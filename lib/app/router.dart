@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../features/onboarding/screens/welcome_screen.dart';
 import '../features/dashboard/screens/dashboard_screen.dart';
+import '../features/peers/screens/peers_screen.dart';
 import '../core/services/storage_service.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
@@ -54,8 +55,18 @@ final routerProvider = Provider<GoRouter>((ref) {
           },
         ),
       ),
+      GoRoute(
+        path: '/peers',
+        name: 'peers',
+        pageBuilder: (context, state) => CustomTransitionPage(
+          key: state.pageKey,
+          child: const PeersScreen(),
+          transitionsBuilder: (context, animation, secondaryAnimation, child) {
+            return FadeTransition(opacity: animation, child: child);
+          },
+        ),
+      ),
       // More routes will be added in later phases
-      // GoRoute(path: '/peers', ...),
       // GoRoute(path: '/groups', ...),
       // GoRoute(path: '/chat/:groupId', ...),
       // GoRoute(path: '/files', ...),

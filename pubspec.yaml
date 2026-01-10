@@ -30,8 +30,8 @@ dependencies:
   # drift: ^2.22.1
   # sqlite3_flutter_libs: ^0.5.28
   
-  # Network Discovery (add for Phase 2)
-  # bonsoir: ^5.1.4
+  # Network Discovery
+  bonsoir: ^5.1.4
   
   # Encryption (add for Phase 3)
   # cryptography: ^2.7.0

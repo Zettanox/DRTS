@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../core/models/user.dart';
 import '../../../core/services/storage_service.dart';
+import '../../../core/services/discovery_service.dart';
 import '../../../app/theme.dart';
+import '../../peers/screens/peers_screen.dart';
+import '../../onboarding/widgets/edit_profile_dialog.dart';
 
 class DashboardScreen extends ConsumerStatefulWidget {
   const DashboardScreen({super.key});
@@ -39,7 +43,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       body: SafeArea(
         child: _user == null
             ? const Center(child: CircularProgressIndicator())
-            : _buildBody(),
+            : _buildCurrentScreen(),
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _selectedIndex,
@@ -74,7 +78,45 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     );
   }
 
-  Widget _buildBody() {
+  Widget _buildCurrentScreen() {
+    switch (_selectedIndex) {
+      case 0:
+        return _buildHomeContent();
+      case 1:
+        return const PeersScreen();
+      case 2:
+        return _buildPlaceholder('Groups', Icons.forum_outlined, 'Coming in Phase 5');
+      case 3:
+        return _buildPlaceholder('Files', Icons.folder_outlined, 'Coming in Phase 3');
+      default:
+        return _buildHomeContent();
+    }
+  }
+
+  Widget _buildPlaceholder(String title, IconData icon, String message) {
+    return Scaffold(
+      appBar: AppBar(title: Text(title)),
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 80, color: Colors.white24),
+            const SizedBox(height: 16),
+            Text(
+              message,
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                color: Colors.white54,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHomeContent() {
+    final discoveryState = ref.watch(discoveryStateProvider);
+    
     return CustomScrollView(
       slivers: [
         // App Bar
@@ -155,7 +197,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                       label: 'New Group',
                       color: StoaTheme.secondaryColor,
                       onTap: () {
-                        // TODO: Create group
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Groups coming in Phase 5!')),
+                        );
                       },
                     ),
                   ),
@@ -166,7 +210,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                       label: 'Share File',
                       color: StoaTheme.accentColor,
                       onTap: () {
-                        // TODO: Share file
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('File sharing coming in Phase 3!')),
+                        );
                       },
                     ),
                   ),
@@ -179,16 +225,40 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
               const SizedBox(height: 32),
               
               // Status section
-              Text(
-                'Network Status',
-                style: Theme.of(context).textTheme.titleLarge,
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Network Status',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                  // Discovery toggle
+                  TextButton.icon(
+                    onPressed: () {
+                      if (discoveryState.isDiscovering) {
+                        ref.read(discoveryStateProvider.notifier).stop();
+                      } else {
+                        ref.read(discoveryStateProvider.notifier).start();
+                      }
+                    },
+                    icon: Icon(
+                      discoveryState.isDiscovering
+                          ? Icons.wifi_tethering
+                          : Icons.wifi_tethering_off,
+                      size: 18,
+                    ),
+                    label: Text(
+                      discoveryState.isDiscovering ? 'Active' : 'Start',
+                    ),
+                  ),
+                ],
               )
                   .animate()
                   .fadeIn(delay: 300.ms, duration: 400.ms),
               
               const SizedBox(height: 12),
               
-              _buildStatusCard()
+              _buildStatusCard(discoveryState)
                   .animate()
                   .fadeIn(delay: 400.ms, duration: 400.ms)
                   .slideY(begin: 0.1, end: 0),
@@ -276,8 +346,23 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
           ),
           IconButton(
             icon: const Icon(Icons.edit_outlined),
-            onPressed: () {
-              // TODO: Edit profile
+            onPressed: () async {
+              if (_user == null) return;
+              final updatedUser = await EditProfileDialog.show(context, _user!);
+              if (updatedUser != null && mounted) {
+                setState(() {
+                  _user = updatedUser;
+                });
+                // Restart discovery with new user info
+                final discoveryNotifier = ref.read(discoveryStateProvider.notifier);
+                await discoveryNotifier.stop();
+                await discoveryNotifier.start();
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Profile updated! Discovery restarted.')),
+                  );
+                }
+              }
             },
           ),
         ],
@@ -322,7 +407,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     );
   }
 
-  Widget _buildStatusCard() {
+  Widget _buildStatusCard(DiscoveryState discoveryState) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -334,15 +419,15 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
           _buildStatusRow(
             icon: Icons.wifi,
             label: 'Discovery',
-            status: 'Not started',
-            statusColor: Colors.grey,
+            status: discoveryState.isDiscovering ? 'Active' : 'Inactive',
+            statusColor: discoveryState.isDiscovering ? StoaTheme.success : Colors.grey,
           ),
           const Divider(height: 24),
           _buildStatusRow(
             icon: Icons.people_outline,
             label: 'Peers nearby',
-            status: '0 found',
-            statusColor: Colors.grey,
+            status: '${discoveryState.peers.length} found',
+            statusColor: discoveryState.peers.isNotEmpty ? StoaTheme.primaryColor : Colors.grey,
           ),
           const Divider(height: 24),
           _buildStatusRow(

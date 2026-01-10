@@ -17,16 +17,17 @@
           };
         };
 
-        # Android SDK configuration
+        # Android SDK configuration - include all common platform versions
         androidComposition = pkgs.androidenv.composeAndroidPackages {
           cmdLineToolsVersion = "11.0";
           platformToolsVersion = "35.0.1";
-          buildToolsVersions = [ "34.0.0" ];
-          platformVersions = [ "34" ];
+          buildToolsVersions = [ "30.0.3" "33.0.2" "34.0.0" "35.0.0" ];
+          platformVersions = [ "31" "32" "33" "34" "35" "36" ];
           abiVersions = [ "arm64-v8a" "x86_64" ];
-          includeEmulator = false;  # Skip emulator to simplify
+          includeEmulator = false;
           includeNDK = true;
-          ndkVersions = [ "26.1.10909125" ];
+          ndkVersions = [ "27.0.12077973" ];
+          cmakeVersions = [ "3.22.1" ];
         };
 
         androidSdk = androidComposition.androidsdk;
