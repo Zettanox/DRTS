@@ -1,0 +1,64 @@
+name: stoa
+description: "Collaborative file sharing and messaging application"
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.10.4
+
+dependencies:
+  flutter:
+    sdk: flutter
+  
+  # UI
+  cupertino_icons: ^1.0.8
+  google_fonts: ^6.2.1
+  flutter_animate: ^4.5.2
+  
+  # State Management
+  flutter_riverpod: ^2.6.1
+  riverpod_annotation: ^2.6.1
+  
+  # Navigation
+  go_router: ^15.1.2
+  
+  # Local Storage
+  shared_preferences: ^2.5.3
+  path_provider: ^2.1.5
+  
+  # Database (add later for Phase 4)
+  # drift: ^2.22.1
+  # sqlite3_flutter_libs: ^0.5.28
+  
+  # Network Discovery (add for Phase 2)
+  # bonsoir: ^5.1.4
+  
+  # Encryption (add for Phase 3)
+  # cryptography: ^2.7.0
+  
+  # CRDT (add for Phase 6)
+  # crdt: ^5.2.0
+  
+  # Utils
+  uuid: ^4.5.1
+  freezed_annotation: ^2.4.4
+  json_annotation: ^4.9.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  
+  # Code generation
+  build_runner: ^2.4.14
+  freezed: ^2.5.8
+  json_serializable: ^6.9.4
+  riverpod_generator: ^2.6.3
+
+flutter:
+  uses-material-design: true
+  
+  # Assets will be added later
+  # assets:
+  #   - assets/images/
+  #   - assets/fonts/
