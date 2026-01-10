@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 
-import '../../../core/models/peer.dart';
-import '../../../core/services/discovery_service.dart';
-import '../../../app/theme.dart';
+import 'package:stoa/core/models/peer.dart';
+import 'package:stoa/core/services/discovery_service.dart';
+import 'package:stoa/app/theme.dart';
 import '../widgets/peer_card.dart';
 
 class PeersScreen extends ConsumerStatefulWidget {

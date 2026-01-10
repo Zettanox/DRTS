@@ -3,12 +3,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../core/models/user.dart';
-import '../../../core/services/storage_service.dart';
-import '../../../core/services/discovery_service.dart';
-import '../../../app/theme.dart';
-import '../../peers/screens/peers_screen.dart';
-import '../../onboarding/widgets/edit_profile_dialog.dart';
+import 'package:stoa/core/models/user.dart';
+import 'package:stoa/core/services/storage_service.dart';
+import 'package:stoa/core/services/discovery_service.dart';
+import 'package:stoa/app/theme.dart';
+import 'package:stoa/features/peers/screens/peers_screen.dart';
+import 'package:stoa/features/onboarding/widgets/edit_profile_dialog.dart';
 
 class DashboardScreen extends ConsumerStatefulWidget {
   const DashboardScreen({super.key});
