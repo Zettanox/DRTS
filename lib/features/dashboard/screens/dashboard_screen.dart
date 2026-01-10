@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:stoa/core/models/user.dart';
 import 'package:stoa/core/services/storage_service.dart';
 import 'package:stoa/core/services/discovery_service.dart';
+import 'package:stoa/core/services/connection_service.dart';
 import 'package:stoa/app/theme.dart';
 import 'package:stoa/features/peers/screens/peers_screen.dart';
 import 'package:stoa/features/onboarding/widgets/edit_profile_dialog.dart';
@@ -25,6 +26,11 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   void initState() {
     super.initState();
     _loadUser();
+    
+    // Initialize connection server
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(connectionServiceProvider).initialize();
+    });
   }
 
   Future<void> _loadUser() async {

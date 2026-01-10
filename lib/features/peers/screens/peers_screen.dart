@@ -4,6 +4,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 
 import 'package:stoa/core/models/peer.dart';
 import 'package:stoa/core/services/discovery_service.dart';
+import 'package:stoa/core/services/connection_service.dart';
 import 'package:stoa/app/theme.dart';
 import '../widgets/peer_card.dart';
 
@@ -15,13 +16,59 @@ class PeersScreen extends ConsumerStatefulWidget {
 }
 
 class _PeersScreenState extends ConsumerState<PeersScreen> {
+  final Map<String, PeerConnectionStatus> _connectionStatuses = {};
+
   @override
   void initState() {
     super.initState();
     // Auto-start discovery when screen opens
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(discoveryStateProvider.notifier).start();
+      _listenToConnections();
     });
+  }
+
+  void _listenToConnections() {
+    ref.read(connectionServiceProvider).messageStream.listen((message) {
+      if (!mounted) return;
+      
+      setState(() {
+        if (message.type == ConnectionMessageType.connected) {
+          _connectionStatuses[message.peerId] = PeerConnectionStatus.connected;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Secure connection established! 🔒')),
+          );
+        } else if (message.type == ConnectionMessageType.disconnected) {
+          _connectionStatuses[message.peerId] = PeerConnectionStatus.disconnected;
+        }
+      });
+    });
+  }
+
+  Future<void> _connectToPeer(Peer peer) async {
+    // If already connected, show options
+    if (_connectionStatuses[peer.id] == PeerConnectionStatus.connected) {
+      _showPeerOptions(peer);
+      return;
+    }
+
+    setState(() {
+      _connectionStatuses[peer.id] = PeerConnectionStatus.connecting;
+    });
+
+    try {
+      await ref.read(connectionServiceProvider).connectTo(peer);
+      // Success will be handled by the stream listener
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _connectionStatuses[peer.id] = PeerConnectionStatus.failed;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Connection failed: $e')),
+        );
+      }
+    }
   }
 
   @override
@@ -264,9 +311,18 @@ class _PeersScreenState extends ConsumerState<PeersScreen> {
       itemCount: peers.length,
       itemBuilder: (context, index) {
         final peer = peers[index];
+        // Create a copy of the peer with updated connection status
+        // Priority: Local state > Peer model state > Disconnected
+        final currentStatus = _connectionStatuses[peer.id] ?? peer.connectionStatus;
+        
+        final peerWithStatus = peer.copyWith(
+          connectionStatus: currentStatus,
+          isConnected: currentStatus == PeerConnectionStatus.connected,
+        );
+        
         return PeerCard(
-          peer: peer,
-          onTap: () => _showPeerOptions(peer),
+          peer: peerWithStatus,
+          onTap: () => _connectToPeer(peerWithStatus),
         )
             .animate()
             .fadeIn(delay: (index * 100).ms)

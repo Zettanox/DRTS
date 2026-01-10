@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
-import '../../../core/models/peer.dart';
-import '../../../app/theme.dart';
+import 'package:flutter_animate/flutter_animate.dart';
+import 'package:stoa/core/models/peer.dart';
+import 'package:stoa/app/theme.dart';
 
 /// Card widget displaying a discovered peer
 class PeerCard extends StatelessWidget {
@@ -36,30 +37,15 @@ class PeerCard extends StatelessWidget {
                   children: [
                     Row(
                       children: [
-                        Text(
-                          peer.username,
-                          style: Theme.of(context).textTheme.titleMedium,
-                        ),
-                        if (peer.isConnected) ...[
-                          const SizedBox(width: 8),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 6,
-                              vertical: 2,
-                            ),
-                            decoration: BoxDecoration(
-                              color: StoaTheme.success.withOpacity(0.2),
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: Text(
-                              'Connected',
-                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                color: StoaTheme.success,
-                                fontSize: 10,
-                              ),
-                            ),
+                        Flexible(
+                          child: Text(
+                            peer.username,
+                            style: Theme.of(context).textTheme.titleMedium,
+                            overflow: TextOverflow.ellipsis,
                           ),
-                        ],
+                        ),
+                        const SizedBox(width: 8),
+                        _buildStatusBadge(context),
                       ],
                     ),
                     const SizedBox(height: 4),
@@ -72,14 +58,95 @@ class PeerCard extends StatelessWidget {
               ),
               
               // Action indicator
-              Icon(
-                Icons.chevron_right,
-                color: Colors.white54,
-              ),
+              _buildActionIcon(),
             ],
           ),
         ),
       ),
+    );
+  }
+  
+  Widget _buildStatusBadge(BuildContext context) {
+    switch (peer.connectionStatus) {
+      case PeerConnectionStatus.connected:
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+          decoration: BoxDecoration(
+            color: StoaTheme.success.withOpacity(0.2),
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.lock, size: 10, color: StoaTheme.success),
+              const SizedBox(width: 4),
+              Text(
+                'Connected',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: StoaTheme.success,
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+        );
+      case PeerConnectionStatus.connecting:
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+          decoration: BoxDecoration(
+            color: StoaTheme.secondaryColor.withOpacity(0.2),
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                width: 10,
+                height: 10,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: StoaTheme.secondaryColor,
+                ),
+              ),
+              const SizedBox(width: 4),
+              Text(
+                'Connecting...',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: StoaTheme.secondaryColor,
+                  fontSize: 10,
+                ),
+              ),
+            ],
+          ),
+        );
+      case PeerConnectionStatus.failed:
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+          decoration: BoxDecoration(
+            color: StoaTheme.error.withOpacity(0.2),
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: Text(
+            'Failed',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: StoaTheme.error,
+              fontSize: 10,
+            ),
+          ),
+        );
+      default:
+        return const SizedBox.shrink();
+    }
+  }
+
+  Widget _buildActionIcon() {
+    if (peer.connectionStatus == PeerConnectionStatus.connecting) {
+      return const SizedBox.shrink();
+    }
+    return Icon(
+      Icons.chevron_right,
+      color: Colors.white54,
     );
   }
   

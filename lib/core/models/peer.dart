@@ -14,6 +14,8 @@ class Peer with _$Peer {
     String? publicKey,
     String? avatarColor,
     @Default(false) bool isConnected,
+    @Default(false) bool isVerified,
+    @Default(PeerConnectionStatus.disconnected) PeerConnectionStatus connectionStatus,
     DateTime? lastSeen,
   }) = _Peer;
   
@@ -35,6 +37,13 @@ class Peer with _$Peer {
       lastSeen: DateTime.now(),
     );
   }
+}
+
+enum PeerConnectionStatus {
+  disconnected,
+  connecting,
+  connected,
+  failed,
 }
 
 /// Connection state for a peer

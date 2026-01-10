@@ -219,6 +219,15 @@ class DiscoveryService {
       port = service.port;
     }
     
+    // Preserve local state if partially existing
+    bool isConnected = false;
+    PeerConnectionStatus connectionStatus = PeerConnectionStatus.disconnected;
+     if (_peers.containsKey(peerId)) {
+      final existing = _peers[peerId]!;
+      isConnected = existing.isConnected;
+      connectionStatus = existing.connectionStatus;
+    }
+
     // Create peer with available info
     final peer = Peer(
       id: peerId,
@@ -228,11 +237,19 @@ class DiscoveryService {
       avatarColor: attributes['avatarColor'],
       publicKey: attributes['publicKey'],
       lastSeen: DateTime.now(),
+      isConnected: isConnected,
+      connectionStatus: connectionStatus,
     );
     
     _peers[peer.id] = peer;
     _notifyPeersChanged();
     
+    // If not resolved (unknown host), force resolution now
+    if (host == 'unknown' && _discovery != null) {
+      print('🔍 Attempting to resolve ${service.name}...');
+      service.resolve(_discovery!.serviceResolver);
+    }
+
     print('✅ Added peer: ${peer.username} (host: $host, port: $port)');
   }
   
@@ -264,10 +281,23 @@ class DiscoveryService {
       host = host.split('%').first;
     }
     
+    // Preserve local state (connection status) if peer already exists
+    bool isConnected = false;
+    PeerConnectionStatus connectionStatus = PeerConnectionStatus.disconnected;
+    
+    if (_peers.containsKey(peerId)) {
+      final existing = _peers[peerId]!;
+      isConnected = existing.isConnected;
+      connectionStatus = existing.connectionStatus;
+    }
+
     final peer = Peer.fromServiceAttributes(
       host: host,
       port: service.port,
       attributes: attributes,
+    ).copyWith(
+      isConnected: isConnected,
+      connectionStatus: connectionStatus,
     );
     
     _peers[peer.id] = peer;
@@ -291,6 +321,39 @@ class DiscoveryService {
   void _notifyPeersChanged() {
     _peersController.add(peers);
     print('📋 Total peers: ${peers.length}');
+  }
+  
+  /// Manually add a peer (e.g. when connected via socket but not found via mDNS)
+  void addConnectedPeer(Peer peer) {
+    // If we already know this peer, just ensure it's up to date
+    if (_peers.containsKey(peer.id)) {
+      final existing = _peers[peer.id]!;
+      // Update info if the existing one has less info (e.g. unknown host)
+      if (existing.host == 'unknown' && peer.host != 'unknown') {
+        _peers[peer.id] = peer;
+        _notifyPeersChanged();
+      }
+      return;
+    }
+    
+    print('✅ Added connected peer manually: ${peer.username}');
+    _peers[peer.id] = peer;
+    _notifyPeersChanged();
+  }
+
+  /// Update just the connection status of a peer
+  void updatePeerStatus(String peerId, bool isConnected) {
+    if (_peers.containsKey(peerId)) {
+      final existing = _peers[peerId]!;
+      // Only update if changed
+      if (existing.isConnected != isConnected) {
+        _peers[peerId] = existing.copyWith(
+          isConnected: isConnected,
+          connectionStatus: isConnected ? PeerConnectionStatus.connected : PeerConnectionStatus.disconnected,
+        );
+        _notifyPeersChanged();
+      }
+    }
   }
   
   /// Cleanup resources

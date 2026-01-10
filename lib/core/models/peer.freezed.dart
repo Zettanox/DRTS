@@ -28,6 +28,9 @@ mixin _$Peer {
   String? get publicKey => throw _privateConstructorUsedError;
   String? get avatarColor => throw _privateConstructorUsedError;
   bool get isConnected => throw _privateConstructorUsedError;
+  bool get isVerified => throw _privateConstructorUsedError;
+  PeerConnectionStatus get connectionStatus =>
+      throw _privateConstructorUsedError;
   DateTime? get lastSeen => throw _privateConstructorUsedError;
 
   /// Serializes this Peer to a JSON map.
@@ -52,6 +55,8 @@ abstract class $PeerCopyWith<$Res> {
     String? publicKey,
     String? avatarColor,
     bool isConnected,
+    bool isVerified,
+    PeerConnectionStatus connectionStatus,
     DateTime? lastSeen,
   });
 }
@@ -78,6 +83,8 @@ class _$PeerCopyWithImpl<$Res, $Val extends Peer>
     Object? publicKey = freezed,
     Object? avatarColor = freezed,
     Object? isConnected = null,
+    Object? isVerified = null,
+    Object? connectionStatus = null,
     Object? lastSeen = freezed,
   }) {
     return _then(
@@ -110,6 +117,14 @@ class _$PeerCopyWithImpl<$Res, $Val extends Peer>
                 ? _value.isConnected
                 : isConnected // ignore: cast_nullable_to_non_nullable
                       as bool,
+            isVerified: null == isVerified
+                ? _value.isVerified
+                : isVerified // ignore: cast_nullable_to_non_nullable
+                      as bool,
+            connectionStatus: null == connectionStatus
+                ? _value.connectionStatus
+                : connectionStatus // ignore: cast_nullable_to_non_nullable
+                      as PeerConnectionStatus,
             lastSeen: freezed == lastSeen
                 ? _value.lastSeen
                 : lastSeen // ignore: cast_nullable_to_non_nullable
@@ -136,6 +151,8 @@ abstract class _$$PeerImplCopyWith<$Res> implements $PeerCopyWith<$Res> {
     String? publicKey,
     String? avatarColor,
     bool isConnected,
+    bool isVerified,
+    PeerConnectionStatus connectionStatus,
     DateTime? lastSeen,
   });
 }
@@ -159,6 +176,8 @@ class __$$PeerImplCopyWithImpl<$Res>
     Object? publicKey = freezed,
     Object? avatarColor = freezed,
     Object? isConnected = null,
+    Object? isVerified = null,
+    Object? connectionStatus = null,
     Object? lastSeen = freezed,
   }) {
     return _then(
@@ -191,6 +210,14 @@ class __$$PeerImplCopyWithImpl<$Res>
             ? _value.isConnected
             : isConnected // ignore: cast_nullable_to_non_nullable
                   as bool,
+        isVerified: null == isVerified
+            ? _value.isVerified
+            : isVerified // ignore: cast_nullable_to_non_nullable
+                  as bool,
+        connectionStatus: null == connectionStatus
+            ? _value.connectionStatus
+            : connectionStatus // ignore: cast_nullable_to_non_nullable
+                  as PeerConnectionStatus,
         lastSeen: freezed == lastSeen
             ? _value.lastSeen
             : lastSeen // ignore: cast_nullable_to_non_nullable
@@ -211,6 +238,8 @@ class _$PeerImpl implements _Peer {
     this.publicKey,
     this.avatarColor,
     this.isConnected = false,
+    this.isVerified = false,
+    this.connectionStatus = PeerConnectionStatus.disconnected,
     this.lastSeen,
   });
 
@@ -233,11 +262,17 @@ class _$PeerImpl implements _Peer {
   @JsonKey()
   final bool isConnected;
   @override
+  @JsonKey()
+  final bool isVerified;
+  @override
+  @JsonKey()
+  final PeerConnectionStatus connectionStatus;
+  @override
   final DateTime? lastSeen;
 
   @override
   String toString() {
-    return 'Peer(id: $id, username: $username, host: $host, port: $port, publicKey: $publicKey, avatarColor: $avatarColor, isConnected: $isConnected, lastSeen: $lastSeen)';
+    return 'Peer(id: $id, username: $username, host: $host, port: $port, publicKey: $publicKey, avatarColor: $avatarColor, isConnected: $isConnected, isVerified: $isVerified, connectionStatus: $connectionStatus, lastSeen: $lastSeen)';
   }
 
   @override
@@ -256,6 +291,10 @@ class _$PeerImpl implements _Peer {
                 other.avatarColor == avatarColor) &&
             (identical(other.isConnected, isConnected) ||
                 other.isConnected == isConnected) &&
+            (identical(other.isVerified, isVerified) ||
+                other.isVerified == isVerified) &&
+            (identical(other.connectionStatus, connectionStatus) ||
+                other.connectionStatus == connectionStatus) &&
             (identical(other.lastSeen, lastSeen) ||
                 other.lastSeen == lastSeen));
   }
@@ -271,6 +310,8 @@ class _$PeerImpl implements _Peer {
     publicKey,
     avatarColor,
     isConnected,
+    isVerified,
+    connectionStatus,
     lastSeen,
   );
 
@@ -297,6 +338,8 @@ abstract class _Peer implements Peer {
     final String? publicKey,
     final String? avatarColor,
     final bool isConnected,
+    final bool isVerified,
+    final PeerConnectionStatus connectionStatus,
     final DateTime? lastSeen,
   }) = _$PeerImpl;
 
@@ -316,6 +359,10 @@ abstract class _Peer implements Peer {
   String? get avatarColor;
   @override
   bool get isConnected;
+  @override
+  bool get isVerified;
+  @override
+  PeerConnectionStatus get connectionStatus;
   @override
   DateTime? get lastSeen;
 
