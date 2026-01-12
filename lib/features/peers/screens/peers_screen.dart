@@ -18,6 +18,7 @@ class PeersScreen extends ConsumerStatefulWidget {
 
 class _PeersScreenState extends ConsumerState<PeersScreen> {
   final Map<String, PeerConnectionStatus> _connectionStatuses = {};
+  String? _waitingPeerId; // Track which peer we are waiting for
 
   @override
   void initState() {
@@ -39,6 +40,23 @@ class _PeersScreenState extends ConsumerState<PeersScreen> {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Secure connection established! 🔒')),
           );
+          
+          // If we were waiting for this peer, navigate now
+          if (_waitingPeerId == message.peerId) {
+            Navigator.of(context).pop(); // Close waiting dialog
+            setState(() { _waitingPeerId = null; });
+            context.pushNamed('chat', pathParameters: {'peerId': message.peerId});
+          }
+        } else if (message.type == ConnectionMessageType.disconnected) {
+          _connectionStatuses[message.peerId] = PeerConnectionStatus.disconnected;
+          
+          if (_waitingPeerId == message.peerId) {
+             Navigator.of(context).pop(); // Close waiting dialog
+             setState(() { _waitingPeerId = null; });
+             ScaffoldMessenger.of(context).showSnackBar(
+               const SnackBar(content: Text('Connection denied or failed ❌')),
+             );
+          }
         } else if (message.type == ConnectionMessageType.connectionRequest) {
             final username = message.payload['username'];
             final peerId = message.peerId;
@@ -66,8 +84,6 @@ class _PeersScreenState extends ConsumerState<PeersScreen> {
                 ],
               )
             );
-        } else if (message.type == ConnectionMessageType.disconnected) {
-          _connectionStatuses[message.peerId] = PeerConnectionStatus.disconnected;
         }
       });
     });
@@ -81,33 +97,55 @@ class _PeersScreenState extends ConsumerState<PeersScreen> {
     }
 
     if (_connectionStatuses[peer.id] == PeerConnectionStatus.connecting) {
-      return;
-    }
-    
-    setState(() {
+    return;
+  }
+  
+  // Don't try to connect if host isn't resolved yet
+  if (peer.host == 'unknown' || peer.host.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Waiting for peer address resolution...')),
+    );
+    return;
+  }
+  
+  setState(() {
       _connectionStatuses[peer.id] = PeerConnectionStatus.connecting;
     });
 
     try {
-      await ref.read(connectionServiceProvider).connectTo(peer);
+    await ref.read(connectionServiceProvider).connectTo(peer);
+    
+    if (mounted) {
+      setState(() { 
+        _waitingPeerId = peer.id;
+      });
       
-      if (mounted) {
-        setState(() {
-          _connectionStatuses[peer.id] = PeerConnectionStatus.connected;
-        });
-        context.pushNamed('chat', pathParameters: {'peerId': peer.id});
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _connectionStatuses[peer.id] = PeerConnectionStatus.failed;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Connection failed: $e')),
-        );
-      }
+      // Show waiting dialog
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => const AlertDialog(
+          content: Row(
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(width: 24),
+              Expanded(child: Text("Waiting for confirmation...")),
+            ],
+          ),
+        ),
+      );
+    }
+  } catch (e) {
+    if (mounted) {
+      setState(() {
+        _connectionStatuses[peer.id] = PeerConnectionStatus.failed;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Connection failed: $e')),
+      );
     }
   }
+}
 
   @override
   Widget build(BuildContext context) {

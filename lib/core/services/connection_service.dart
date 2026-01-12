@@ -35,6 +35,9 @@ class ConnectionService {
   
   ConnectionService(this._ref, this._encryptionService);
   
+  /// Check if we have an active connection to a peer
+  bool isConnectedTo(String peerId) => _connections.containsKey(peerId);
+  
   /// Initialize server and keys
   Future<void> initialize() async {
     _keyPair = await _encryptionService.generateKeyPair();

@@ -85,6 +85,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   }
   
   Widget _buildScaffold(Peer peer, Stream<Map<String, TransferProgress>> transfersStream, AppDatabase db) {
+     // Check actual connection status from service, not discovery state
+     final isActuallyConnected = ref.read(connectionServiceProvider).isConnectedTo(peer.id);
+     
      return Scaffold(
       appBar: AppBar(
         title: Column(
@@ -92,10 +95,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           children: [
             Text(peer.username),
             Text(
-              peer.isConnected ? 'Connected 🔒' : 'Disconnected',
+              isActuallyConnected ? 'Connected 🔒' : 'Disconnected',
               style: TextStyle(
                 fontSize: 12,
-                color: peer.isConnected ? Colors.greenAccent : Colors.grey,
+                color: isActuallyConnected ? Colors.greenAccent : Colors.grey,
               ),
             ),
           ],
