@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'package:go_router/go_router.dart';
 
 import 'package:stoa/core/models/peer.dart';
 import 'package:stoa/core/services/discovery_service.dart';
@@ -46,19 +47,29 @@ class _PeersScreenState extends ConsumerState<PeersScreen> {
   }
 
   Future<void> _connectToPeer(Peer peer) async {
-    // If already connected, show options
-    if (_connectionStatuses[peer.id] == PeerConnectionStatus.connected) {
-      _showPeerOptions(peer);
+    // If connected, navigate to chat
+    if (peer.isConnected || _connectionStatuses[peer.id] == PeerConnectionStatus.connected) {
+      context.pushNamed('chat', pathParameters: {'peerId': peer.id});
       return;
     }
 
+    if (_connectionStatuses[peer.id] == PeerConnectionStatus.connecting) {
+      return;
+    }
+    
     setState(() {
       _connectionStatuses[peer.id] = PeerConnectionStatus.connecting;
     });
 
     try {
       await ref.read(connectionServiceProvider).connectTo(peer);
-      // Success will be handled by the stream listener
+      
+      if (mounted) {
+        setState(() {
+          _connectionStatuses[peer.id] = PeerConnectionStatus.connected;
+        });
+        context.pushNamed('chat', pathParameters: {'peerId': peer.id});
+      }
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -400,10 +411,7 @@ class _PeerOptionsSheet extends StatelessWidget {
             color: StoaTheme.primaryColor,
             onTap: () {
               Navigator.pop(context);
-              // TODO: Implement file sending
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('File sharing coming in Phase 3!')),
-              );
+              context.pushNamed('chat', pathParameters: {'peerId': peer.id});
             },
           ),
           

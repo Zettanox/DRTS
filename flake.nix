@@ -60,6 +60,7 @@
             curl
             unzip
             xz
+            zenity # Required for file_picker on Linux
           ];
 
           # Environment variables

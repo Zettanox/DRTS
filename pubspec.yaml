@@ -14,6 +14,7 @@ dependencies:
   cupertino_icons: ^1.0.8
   google_fonts: ^6.2.1
   flutter_animate: ^4.5.2
+  intl: ^0.19.0
   
   # State Management
   flutter_riverpod: ^2.6.1
@@ -43,14 +44,26 @@ dependencies:
   uuid: ^4.5.1
   freezed_annotation: ^2.4.4
   json_annotation: ^4.9.0
+  
+  # File picking and handling
+  file_picker: ^8.0.0
+  open_filex: ^4.3.2
+  mime: ^1.0.4
+
+  # Database
+  drift: ^2.14.0
+  sqlite3_flutter_libs: ^0.5.18
+  # path_provider is already included above
+  path: ^1.9.0
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^6.0.0
+  flutter_lints: ^2.0.0
   
   # Code generation
   build_runner: ^2.4.14
+  drift_dev: ^2.14.0
   freezed: ^2.5.8
   json_serializable: ^6.9.4
   riverpod_generator: ^2.6.3

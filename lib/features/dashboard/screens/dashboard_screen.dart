@@ -9,6 +9,7 @@ import 'package:stoa/core/services/discovery_service.dart';
 import 'package:stoa/core/services/connection_service.dart';
 import 'package:stoa/app/theme.dart';
 import 'package:stoa/features/peers/screens/peers_screen.dart';
+import 'package:stoa/features/files/screens/files_screen.dart';
 import 'package:stoa/features/onboarding/widgets/edit_profile_dialog.dart';
 
 class DashboardScreen extends ConsumerStatefulWidget {
@@ -93,7 +94,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       case 2:
         return _buildPlaceholder('Groups', Icons.forum_outlined, 'Coming in Phase 5');
       case 3:
-        return _buildPlaceholder('Files', Icons.folder_outlined, 'Coming in Phase 3');
+        return const FilesScreen();
       default:
         return _buildHomeContent();
     }

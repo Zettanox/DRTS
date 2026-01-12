@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../features/onboarding/screens/welcome_screen.dart';
 import '../features/dashboard/screens/dashboard_screen.dart';
 import '../features/peers/screens/peers_screen.dart';
+import '../features/chat/screens/chat_screen.dart';
 import '../core/services/storage_service.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
@@ -64,6 +65,13 @@ final routerProvider = Provider<GoRouter>((ref) {
           transitionsBuilder: (context, animation, secondaryAnimation, child) {
             return FadeTransition(opacity: animation, child: child);
           },
+        ),
+      ),
+      GoRoute(
+        path: '/chat/:peerId',
+        name: 'chat',
+        builder: (context, state) => ChatScreen(
+          peerId: state.pathParameters['peerId']!,
         ),
       ),
       // More routes will be added in later phases

@@ -325,13 +325,22 @@ class DiscoveryService {
   
   /// Manually add a peer (e.g. when connected via socket but not found via mDNS)
   void addConnectedPeer(Peer peer) {
-    // If we already know this peer, just ensure it's up to date
+    // If we already know this peer, ensure we update the connection status and host info
     if (_peers.containsKey(peer.id)) {
       final existing = _peers[peer.id]!;
-      // Update info if the existing one has less info (e.g. unknown host)
-      if (existing.host == 'unknown' && peer.host != 'unknown') {
-        _peers[peer.id] = peer;
-        _notifyPeersChanged();
+      
+      // Update if:
+      // 1. Connection status changed (we are now connected)
+      // 2. Host info improved (unknown -> valid IP)
+      // 3. Other details changed
+      if (!existing.isConnected || (existing.host == 'unknown' && peer.host != 'unknown')) {
+         _peers[peer.id] = existing.copyWith(
+           isConnected: true, // We are adding a *connected* peer
+           connectionStatus: PeerConnectionStatus.connected,
+           host: peer.host != 'unknown' ? peer.host : existing.host,
+           port: peer.port > 0 ? peer.port : existing.port,
+         );
+         _notifyPeersChanged();
       }
       return;
     }

@@ -10,9 +10,9 @@ import '../models/peer.dart';
 import '../models/user.dart';
 import '../utils/constants.dart';
 import 'encryption_service.dart';
-import 'encryption_service.dart';
 import 'storage_service.dart';
 import 'discovery_service.dart';
+import '../data/database.dart';
 
 /// Manages TCP connections to peers
 class ConnectionService {
@@ -118,18 +118,43 @@ class ConnectionService {
     _sendRaw(socket, jsonEncode(handshake));
   }
   
-  /// Handle incoming data
+  // Buffer for incoming data
+  final Map<Socket, List<int>> _buffers = {};
+
+  /// Handle incoming data with length-prefix framing
   void _handleData(Socket socket, Uint8List data) async {
     try {
-      // In a real implementation, we'd need a framing protocol (length-prefix)
-      // For now we assume messages arrive in complete chunks (which is fragile but okay for PoC)
-      final message = utf8.decode(data);
-      final json = jsonDecode(message);
+      // Get or create buffer for this socket
+      final buffer = _buffers.putIfAbsent(socket, () => []);
+      buffer.addAll(data);
       
-      if (json['type'] == 'handshake') {
-        await _processHandshake(socket, json);
-      } else if (json['type'] == 'encrypted') {
-        await _processEncryptedMessage(socket, json);
+      // Process all complete messages in the buffer
+      while (true) {
+        // We need at least 4 bytes for the length prefix
+        if (buffer.length < 4) break;
+        
+        // Read length prefix (big endian)
+        final lengthBytes = Uint8List.fromList(buffer.take(4).toList());
+        final length = ByteData.sublistView(lengthBytes).getUint32(0);
+        
+        // Check if we have the full message
+        if (buffer.length < 4 + length) break;
+        
+        // Extract message payload
+        final payload = Uint8List.fromList(buffer.sublist(4, 4 + length));
+        
+        // Remove processed bytes from buffer
+        buffer.removeRange(0, 4 + length);
+        
+        // Process message
+        final message = utf8.decode(payload);
+        final json = jsonDecode(message);
+        
+        if (json['type'] == 'handshake') {
+          await _processHandshake(socket, json);
+        } else if (json['type'] == 'encrypted') {
+          await _processEncryptedMessage(socket, json);
+        }
       }
     } catch (e) {
       print('❌ Error handling data: $e');
@@ -174,9 +199,6 @@ class ConnectionService {
     // This handles cases where mDNS failed but connection succeeded
     final discoveryService = _ref.read(discoveryServiceProvider);
     
-    // Construct peer object from available info
-    // We might not have the host/port if this was an incoming connection
-    // But we can infer or use defaults, the main thing is having the ID and Username
     final peer = Peer(
       id: peerId,
       username: peerUsername,
@@ -190,6 +212,20 @@ class ConnectionService {
     );
     
     discoveryService.addConnectedPeer(peer);
+    
+    // Persist peer to database
+    try {
+      final db = _ref.read(databaseProvider);
+      await db.insertPeer(LocalPeer(
+        id: peerId,
+        username: peerUsername,
+        publicKey: base64Encode(peerPublicKey),
+        lastSeen: DateTime.now(),
+        avatarColor: null,
+      ));
+    } catch (e) {
+      print('⚠️ Failed to persist peer: $e');
+    }
     
     print('✅ Secure connection established with $peerUsername');
   }
@@ -242,7 +278,14 @@ class ConnectionService {
   }
   
   void _sendRaw(Socket socket, String string) {
-    socket.write(string);
+    // Length-prefix framing: [4 bytes length][payload]
+    final bytes = utf8.encode(string);
+    final length = bytes.length;
+    
+    final header = ByteData(4)..setUint32(0, length);
+    
+    socket.add(header.buffer.asUint8List());
+    socket.add(bytes);
   }
   
   void _handleError(Socket socket, dynamic error) {
