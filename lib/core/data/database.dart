@@ -71,6 +71,11 @@ class AppDatabase extends _$AppDatabase {
            ..orderBy([(t) => OrderingTerm(expression: t.timestamp, mode: OrderingMode.desc)]))
            .watch();
   }
+  
+  // Delete a message by ID
+  Future<int> deleteMessage(int id) {
+    return (delete(messages)..where((t) => t.id.equals(id))).go();
+  }
 }
 
 LazyDatabase _openConnection() {

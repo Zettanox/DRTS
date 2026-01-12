@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -55,7 +56,60 @@ class FilesScreen extends ConsumerWidget {
             itemCount: files.length,
             itemBuilder: (context, index) {
               final file = files[index];
-              return _buildFileItem(context, file);
+              return Dismissible(
+                key: Key(file.id.toString()),
+                direction: DismissDirection.endToStart,
+                background: Container(
+                  alignment: Alignment.centerRight,
+                  padding: const EdgeInsets.only(right: 20),
+                  margin: const EdgeInsets.only(bottom: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.red,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(Icons.delete, color: Colors.white),
+                ),
+                confirmDismiss: (direction) async {
+                  return await showDialog(
+                    context: context,
+                    builder: (ctx) => AlertDialog(
+                      title: const Text('Delete File?'),
+                      content: Text('Delete "${file.content}" from storage?'),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(ctx, false),
+                          child: const Text('Cancel'),
+                        ),
+                        FilledButton(
+                          onPressed: () => Navigator.pop(ctx, true),
+                          style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                          child: const Text('Delete'),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+                onDismissed: (direction) async {
+                  // Delete from disk
+                  if (file.filePath != null) {
+                    try {
+                      final f = File(file.filePath!);
+                      if (await f.exists()) {
+                        await f.delete();
+                      }
+                    } catch (e) {
+                      debugPrint('Failed to delete file from disk: $e');
+                    }
+                  }
+                  // Delete from database
+                  db.deleteMessage(file.id);
+                  
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Deleted ${file.content}')),
+                  );
+                },
+                child: _buildFileItem(context, file),
+              );
             },
           );
         },
