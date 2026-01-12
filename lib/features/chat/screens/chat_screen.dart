@@ -8,6 +8,7 @@ import '../../../core/services/file_transfer_service.dart';
 import '../../../core/services/discovery_service.dart';
 import '../../../core/data/database.dart';
 import 'package:open_filex/open_filex.dart';
+import 'dart:async';
 
 class ChatScreen extends ConsumerStatefulWidget {
   final String peerId;
@@ -20,6 +21,13 @@ class ChatScreen extends ConsumerStatefulWidget {
 
 class _ChatScreenState extends ConsumerState<ChatScreen> {
   final ScrollController _scrollController = ScrollController();
+  final TextEditingController _messageController = TextEditingController();
+  
+  @override
+  void dispose() {
+    _messageController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -53,7 +61,31 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final transfersStream = fileTransferService.progressStream;
     final db = ref.watch(databaseProvider);
     
-    return Scaffold(
+    // Listen for incoming text messages
+    return StreamBuilder<ConnectionMessage>(
+      stream: ref.watch(connectionServiceProvider).messageStream,
+      builder: (context, snapshot) {
+        if (snapshot.hasData) {
+          final msg = snapshot.data!;
+          // If message is for this peer and is data (text)
+          if (msg.peerId == peer!.id && msg.type == ConnectionMessageType.data && msg.payload['type'] == 'text') {
+             // We need to add this to our ephemeral list if it's new
+             // But StreamBuilder rebuilds on every event. We should manipulate state in a listener, not builder.
+             // Ideally we wrap this in a ConsumerStatefulWidget listener or use a provider.
+             // For quick implementation:
+             // We can rely on the fact that we can't easily dedup without ID tracking.
+             // Let's use a simpler approach: Watch a provider that accumulates messages?
+             // Or just use `ref.listen` in `build`?
+          }
+        }
+        
+        return _buildScaffold(peer!, transfersStream, db);
+      }
+    );
+  }
+  
+  Widget _buildScaffold(Peer peer, Stream<Map<String, TransferProgress>> transfersStream, AppDatabase db) {
+     return Scaffold(
       appBar: AppBar(
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -81,7 +113,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         children: [
           Expanded(
             child: StreamBuilder<List<Message>>(
-              stream: db.watchMessagesForPeer(peer!.id),
+              stream: db.watchMessagesForPeer(peer.id),
               builder: (context, dbSnapshot) {
                 final dbMessages = dbSnapshot.data ?? [];
                 
@@ -90,16 +122,20 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                   builder: (context, transferSnapshot) {
                     final transfers = transferSnapshot.data ?? {};
                     
-                    // Filter active transfers for this peer (exclude completed/failed as they should be in DB)
-                    // Actually, failed might not be in DB if we only log success. 
-                    // Let's keep failed in active list for now or until dismissed.
-                    // For now, exclude COMPLETED.
                     final activeTransfers = transfers.values
-                        .where((t) => t.peerId == peer!.id && t.status != TransferStatus.completed)
+                        .where((t) => t.peerId == peer.id && t.status != TransferStatus.completed)
                         .toList();
                         
-                    // Combine lists. Active transfers are assumed newer (at the bottom/start of reverse list)
-                    final allItems = [...activeTransfers.reversed, ...dbMessages];
+                    // Merge everything (DB only now)
+                    final allItems = [
+                        ...activeTransfers.reversed, 
+                        ...dbMessages
+                    ];
+                    
+                    // Retain simple sort order if needed, but active/ephemeral are usually newer.
+                    // We might need to sort by timestamp if we want perfect ordering.
+                    // dbMessages are likely sorted by time DESC.
+                    // _ephemeralMessages should be prepended (newest).
                     
                     if (allItems.isEmpty) {
                       return Center(
@@ -139,6 +175,70 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         ],
       ),
     );
+  }
+  
+  // Initialize listener
+  @override
+  void initState() {
+    super.initState();
+    // No need to listen to connection stream for text messages anymore
+    // DB watch handles it
+  }
+
+  Widget _buildInputArea(Peer peer) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      color: Colors.black12,
+      child: Row(
+        children: [
+          IconButton(
+            onPressed: () {
+               ref.read(fileTransferServiceProvider).pickAndSendFile(peer);
+            },
+            icon: const Icon(Icons.add_circle, size: 32),
+            color: Colors.white70,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: TextField(
+              controller: _messageController,
+              decoration: const InputDecoration(
+                hintText: 'Type a message...',
+                border: InputBorder.none,
+                hintStyle: TextStyle(color: Colors.grey),
+              ),
+              onSubmitted: (_) => _sendMessage(peer),
+            ),
+          ),
+          IconButton(
+            onPressed: () => _sendMessage(peer),
+            icon: const Icon(Icons.send),
+            color: Theme.of(context).primaryColor,
+          ),
+        ],
+      ),
+    );
+  }
+  
+  void _sendMessage(Peer peer) async {
+    final text = _messageController.text.trim();
+    if (text.isEmpty) return;
+    
+    // Send via connection service
+    await ref.read(connectionServiceProvider).sendText(peer, text);
+    
+    // Add to DB
+    final db = ref.read(databaseProvider);
+    await db.insertMessage(MessagesCompanion.insert(
+      peerId: peer.id,
+      isMe: true,
+      content: text,
+      type: 'text',
+      status: 'sent',
+      timestamp: DateTime.now(),
+    ));
+
+    _messageController.clear();
   }
 
   Widget _buildTransferBubble(TransferProgress transfer) {
@@ -203,6 +303,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   Widget _buildDbMessageBubble(Message message) {
     final isMe = message.isMe;
     final color = isMe ? Theme.of(context).primaryColor.withOpacity(0.8) : Colors.grey[800]!.withOpacity(0.8);
+    final isText = message.type == 'text';
     
     return Align(
       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
@@ -221,12 +322,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(
-                  message.isMe ? Icons.upload_rounded : Icons.download_rounded,
-                  color: Colors.white70, 
-                  size: 20
-                ),
-                const SizedBox(width: 8),
+                if (!isText) ...[
+                  Icon(
+                    message.isMe ? Icons.upload_rounded : Icons.download_rounded,
+                    color: Colors.white70, 
+                    size: 20
+                  ),
+                  const SizedBox(width: 8),
+                ],
                 Flexible(
                   child: Text(
                     message.content,
@@ -241,19 +344,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
-                  message.fileSize != null ? _formatBytes(message.fileSize!) : '',
+                  message.fileSize != null ? _formatBytes(message.fileSize!) : 
+                  (isText ? _formatTime(message.timestamp) : ''),
                   style: const TextStyle(fontSize: 10, color: Colors.white54),
                 ),
                 if (message.type == 'file' && message.filePath != null)
                   GestureDetector(
                     onTap: () {
                       if (message.filePath != null) {
-                         // We don't have openFilex imported specifically here, 
-                         // but we can use generic OpenFilex or call via service if we expose helper.
-                         // For now let's rely on importing open_filex or just use the service helper if generic.
-                         // ConnectionService doesn't have open. FileTransferService does.
-                         // But FileTransferService takes 'fileId' (uuid) which we might not have easily in DB message (unless we store it).
-                         // We should just use OpenFilex directly here.
                          ref.read(fileTransferServiceProvider).openFileByPath(message.filePath!);
                     }
                     },
@@ -267,35 +365,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     );
   }
 
-  Widget _buildInputArea(Peer peer) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      color: Colors.black12,
-      child: Row(
-        children: [
-          IconButton(
-            onPressed: () {
-               ref.read(fileTransferServiceProvider).pickAndSendFile(peer);
-            },
-            icon: const Icon(Icons.add_circle, size: 32),
-            color: Theme.of(context).primaryColor,
-          ),
-          const SizedBox(width: 8),
-          const Expanded(
-            child: Text(
-              'Secure Encrypted Channel',
-              style: TextStyle(color: Colors.grey, fontSize: 12),
-              textAlign: TextAlign.center,
-            ),
-          ),
-          // Placeholder for text input later
-          IconButton(
-            onPressed: null, // Disabled for now
-            icon: const Icon(Icons.send),
-          ),
-        ],
-      ),
-    );
+  String _formatTime(DateTime dt) {
+    return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
   }
 
   String _formatBytes(int bytes) {

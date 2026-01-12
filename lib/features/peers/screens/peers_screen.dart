@@ -39,6 +39,33 @@ class _PeersScreenState extends ConsumerState<PeersScreen> {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Secure connection established! 🔒')),
           );
+        } else if (message.type == ConnectionMessageType.connectionRequest) {
+            final username = message.payload['username'];
+            final peerId = message.peerId;
+            
+            showDialog(
+              context: context, 
+              builder: (ctx) => AlertDialog(
+                title: const Text('Connection Request'),
+                content: Text('$username wants to connect with you.'),
+                actions: [
+                  TextButton(
+                    onPressed: () {
+                      ref.read(connectionServiceProvider).denyConnection(peerId);
+                      Navigator.pop(ctx);
+                    },
+                    child: const Text('Deny', style: TextStyle(color: Colors.red)),
+                  ),
+                  FilledButton(
+                    onPressed: () {
+                      ref.read(connectionServiceProvider).acceptConnection(peerId);
+                      Navigator.pop(ctx);
+                    }, 
+                    child: const Text('Accept')
+                  ),
+                ],
+              )
+            );
         } else if (message.type == ConnectionMessageType.disconnected) {
           _connectionStatuses[message.peerId] = PeerConnectionStatus.disconnected;
         }

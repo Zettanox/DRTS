@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:uuid/uuid.dart';
 
 import '../models/peer.dart';
 import '../models/user.dart';
@@ -30,6 +31,7 @@ class ConnectionService {
   
   // Ephemeral key pair for this session
   SimpleKeyPair? _keyPair;
+  final _uuid = const Uuid();
   
   ConnectionService(this._ref, this._encryptionService);
   
@@ -169,7 +171,85 @@ class ConnectionService {
     
     print('🤝 Handshake received from $peerUsername ($peerId)');
     
-    // 1. Derive shared secret
+    // 2. If we are the server (incoming socket), we need approval first
+    if (_incomingSockets.contains(socket)) {
+      // Check if we already have a session (reconnection) or if it's new
+      // For now, always require approval for simplicity, or check DB if trusted?
+      // User asked for "connection establishment process to be two directional", implying interactive.
+      // So we emit a request.
+      
+      print('🤝 Handshake request from $peerUsername. Waiting for approval...');
+      
+      // Store pending info
+      _pendingRequests[peerId] = {
+        'socket': socket,
+        'username': peerUsername,
+        'publicKey': peerPublicKey,
+        'id': peerId,
+      };
+      
+      // Notify app to show dialog
+      _messageController.add(ConnectionMessage(
+        peerId: peerId,
+        type: ConnectionMessageType.connectionRequest,
+        payload: {'username': peerUsername},
+      ));
+      
+      return; // Stop here. Do not auto-reply.
+    }
+    
+    // If we are here, it means WE initiated the connection and they replied (Accept),
+    // OR we just accepted their request and this logic is running (wait, no).
+    // If we accepted, we called _sendHandshake manually.
+    // The peer sending a handshake means we are establishing the session logic.
+    
+    // ... Proceed to Derive Secret ...
+    _finalizeConnection(socket, peerId, peerUsername, peerPublicKey);
+  }
+  
+  // Pending requests: Map<PeerId, Data>
+  final Map<String, Map<String, dynamic>> _pendingRequests = {};
+  
+  Future<void> acceptConnection(String peerId) async {
+    final data = _pendingRequests[peerId];
+    if (data == null) {
+      print('⚠️ No pending request for $peerId');
+      return;
+    }
+    
+    final socket = data['socket'] as Socket;
+    final username = data['username'] as String;
+    final publicKey = data['publicKey'] as List<int>;
+    
+    print('✅ Accepting connection from $username...');
+    
+    // Reply with our handshake
+    await _sendHandshake(socket);
+    
+    // Finalize
+    await _finalizeConnection(socket, peerId, username, publicKey);
+    
+    // Cleanup
+    _pendingRequests.remove(peerId);
+     // Remove from incoming set since it's now a full connection?
+    // actually _incomingSockets just tracks source. 
+  }
+  
+  Future<void> denyConnection(String peerId) async {
+    final data = _pendingRequests[peerId];
+    if (data == null) return;
+    
+    final socket = data['socket'] as Socket;
+    print('⛔ Denying connection from ${data['username']}');
+    
+    socket.destroy();
+    _pendingRequests.remove(peerId);
+  }
+
+  Future<void> _finalizeConnection(Socket socket, String peerId, String peerUsername, List<int> peerPublicKey) async {
+    print('🔐 Finalizing connection with $peerUsername...');
+    
+    // Derive shared secret
     final sharedSecret = await _encryptionService.deriveSharedSecret(
       ownKeyPair: _keyPair!,
       peerPublicKeyBytes: peerPublicKey,
@@ -178,15 +258,8 @@ class ConnectionService {
     _sessionKeys[peerId] = sharedSecret;
     _connections[peerId] = socket;
     
-    // 2. If we are the server (incoming socket), reply with our handshake
-    if (_incomingSockets.contains(socket)) {
-      print('🤝 Replying to handshake from $peerUsername...');
-      await _sendHandshake(socket);
-      // We've verified distinctness, remove from incoming tracking so we don't reply again loops
-      // Actually we don't need to remove it, just checking contains is enough
-      // But clearing it is cleaner
-      _incomingSockets.remove(socket);
-    }
+    // Remove from incoming tracking to avoid treating future re-handshakes as requests (if that happens)
+    // _incomingSockets.remove(socket); 
     
     // Notify app that we are connected
     _messageController.add(ConnectionMessage(
@@ -202,9 +275,8 @@ class ConnectionService {
     final peer = Peer(
       id: peerId,
       username: peerUsername,
-      host: socket.remoteAddress.address, // We know the IP connect via socket
-      port: AppConstants.discoveryPort, // Assume default port
-      // We don't have avatarColor in handshake yet, use default or random
+      host: socket.remoteAddress.address, 
+      port: AppConstants.discoveryPort, 
       avatarColor: null, 
       publicKey: base64Encode(peerPublicKey),
       isConnected: true,
@@ -227,7 +299,7 @@ class ConnectionService {
       print('⚠️ Failed to persist peer: $e');
     }
     
-    print('✅ Secure connection established with $peerUsername');
+    print('✅ Secure connection finalized with $peerUsername');
   }
   
   /// Process encrypted message
@@ -245,6 +317,19 @@ class ConnectionService {
       final decryptedBytes = await _encryptionService.decrypt(encryptedPayload, secretKey);
       final decryptedString = utf8.decode(decryptedBytes);
       final payload = jsonDecode(decryptedString);
+      
+      // Persist text messages
+      if (payload['type'] == 'text') {
+        final db = _ref.read(databaseProvider);
+        await db.insertMessage(MessagesCompanion.insert(
+          peerId: senderId,
+          isMe: false,
+          content: payload['content'],
+          type: 'text',
+          status: 'received',
+          timestamp: DateTime.parse(payload['timestamp']),
+        ));
+      }
       
       _messageController.add(ConnectionMessage(
         peerId: senderId,
@@ -286,6 +371,19 @@ class ConnectionService {
     
     socket.add(header.buffer.asUint8List());
     socket.add(bytes);
+  }
+
+  Future<void> sendMap(Peer peer, Map<String, dynamic> data) async {
+    await send(peer.id, data);
+  }
+
+  Future<void> sendText(Peer peer, String text) async {
+    await sendMap(peer, {
+      'type': 'text',
+      'id': _uuid.v4(),
+      'content': text,
+      'timestamp': DateTime.now().toIso8601String(),
+    });
   }
   
   void _handleError(Socket socket, dynamic error) {
@@ -347,6 +445,7 @@ enum ConnectionMessageType {
   connected,
   disconnected,
   data,
+  connectionRequest
 }
 
 class ConnectionMessage {
