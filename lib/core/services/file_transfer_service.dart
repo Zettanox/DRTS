@@ -9,6 +9,7 @@ import 'package:mime/mime.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
+import 'package:archive/archive.dart';
 
 import '../models/peer.dart';
 import 'connection_service.dart';
@@ -87,9 +88,49 @@ class FileTransferService {
     }
   }
   
+  /// Pick and send a folder as ZIP to a peer
+  Future<void> pickAndSendFolder(Peer peer) async {
+    final directoryPath = await FilePicker.platform.getDirectoryPath();
+    
+    if (directoryPath == null) return;
+    
+    final directory = Directory(directoryPath);
+    final folderName = directory.path.split(Platform.pathSeparator).last;
+    
+    print('📁 Zipping folder: $folderName...');
+    
+    // Create ZIP archive
+    final archive = Archive();
+    
+    await for (final entity in directory.list(recursive: true)) {
+      if (entity is File) {
+        final relativePath = entity.path.substring(directory.path.length + 1);
+        final bytes = await entity.readAsBytes();
+        archive.addFile(ArchiveFile(relativePath, bytes.length, bytes));
+      }
+    }
+    
+    final zipBytes = ZipEncoder().encode(archive);
+    if (zipBytes == null) {
+      print('❌ Failed to create ZIP archive');
+      return;
+    }
+    
+    // Save ZIP to temp directory
+    final tempDir = await getTemporaryDirectory();
+    final zipPath = '${tempDir.path}/$folderName.zip';
+    final zipFile = File(zipPath);
+    await zipFile.writeAsBytes(zipBytes);
+    
+    print('✅ Created ZIP: ${zipFile.path} (${(zipBytes.length / 1024 / 1024).toStringAsFixed(1)} MB)');
+    
+    // Send the ZIP file (with .zip extension so receiver can open it)
+    await _sendFile(peer, zipFile, isFolder: true, originalName: '$folderName.zip');
+  }
+  
   /// Send a file to a peer
-  Future<void> _sendFile(Peer peer, File file) async {
-    final filename = file.uri.pathSegments.last;
+  Future<void> _sendFile(Peer peer, File file, {bool isFolder = false, String? originalName}) async {
+    final filename = originalName ?? file.uri.pathSegments.last;
     final size = await file.length();
     final mimeType = lookupMimeType(file.path) ?? 'application/octet-stream';
     final fileId = _uuid.v4();
@@ -283,30 +324,90 @@ class FileTransferService {
     if (transfer == null || buffer == null) return;
     
     try {
-      final dir = await getApplicationDocumentsDirectory();
-      // Ensure unique name
-      String savePath = '${dir.path}/${transfer.filename}';
-      int counter = 1;
-      while (File(savePath).existsSync()) {
-        final name = transfer.filename.split('.').first;
-        final ext = transfer.filename.split('.').last;
-        savePath = '${dir.path}/${name}_$counter.$ext';
-        counter++;
+      // Use Downloads folder on Android, Documents on other platforms
+      Directory baseDir;
+      if (Platform.isAndroid) {
+        baseDir = Directory('/storage/emulated/0/Download/Stoa');
+      } else {
+        final docDir = await getApplicationDocumentsDirectory();
+        baseDir = Directory('${docDir.path}/Stoa');
       }
       
-      final file = File(savePath);
-      await file.writeAsBytes(buffer);
+      // Ensure Stoa folder exists
+      if (!await baseDir.exists()) {
+        await baseDir.create(recursive: true);
+      }
+      
+      // Check if it's a ZIP file (folder transfer)
+      final isZip = transfer.filename.toLowerCase().endsWith('.zip');
+      String savePath;
+      String displayPath;
+      
+      if (isZip) {
+        // Auto-extract ZIP to folder
+        final folderName = transfer.filename.substring(0, transfer.filename.length - 4);
+        var extractDir = Directory('${baseDir.path}/$folderName');
+        
+        // Ensure unique folder name
+        int counter = 1;
+        while (await extractDir.exists()) {
+          extractDir = Directory('${baseDir.path}/${folderName}_$counter');
+          counter++;
+        }
+        savePath = extractDir.path;
+        
+        // Create extraction directory
+        await extractDir.create(recursive: true);
+        
+        // Extract ZIP contents
+        try {
+          final archive = ZipDecoder().decodeBytes(buffer);
+          for (final file in archive) {
+            final filename = file.name;
+            if (file.isFile) {
+              final outputFile = File('${extractDir.path}/$filename');
+              await outputFile.create(recursive: true);
+              await outputFile.writeAsBytes(file.content as List<int>);
+            } else {
+              await Directory('${extractDir.path}/$filename').create(recursive: true);
+            }
+          }
+          print('📦 Extracted ${archive.length} files to: ${extractDir.path}');
+        } catch (e) {
+          print('⚠️ Failed to extract ZIP, saving as-is: $e');
+          // Fallback: save as ZIP file
+          savePath = '${baseDir.path}/${transfer.filename}';
+          final file = File(savePath);
+          await file.writeAsBytes(buffer);
+        }
+        
+        displayPath = savePath;
+      } else {
+        // Regular file - save normally
+        savePath = '${baseDir.path}/${transfer.filename}';
+        int counter = 1;
+        while (await File(savePath).exists()) {
+          final name = transfer.filename.split('.').first;
+          final ext = transfer.filename.split('.').last;
+          savePath = '${baseDir.path}/${name}_$counter.$ext';
+          counter++;
+        }
+        
+        final file = File(savePath);
+        await file.writeAsBytes(buffer);
+        displayPath = savePath;
+      }
       
       _updateProgress(transfer.copyWith(
         status: TransferStatus.completed,
-        filePath: savePath,
-        transferredBytes: transfer.totalBytes, // Ensure 100%
+        filePath: displayPath,
+        transferredBytes: transfer.totalBytes,
       ));
       
       // Clear buffer to free memory
       _incomingBuffers.remove(fileId);
       
-      print('💾 File saved to: $savePath');
+      print('💾 File saved to: $displayPath');
       
       // Log to database
       try {
@@ -314,11 +415,11 @@ class FileTransferService {
         await db.insertMessage(MessagesCompanion.insert(
           peerId: transfer.peerId,
           isMe: false,
-          content: transfer.filename,
-          type: 'file',
+          content: isZip ? transfer.filename.substring(0, transfer.filename.length - 4) : transfer.filename,
+          type: isZip ? 'folder' : 'file',
           status: 'received',
           timestamp: DateTime.now(),
-          filePath: Value(savePath),
+          filePath: Value(displayPath),
           fileSize: Value(transfer.totalBytes),
         ));
       } catch (e) {

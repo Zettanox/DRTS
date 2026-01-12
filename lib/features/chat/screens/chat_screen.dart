@@ -200,6 +200,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             },
             icon: const Icon(Icons.add_circle, size: 32),
             color: Colors.white70,
+            tooltip: 'Send File',
+          ),
+          IconButton(
+            onPressed: () {
+               ref.read(fileTransferServiceProvider).pickAndSendFolder(peer);
+            },
+            icon: const Icon(Icons.folder, size: 28),
+            color: Colors.white54,
+            tooltip: 'Send Folder',
           ),
           const SizedBox(width: 8),
           Expanded(
