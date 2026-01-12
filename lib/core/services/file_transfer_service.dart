@@ -121,47 +121,47 @@ class FileTransferService {
       
       _updateProgress(_transfers[fileId]!.copyWith(status: TransferStatus.inProgress));
       
-      // 3. Send Chunks
+      // 3. Send Chunks using Turbo Mode (raw binary) - Maximum Speed
       int sentBytes = 0;
       int chunkIndex = 0;
       
-      // Use larger chunks for better throughput (64KB)
-      // Note: openRead default chunk size is system dependent (usually 64KB)
-      final stream = file.openRead();
+      // 1MB chunks for maximum throughput
+      const chunkSize = 1024 * 1024;
+      final fileBytes = await file.readAsBytes();
+      final totalChunks = (fileBytes.length / chunkSize).ceil();
       
-      await for (final chunk in stream) {
-        // Encode chunk to Base64 to ensure safe transport over JSON
-        final encodedChunk = base64Encode(chunk);
+      // Pipeline writes: collect futures, don't await each one
+      final List<Future<void>> pendingWrites = [];
+      
+      for (int i = 0; i < fileBytes.length; i += chunkSize) {
+        final end = (i + chunkSize > fileBytes.length) ? fileBytes.length : i + chunkSize;
+        final chunk = Uint8List.fromList(fileBytes.sublist(i, end));
+        final isLast = (end >= fileBytes.length);
         
-        await connectionService.send(peer.id, {
-          'type': 'file_chunk',
-          'fileId': fileId,
-          'chunkIndex': chunkIndex,
-          'data': encodedChunk,
-          'isLast': false,
-        });
+        // Don't await - let TCP buffer handle flow control
+        pendingWrites.add(connectionService.sendRawFileChunk(peer.id, fileId, chunk, isLast: isLast));
         
         sentBytes += chunk.length;
         chunkIndex++;
         
-        // Update progress occasionally (every 10 chunks or so to reduce UI rebuilds)
-        if (chunkIndex % 10 == 0) {
+        // Update progress every 20 chunks (less UI overhead)
+        if (chunkIndex % 20 == 0 || isLast) {
           _updateProgress(_transfers[fileId]!.copyWith(
             transferredBytes: sentBytes,
           ));
-          // Yield to event loop to keep UI responsive, but not every single chunk
-          await Future.delayed(Duration.zero);
+        }
+        
+        // Limit pipeline depth to avoid memory bloat on huge files
+        if (pendingWrites.length >= 10) {
+          await Future.wait(pendingWrites);
+          pendingWrites.clear();
         }
       }
       
-      // Send completion marker
-      await connectionService.send(peer.id, {
-        'type': 'file_chunk',
-        'fileId': fileId,
-        'chunkIndex': chunkIndex,
-        'data': '',
-        'isLast': true,
-      });
+      // Wait for any remaining writes
+      if (pendingWrites.isNotEmpty) {
+        await Future.wait(pendingWrites);
+      }
       
       _updateProgress(_transfers[fileId]!.copyWith(
         transferredBytes: size,
@@ -201,6 +201,31 @@ class FileTransferService {
       await _handleOffer(senderId, message);
     } else if (type == 'file_chunk') {
       await _handleChunk(senderId, message);
+    } else if (type == 'file_chunk_binary') {
+      await _handleBinaryChunk(senderId, message);
+    }
+  }
+  
+  /// Handle binary chunk (Turbo Mode)
+  Future<void> _handleBinaryChunk(String senderId, Map<String, dynamic> message) async {
+    final fileId = message['fileId'];
+    final data = message['data'] as Uint8List;
+    final isLast = message['isLast'] as bool;
+    
+    if (!_transfers.containsKey(fileId)) return;
+    
+    final buffer = _incomingBuffers[fileId];
+    if (buffer == null) return;
+    
+    buffer.addAll(data);
+    
+    final current = _transfers[fileId]!;
+    _updateProgress(current.copyWith(
+      transferredBytes: current.transferredBytes + data.length,
+    ));
+    
+    if (isLast) {
+      await _saveFile(fileId);
     }
   }
   

@@ -94,6 +94,36 @@ class EncryptionService {
       secretKey: secretKey,
     );
   }
+  
+  /// Encrypt raw bytes - Turbo Mode (returns combined nonce+ciphertext+mac)
+  Future<List<int>> encryptBytes(List<int> plainBytes, SecretKey secretKey) async {
+    final secretBox = await _cipher.encrypt(
+      plainBytes,
+      secretKey: secretKey,
+    );
+    
+    // Return: [12-byte nonce][ciphertext][16-byte mac]
+    return [...secretBox.nonce, ...secretBox.cipherText, ...secretBox.mac.bytes];
+  }
+  
+  /// Decrypt raw bytes - Turbo Mode (expects combined nonce+ciphertext+mac)
+  Future<List<int>> decryptBytes(List<int> encryptedBytes, SecretKey secretKey) async {
+    // Parse: [12-byte nonce][ciphertext][16-byte mac]
+    final nonce = encryptedBytes.sublist(0, 12);
+    final mac = encryptedBytes.sublist(encryptedBytes.length - 16);
+    final cipherText = encryptedBytes.sublist(12, encryptedBytes.length - 16);
+    
+    final secretBox = SecretBox(
+      cipherText,
+      nonce: nonce,
+      mac: Mac(mac),
+    );
+    
+    return await _cipher.decrypt(
+      secretBox,
+      secretKey: secretKey,
+    );
+  }
 }
 
 final encryptionServiceProvider = Provider<EncryptionService>((ref) {

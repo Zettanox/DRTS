@@ -151,18 +151,64 @@ class ConnectionService {
         // Remove processed bytes from buffer
         buffer.removeRange(0, 4 + length);
         
-        // Process message
-        final message = utf8.decode(payload);
-        final json = jsonDecode(message);
-        
-        if (json['type'] == 'handshake') {
-          await _processHandshake(socket, json);
-        } else if (json['type'] == 'encrypted') {
-          await _processEncryptedMessage(socket, json);
+        // Check message type: 0x02 = binary file chunk, otherwise JSON
+        if (payload.isNotEmpty && payload[0] == 0x02) {
+          await _processBinaryFileChunk(socket, payload);
+        } else {
+          // Process JSON message
+          final message = utf8.decode(payload);
+          final json = jsonDecode(message);
+          
+          if (json['type'] == 'handshake') {
+            await _processHandshake(socket, json);
+          } else if (json['type'] == 'encrypted') {
+            await _processEncryptedMessage(socket, json);
+          }
         }
       }
     } catch (e) {
       print('❌ Error handling data: $e');
+    }
+  }
+  
+  /// Process binary file chunk (Turbo Mode)
+  Future<void> _processBinaryFileChunk(Socket socket, Uint8List payload) async {
+    // Frame format: [1-byte type=0x02][1-byte isLast][36-byte fileId][encrypted data]
+    final isLast = payload[1] == 1;
+    final fileId = utf8.decode(payload.sublist(2, 38)).trim();
+    final encryptedData = payload.sublist(38);
+    
+    // Find sender by socket
+    String? senderId;
+    for (final entry in _connections.entries) {
+      if (entry.value == socket) {
+        senderId = entry.key;
+        break;
+      }
+    }
+    
+    if (senderId == null) return;
+    
+    final secretKey = _sessionKeys[senderId];
+    if (secretKey == null) return;
+    
+    try {
+      // Decrypt raw bytes
+      final decryptedBytes = await _encryptionService.decryptBytes(encryptedData, secretKey);
+      
+      // Emit as file chunk message for FileTransferService
+      _messageController.add(ConnectionMessage(
+        peerId: senderId,
+        type: ConnectionMessageType.data,
+        payload: {
+          'type': 'file_chunk_binary',
+          'fileId': fileId,
+          'data': Uint8List.fromList(decryptedBytes),
+          'isLast': isLast,
+        },
+      ));
+    } catch (e) {
+      print('❌ Failed to decrypt binary chunk: $e');
     }
   }
   
@@ -374,6 +420,32 @@ class ConnectionService {
     
     socket.add(header.buffer.asUint8List());
     socket.add(bytes);
+  }
+  
+  /// Send raw binary file chunk - Turbo Mode (no Base64, no JSON wrapping for data)
+  /// Frame format: [4 bytes total len][1 byte type=0x02][36 bytes fileId][encrypted bytes]
+  Future<void> sendRawFileChunk(String peerId, String fileId, Uint8List rawBytes, {bool isLast = false}) async {
+    final socket = _connections[peerId];
+    final secretKey = _sessionKeys[peerId];
+    
+    if (socket == null || secretKey == null) {
+      throw Exception('Not connected to peer $peerId');
+    }
+    
+    // Encrypt raw bytes directly
+    final encryptedBytes = await _encryptionService.encryptBytes(rawBytes, secretKey);
+    
+    // Frame: [4-byte length][1-byte type][1-byte isLast][36-byte fileId][encrypted data]
+    final fileIdBytes = utf8.encode(fileId.padRight(36).substring(0, 36)); // Ensure 36 bytes
+    final totalLength = 1 + 1 + 36 + encryptedBytes.length;
+    
+    final header = ByteData(4)..setUint32(0, totalLength);
+    
+    socket.add(header.buffer.asUint8List());
+    socket.add([0x02]); // Type marker for binary file chunk
+    socket.add([isLast ? 1 : 0]); // isLast flag
+    socket.add(fileIdBytes);
+    socket.add(encryptedBytes);
   }
 
   Future<void> sendMap(Peer peer, Map<String, dynamic> data) async {
