@@ -199,15 +199,6 @@ class DiscoveryService {
       return;
     }
     
-    // Even without host/port, we can show the peer was found
-    // We'll use the service name to derive info if needed
-    final existingPeer = _peers[peerId];
-    if (existingPeer != null) {
-      // Already have this peer
-      print('🔍 Peer already known: $username');
-      return;
-    }
-    
     // Try to get host info from resolved service
     String host = 'unknown';
     int port = AppConstants.discoveryPort;
@@ -219,13 +210,27 @@ class DiscoveryService {
       port = service.port;
     }
     
-    // Preserve local state if partially existing
+    // Preserve existing peer state
     bool isConnected = false;
     PeerConnectionStatus connectionStatus = PeerConnectionStatus.disconnected;
-     if (_peers.containsKey(peerId)) {
+    
+    if (_peers.containsKey(peerId)) {
       final existing = _peers[peerId]!;
       isConnected = existing.isConnected;
       connectionStatus = existing.connectionStatus;
+      
+      // IMPORTANT: Don't overwrite a valid host with 'unknown'
+      if (host == 'unknown' && existing.host != 'unknown') {
+        host = existing.host;
+        print('🔍 Preserving known host for $username: $host');
+      }
+      
+      // If we already have a valid host, just update last seen
+      if (existing.host != 'unknown' && host == existing.host) {
+        final updatedPeer = existing.copyWith(lastSeen: DateTime.now());
+        _peers[peerId] = updatedPeer;
+        return; // No need to do anything else
+      }
     }
 
     // Create peer with available info
@@ -281,6 +286,21 @@ class DiscoveryService {
       host = host.split('%').first;
     }
     
+    // Skip IPv6 link-local addresses (fe80::) - prefer IPv4
+    if (host.startsWith('fe80:') || host.startsWith('Fe80:')) {
+      print('⚠️ Skipping link-local IPv6 address: $host');
+      return;
+    }
+    
+    // If it's an IPv6 address and we already have an IPv4 for this peer, keep IPv4
+    if (host.contains(':') && _peers.containsKey(peerId)) {
+      final existing = _peers[peerId]!;
+      if (existing.host != 'unknown' && !existing.host.contains(':')) {
+        print('🔍 Keeping existing IPv4 address for peer: ${existing.host}');
+        host = existing.host;
+      }
+    }
+    
     // Preserve local state (connection status) if peer already exists
     bool isConnected = false;
     PeerConnectionStatus connectionStatus = PeerConnectionStatus.disconnected;
@@ -311,9 +331,17 @@ class DiscoveryService {
     final peerId = service.attributes['id'];
     
     if (peerId != null && _peers.containsKey(peerId)) {
-      final peer = _peers.remove(peerId);
+      final peer = _peers[peerId]!;
+      
+      // Don't remove peers that are actively connected
+      if (peer.isConnected || peer.connectionStatus == PeerConnectionStatus.connected) {
+        print('🔍 Keeping connected peer: ${peer.username} (mDNS lost but still connected)');
+        return;
+      }
+      
+      _peers.remove(peerId);
       _notifyPeersChanged();
-      print('❌ Lost peer: ${peer?.username}');
+      print('❌ Lost peer: ${peer.username}');
     }
   }
   

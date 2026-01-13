@@ -22,6 +22,10 @@ class ConnectionService {
   final Set<Socket> _incomingSockets = {}; // Track sockets that initiated connection to us
   final Map<String, SecretKey> _sessionKeys = {};
   
+  // Timer tracking for handshake timeouts
+  final Map<String, Timer> _handshakeTimers = {};
+  final Map<String, Timer> _pendingRequestTimers = {};
+  
   final EncryptionService _encryptionService;
   final Ref _ref;
   
@@ -38,8 +42,13 @@ class ConnectionService {
   /// Check if we have an active connection to a peer
   bool isConnectedTo(String peerId) => _connections.containsKey(peerId);
   
-  /// Initialize server and keys
+  bool _isInitialized = false;
+  
+  /// Initialize server and keys (safe to call multiple times)
   Future<void> initialize() async {
+    if (_isInitialized) return; // Prevent double initialization
+    _isInitialized = true;
+    
     _keyPair = await _encryptionService.generateKeyPair();
     await _startServer();
   }
@@ -75,33 +84,62 @@ class ConnectionService {
       return;
     }
     
+    // Prevent duplicate connection attempts
+    if (_handshakeTimers.containsKey(peer.id)) {
+      print('🔌 Connection attempt already in progress for ${peer.username}');
+      return;
+    }
+    
     try {
       print('🔌 Connecting to ${peer.host}:${AppConstants.transferPort}...');
       final socket = await Socket.connect(peer.host, AppConstants.transferPort, timeout: AppConstants.peerTimeout);
-      
-      // Store temporary connection until handshake completes
       
       // Initiate handshake
       print('🤝 Sending handshake to ${peer.username}...');
       await _sendHandshake(socket);
       
-      // Set a timeout for the handshake response
-      // If we don't get a valid handshake back within 10 seconds, close the socket
-      Timer(const Duration(seconds: 10), () {
+      // Set a timeout for the handshake response (15 seconds)
+      // This timer will be cancelled in _finalizeConnection on success
+      _handshakeTimers[peer.id] = Timer(const Duration(seconds: 15), () {
         if (!_connections.containsKey(peer.id)) {
           print('⏰ Handshake timed out for ${peer.username}');
           socket.destroy();
+          _handshakeTimers.remove(peer.id);
+          
+          // Notify UI that handshake timed out
+          _messageController.add(ConnectionMessage(
+            peerId: peer.id,
+            type: ConnectionMessageType.handshakeTimeout,
+            payload: {'username': peer.username},
+          ));
         }
       });
       
       socket.listen(
         (data) => _handleData(socket, data),
-        onError: (e) => _handleError(socket, e),
-        onDone: () => _handleDone(socket),
+        onError: (e) {
+          _handshakeTimers[peer.id]?.cancel();
+          _handshakeTimers.remove(peer.id);
+          _handleError(socket, e);
+        },
+        onDone: () {
+          // If connection closed before finalization, notify UI
+          if (!_connections.containsKey(peer.id) && _handshakeTimers.containsKey(peer.id)) {
+            _handshakeTimers[peer.id]?.cancel();
+            _handshakeTimers.remove(peer.id);
+            _messageController.add(ConnectionMessage(
+              peerId: peer.id,
+              type: ConnectionMessageType.handshakeFailed,
+              payload: {'reason': 'Connection closed by peer'},
+            ));
+          }
+          _handleDone(socket);
+        },
       );
       
     } catch (e) {
       print('❌ Failed to connect to ${peer.username}: $e');
+      _handshakeTimers.remove(peer.id);
       rethrow;
     }
   }
@@ -237,7 +275,16 @@ class ConnectionService {
         'id': peerId,
       };
       
+      // Auto-timeout pending request after 30 seconds (receiver didn't respond)
+      _pendingRequestTimers[peerId] = Timer(const Duration(seconds: 30), () {
+        if (_pendingRequests.containsKey(peerId)) {
+          print('⏰ Pending request timed out for $peerUsername');
+          denyConnection(peerId);
+        }
+      });
+      
       // Notify app to show dialog
+      print('📨 Emitting connectionRequest event for $peerUsername ($peerId)');
       _messageController.add(ConnectionMessage(
         peerId: peerId,
         type: ConnectionMessageType.connectionRequest,
@@ -266,27 +313,46 @@ class ConnectionService {
       return;
     }
     
+    // Cancel the pending request timeout
+    _pendingRequestTimers[peerId]?.cancel();
+    _pendingRequestTimers.remove(peerId);
+    
     final socket = data['socket'] as Socket;
     final username = data['username'] as String;
     final publicKey = data['publicKey'] as List<int>;
     
     print('✅ Accepting connection from $username...');
     
-    // Reply with our handshake
-    await _sendHandshake(socket);
-    
-    // Finalize
-    await _finalizeConnection(socket, peerId, username, publicKey);
+    try {
+      // Check if socket is still usable by accessing remoteAddress
+      // This will throw if the socket is closed
+      socket.remoteAddress;
+      
+      // Reply with our handshake
+      await _sendHandshake(socket);
+      
+      // Finalize
+      await _finalizeConnection(socket, peerId, username, publicKey);
+    } catch (e) {
+      print('⚠️ Socket closed before acceptance could complete: $e');
+      _messageController.add(ConnectionMessage(
+        peerId: peerId,
+        type: ConnectionMessageType.handshakeFailed,
+        payload: {'reason': 'Connection closed (peer may have timed out)'},
+      ));
+    }
     
     // Cleanup
     _pendingRequests.remove(peerId);
-     // Remove from incoming set since it's now a full connection?
-    // actually _incomingSockets just tracks source. 
   }
   
   Future<void> denyConnection(String peerId) async {
     final data = _pendingRequests[peerId];
     if (data == null) return;
+    
+    // Cancel the pending request timeout
+    _pendingRequestTimers[peerId]?.cancel();
+    _pendingRequestTimers.remove(peerId);
     
     final socket = data['socket'] as Socket;
     print('⛔ Denying connection from ${data['username']}');
@@ -297,6 +363,10 @@ class ConnectionService {
 
   Future<void> _finalizeConnection(Socket socket, String peerId, String peerUsername, List<int> peerPublicKey) async {
     print('🔐 Finalizing connection with $peerUsername...');
+    
+    // Cancel any handshake timeout timer (we succeeded!)
+    _handshakeTimers[peerId]?.cancel();
+    _handshakeTimers.remove(peerId);
     
     // Derive shared secret
     final sharedSecret = await _encryptionService.deriveSharedSecret(
@@ -520,7 +590,9 @@ enum ConnectionMessageType {
   connected,
   disconnected,
   data,
-  connectionRequest
+  connectionRequest,
+  handshakeFailed,
+  handshakeTimeout,
 }
 
 class ConnectionMessage {

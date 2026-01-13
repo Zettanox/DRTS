@@ -54,40 +54,37 @@ class _PeersScreenState extends ConsumerState<PeersScreen> {
              Navigator.of(context).pop(); // Close waiting dialog
              setState(() { _waitingPeerId = null; });
              ScaffoldMessenger.of(context).showSnackBar(
-               const SnackBar(content: Text('Connection denied or failed ❌')),
+               const SnackBar(content: Text('Connection closed ❌')),
              );
           }
-        } else if (message.type == ConnectionMessageType.connectionRequest) {
-            final username = message.payload['username'];
-            final peerId = message.peerId;
-            
-            showDialog(
-              context: context, 
-              builder: (ctx) => AlertDialog(
-                title: const Text('Connection Request'),
-                content: Text('$username wants to connect with you.'),
-                actions: [
-                  TextButton(
-                    onPressed: () {
-                      ref.read(connectionServiceProvider).denyConnection(peerId);
-                      Navigator.pop(ctx);
-                    },
-                    child: const Text('Deny', style: TextStyle(color: Colors.red)),
-                  ),
-                  FilledButton(
-                    onPressed: () {
-                      ref.read(connectionServiceProvider).acceptConnection(peerId);
-                      Navigator.pop(ctx);
-                    }, 
-                    child: const Text('Accept')
-                  ),
-                ],
-              )
+        } else if (message.type == ConnectionMessageType.handshakeTimeout) {
+          // Handshake timed out - peer didn't respond in time
+          _connectionStatuses[message.peerId] = PeerConnectionStatus.failed;
+          
+          if (_waitingPeerId == message.peerId) {
+            Navigator.of(context).pop(); // Close waiting dialog
+            setState(() { _waitingPeerId = null; });
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Connection timed out - peer did not respond ⏰')),
             );
+          }
+        } else if (message.type == ConnectionMessageType.handshakeFailed) {
+          // Connection failed before handshake completed
+          _connectionStatuses[message.peerId] = PeerConnectionStatus.failed;
+          
+          if (_waitingPeerId == message.peerId) {
+            Navigator.of(context).pop(); // Close waiting dialog
+            setState(() { _waitingPeerId = null; });
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Connection failed: ${message.payload?['reason'] ?? 'Unknown error'}')),
+            );
+          }
         }
+        // Note: connectionRequest is handled globally by GlobalConnectionHandler
       });
     });
   }
+
 
   Future<void> _connectToPeer(Peer peer) async {
     // If connected, navigate to chat

@@ -8,8 +8,16 @@ import '../features/peers/screens/peers_screen.dart';
 import '../features/chat/screens/chat_screen.dart';
 import '../core/services/storage_service.dart';
 
+// Global navigator key for showing dialogs from anywhere
+final navigatorKeyProvider = Provider<GlobalKey<NavigatorState>>((ref) {
+  return GlobalKey<NavigatorState>();
+});
+
 final routerProvider = Provider<GoRouter>((ref) {
+  final navigatorKey = ref.watch(navigatorKeyProvider);
+  
   return GoRouter(
+    navigatorKey: navigatorKey,
     initialLocation: '/',
     redirect: (context, state) async {
       // Check if user has completed onboarding

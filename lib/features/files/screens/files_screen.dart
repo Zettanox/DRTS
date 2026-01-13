@@ -4,21 +4,56 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
-import 'package:open_filex/open_filex.dart'; // Import open_filex
+import 'package:open_filex/open_filex.dart';
 import 'package:stoa/app/theme.dart';
-import 'package:stoa/core/data/database.dart'; // Import database
-import 'package:stoa/core/services/file_transfer_service.dart'; // Import file transfer service
+import 'package:stoa/core/data/database.dart';
 
-class FilesScreen extends ConsumerWidget {
+class FilesScreen extends ConsumerStatefulWidget {
   const FilesScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<FilesScreen> createState() => _FilesScreenState();
+}
+
+class _FilesScreenState extends ConsumerState<FilesScreen> {
+  final Set<int> _selectedIds = {};
+  bool _isSelectionMode = false;
+
+  @override
+  Widget build(BuildContext context) {
     final db = ref.watch(databaseProvider);
     
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Files'),
+        title: _isSelectionMode 
+            ? Text('${_selectedIds.length} selected')
+            : const Text('Files'),
+        actions: [
+          if (_isSelectionMode) ...[
+            IconButton(
+              icon: const Icon(Icons.select_all),
+              tooltip: 'Select All',
+              onPressed: () {
+                // Will be populated after StreamBuilder has data
+              },
+            ),
+            IconButton(
+              icon: const Icon(Icons.delete, color: Colors.red),
+              tooltip: 'Delete Selected',
+              onPressed: _selectedIds.isEmpty ? null : () => _deleteSelected(db),
+            ),
+            IconButton(
+              icon: const Icon(Icons.close),
+              tooltip: 'Cancel',
+              onPressed: () {
+                setState(() {
+                  _isSelectionMode = false;
+                  _selectedIds.clear();
+                });
+              },
+            ),
+          ],
+        ],
       ),
       body: StreamBuilder<List<Message>>(
         stream: db.watchAllFiles(),
@@ -56,59 +91,32 @@ class FilesScreen extends ConsumerWidget {
             itemCount: files.length,
             itemBuilder: (context, index) {
               final file = files[index];
-              return Dismissible(
-                key: Key(file.id.toString()),
-                direction: DismissDirection.endToStart,
-                background: Container(
-                  alignment: Alignment.centerRight,
-                  padding: const EdgeInsets.only(right: 20),
-                  margin: const EdgeInsets.only(bottom: 12),
-                  decoration: BoxDecoration(
-                    color: Colors.red,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: const Icon(Icons.delete, color: Colors.white),
-                ),
-                confirmDismiss: (direction) async {
-                  return await showDialog(
-                    context: context,
-                    builder: (ctx) => AlertDialog(
-                      title: const Text('Delete File?'),
-                      content: Text('Delete "${file.content}" from storage?'),
-                      actions: [
-                        TextButton(
-                          onPressed: () => Navigator.pop(ctx, false),
-                          child: const Text('Cancel'),
-                        ),
-                        FilledButton(
-                          onPressed: () => Navigator.pop(ctx, true),
-                          style: FilledButton.styleFrom(backgroundColor: Colors.red),
-                          child: const Text('Delete'),
-                        ),
-                      ],
-                    ),
-                  );
+              final isSelected = _selectedIds.contains(file.id);
+              
+              return GestureDetector(
+                onLongPress: () {
+                  setState(() {
+                    _isSelectionMode = true;
+                    _selectedIds.add(file.id);
+                  });
                 },
-                onDismissed: (direction) async {
-                  // Delete from disk
-                  if (file.filePath != null) {
-                    try {
-                      final f = File(file.filePath!);
-                      if (await f.exists()) {
-                        await f.delete();
+                onTap: () {
+                  if (_isSelectionMode) {
+                    setState(() {
+                      if (isSelected) {
+                        _selectedIds.remove(file.id);
+                        if (_selectedIds.isEmpty) {
+                          _isSelectionMode = false;
+                        }
+                      } else {
+                        _selectedIds.add(file.id);
                       }
-                    } catch (e) {
-                      debugPrint('Failed to delete file from disk: $e');
-                    }
+                    });
+                  } else if (file.filePath != null) {
+                    OpenFilex.open(file.filePath!);
                   }
-                  // Delete from database
-                  db.deleteMessage(file.id);
-                  
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Deleted ${file.content}')),
-                  );
                 },
-                child: _buildFileItem(context, file),
+                child: _buildFileItem(context, file, isSelected),
               );
             },
           );
@@ -117,25 +125,44 @@ class FilesScreen extends ConsumerWidget {
     );
   }
   
-  Widget _buildFileItem(BuildContext context, Message file) {
+  Widget _buildFileItem(BuildContext context, Message file, bool isSelected) {
     final isReceived = !file.isMe;
     final date = DateFormat('MMM d, h:mm a').format(file.timestamp);
     
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
+      color: isSelected ? StoaTheme.primaryColor.withOpacity(0.3) : null,
       child: ListTile(
-        leading: Container(
-          width: 48,
-          height: 48,
-          decoration: BoxDecoration(
-            color: (isReceived ? StoaTheme.secondaryColor : StoaTheme.primaryColor).withOpacity(0.1),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Icon(
-            isReceived ? Icons.download_rounded : Icons.upload_rounded,
-            color: isReceived ? StoaTheme.secondaryColor : StoaTheme.primaryColor,
-          ),
-        ),
+        leading: _isSelectionMode
+            ? Checkbox(
+                value: isSelected,
+                onChanged: (val) {
+                  setState(() {
+                    if (val == true) {
+                      _selectedIds.add(file.id);
+                    } else {
+                      _selectedIds.remove(file.id);
+                      if (_selectedIds.isEmpty) {
+                        _isSelectionMode = false;
+                      }
+                    }
+                  });
+                },
+              )
+            : Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: (isReceived ? StoaTheme.secondaryColor : StoaTheme.primaryColor).withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  file.type == 'folder' 
+                      ? Icons.folder_rounded
+                      : (isReceived ? Icons.download_rounded : Icons.upload_rounded),
+                  color: isReceived ? StoaTheme.secondaryColor : StoaTheme.primaryColor,
+                ),
+              ),
         title: Text(
           file.content,
           style: const TextStyle(fontWeight: FontWeight.bold),
@@ -157,16 +184,72 @@ class FilesScreen extends ConsumerWidget {
             ),
           ],
         ),
-        trailing: IconButton(
-          icon: const Icon(Icons.open_in_new_rounded),
-          onPressed: () {
-            if (file.filePath != null) {
-              OpenFilex.open(file.filePath!);
-            }
-          },
-        ),
+        trailing: _isSelectionMode
+            ? null
+            : IconButton(
+                icon: const Icon(Icons.open_in_new_rounded),
+                onPressed: () {
+                  if (file.filePath != null) {
+                    OpenFilex.open(file.filePath!);
+                  }
+                },
+              ),
       ),
     );
+  }
+  
+  Future<void> _deleteSelected(AppDatabase db) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete Files?'),
+        content: Text('Delete ${_selectedIds.length} file(s) from storage?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    
+    if (confirmed != true) return;
+    
+    // Delete each selected file
+    for (final id in _selectedIds) {
+      try {
+        // Get file path before deleting from DB
+        final files = await db.watchAllFiles().first;
+        final file = files.cast<Message?>().firstWhere((f) => f?.id == id, orElse: () => null);
+        
+        if (file?.filePath != null) {
+          final f = File(file!.filePath!);
+          if (await f.exists()) {
+            await f.delete();
+          }
+        }
+        
+        await db.deleteMessage(id);
+      } catch (e) {
+        debugPrint('Failed to delete file $id: $e');
+      }
+    }
+    
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Deleted ${_selectedIds.length} file(s)')),
+      );
+      
+      setState(() {
+        _selectedIds.clear();
+        _isSelectionMode = false;
+      });
+    }
   }
   
   String _formatBytes(int bytes) {

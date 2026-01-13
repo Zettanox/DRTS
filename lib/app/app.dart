@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'router.dart';
 import 'theme.dart';
+import 'global_connection_handler.dart';
 
 class StoaApp extends ConsumerWidget {
   const StoaApp({super.key});
@@ -16,8 +17,15 @@ class StoaApp extends ConsumerWidget {
       debugShowCheckedModeBanner: false,
       theme: StoaTheme.light,
       darkTheme: StoaTheme.dark,
-      themeMode: ThemeMode.dark, // Default to dark theme
+      themeMode: ThemeMode.dark,
       routerConfig: router,
+      // Wrap the entire app content with GlobalConnectionHandler
+      // so it has access to MaterialLocalizations for showing dialogs
+      builder: (context, child) {
+        return GlobalConnectionHandler(
+          child: child ?? const SizedBox.shrink(),
+        );
+      },
     );
   }
 }
