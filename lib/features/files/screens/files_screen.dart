@@ -17,6 +17,7 @@ class FilesScreen extends ConsumerStatefulWidget {
 
 class _FilesScreenState extends ConsumerState<FilesScreen> {
   final Set<int> _selectedIds = {};
+  final Set<int> _allFileIds = {};
   bool _isSelectionMode = false;
 
   @override
@@ -31,10 +32,23 @@ class _FilesScreenState extends ConsumerState<FilesScreen> {
         actions: [
           if (_isSelectionMode) ...[
             IconButton(
-              icon: const Icon(Icons.select_all),
-              tooltip: 'Select All',
+              icon: Icon(_selectedIds.length == _allFileIds.length 
+                  ? Icons.deselect 
+                  : Icons.select_all),
+              tooltip: _selectedIds.length == _allFileIds.length 
+                  ? 'Deselect All' 
+                  : 'Select All',
               onPressed: () {
-                // Will be populated after StreamBuilder has data
+                setState(() {
+                  if (_selectedIds.length == _allFileIds.length) {
+                    // Deselect all
+                    _selectedIds.clear();
+                    _isSelectionMode = false;
+                  } else {
+                    // Select all
+                    _selectedIds.addAll(_allFileIds);
+                  }
+                });
               },
             ),
             IconButton(
@@ -67,6 +81,14 @@ class _FilesScreenState extends ConsumerState<FilesScreen> {
           }
           
           final files = snapshot.data!;
+          
+          // Update _allFileIds for Select All functionality
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) {
+              _allFileIds.clear();
+              _allFileIds.addAll(files.map((f) => f.id));
+            }
+          });
           
           if (files.isEmpty) {
             return Center(
