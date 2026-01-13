@@ -149,20 +149,7 @@ class _FilesScreenState extends ConsumerState<FilesScreen> {
                   });
                 },
               )
-            : Container(
-                width: 48,
-                height: 48,
-                decoration: BoxDecoration(
-                  color: (isReceived ? StoaTheme.secondaryColor : StoaTheme.primaryColor).withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(
-                  file.type == 'folder' 
-                      ? Icons.folder_rounded
-                      : (isReceived ? Icons.download_rounded : Icons.upload_rounded),
-                  color: isReceived ? StoaTheme.secondaryColor : StoaTheme.primaryColor,
-                ),
-              ),
+            : _buildFileThumbnail(file, isReceived),
         title: Text(
           file.content,
           style: const TextStyle(fontWeight: FontWeight.bold),
@@ -257,5 +244,93 @@ class _FilesScreenState extends ConsumerState<FilesScreen> {
     const suffixes = ['B', 'KB', 'MB', 'GB', 'TB'];
     var i = (log(bytes) / log(1024)).floor();
     return '${(bytes / pow(1024, i)).toStringAsFixed(1)} ${suffixes[i]}';
+  }
+  
+  /// Check if the file is an image based on extension
+  bool _isImageFile(String filename) {
+    final ext = filename.toLowerCase().split('.').last;
+    return ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'heic', 'heif'].contains(ext);
+  }
+  
+  /// Check if the file is a video based on extension
+  bool _isVideoFile(String filename) {
+    final ext = filename.toLowerCase().split('.').last;
+    return ['mp4', 'mov', 'avi', 'mkv', 'webm', '3gp', 'flv'].contains(ext);
+  }
+  
+  /// Build a thumbnail widget for file preview
+  Widget _buildFileThumbnail(Message file, bool isReceived) {
+    final filename = file.content;
+    final filePath = file.filePath;
+    
+    // For folders
+    if (file.type == 'folder') {
+      return Container(
+        width: 48,
+        height: 48,
+        decoration: BoxDecoration(
+          color: StoaTheme.primaryColor.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: const Icon(Icons.folder_rounded, color: Colors.amber),
+      );
+    }
+    
+    // For images - show thumbnail
+    if (_isImageFile(filename) && filePath != null) {
+      final imageFile = File(filePath);
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: SizedBox(
+          width: 48,
+          height: 48,
+          child: FutureBuilder<bool>(
+            future: imageFile.exists(),
+            builder: (context, snapshot) {
+              if (snapshot.data == true) {
+                return Image.file(
+                  imageFile,
+                  fit: BoxFit.cover,
+                  cacheWidth: 96, // 2x for retina
+                  errorBuilder: (_, __, ___) => _buildDefaultIcon(isReceived),
+                );
+              }
+              return _buildDefaultIcon(isReceived);
+            },
+          ),
+        ),
+      );
+    }
+    
+    // For videos - show play icon
+    if (_isVideoFile(filename)) {
+      return Container(
+        width: 48,
+        height: 48,
+        decoration: BoxDecoration(
+          color: Colors.deepPurple.withOpacity(0.2),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: const Icon(Icons.play_circle_filled_rounded, color: Colors.deepPurple),
+      );
+    }
+    
+    // Default icon for other files
+    return _buildDefaultIcon(isReceived);
+  }
+  
+  Widget _buildDefaultIcon(bool isReceived) {
+    return Container(
+      width: 48,
+      height: 48,
+      decoration: BoxDecoration(
+        color: (isReceived ? StoaTheme.secondaryColor : StoaTheme.primaryColor).withOpacity(0.1),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Icon(
+        isReceived ? Icons.download_rounded : Icons.upload_rounded,
+        color: isReceived ? StoaTheme.secondaryColor : StoaTheme.primaryColor,
+      ),
+    );
   }
 }

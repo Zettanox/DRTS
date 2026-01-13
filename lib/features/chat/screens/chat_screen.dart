@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'dart:io';
 
 import '../../../core/models/peer.dart';
 import '../../../core/services/connection_service.dart';
@@ -316,6 +317,51 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final isMe = message.isMe;
     final color = isMe ? Theme.of(context).primaryColor.withOpacity(0.8) : Colors.grey[800]!.withOpacity(0.8);
     final isText = message.type == 'text';
+    final isFile = message.type == 'file';
+    final isImage = isFile && _isImageFile(message.content);
+    
+    // For image files, show a larger preview
+    if (isImage && message.filePath != null) {
+      return Align(
+        alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+        child: GestureDetector(
+          onTap: () {
+            if (message.filePath != null) {
+              ref.read(fileTransferServiceProvider).openFileByPath(message.filePath!);
+            }
+          },
+          child: Container(
+            margin: const EdgeInsets.symmetric(vertical: 4),
+            constraints: const BoxConstraints(maxWidth: 200, maxHeight: 200),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: color, width: 2),
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(14),
+              child: FutureBuilder<bool>(
+                future: File(message.filePath!).exists(),
+                builder: (context, snapshot) {
+                  if (snapshot.data == true) {
+                    return Image.file(
+                      File(message.filePath!),
+                      fit: BoxFit.cover,
+                      cacheWidth: 400,
+                      errorBuilder: (_, __, ___) => _buildFileBubbleContent(message, isMe, color),
+                    );
+                  }
+                  return Container(
+                    color: color,
+                    padding: const EdgeInsets.all(12),
+                    child: const Icon(Icons.broken_image, color: Colors.white54),
+                  );
+                },
+              ),
+            ),
+          ),
+        ),
+      );
+    }
     
     return Align(
       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
@@ -327,54 +373,78 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           color: color,
           borderRadius: BorderRadius.circular(16),
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        child: _buildFileBubbleContent(message, isMe, color),
+      ),
+    );
+  }
+  
+  Widget _buildFileBubbleContent(Message message, bool isMe, Color color) {
+    final isText = message.type == 'text';
+    
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (!isText) ...[
-                  Icon(
-                    message.isMe ? Icons.upload_rounded : Icons.download_rounded,
-                    color: Colors.white70, 
-                    size: 20
-                  ),
-                  const SizedBox(width: 8),
-                ],
-                Flexible(
-                  child: Text(
-                    message.content,
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 4),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  message.fileSize != null ? _formatBytes(message.fileSize!) : 
-                  (isText ? _formatTime(message.timestamp) : ''),
-                  style: const TextStyle(fontSize: 10, color: Colors.white54),
-                ),
-                if (message.type == 'file' && message.filePath != null)
-                  GestureDetector(
-                    onTap: () {
-                      if (message.filePath != null) {
-                         ref.read(fileTransferServiceProvider).openFileByPath(message.filePath!);
-                    }
-                    },
-                    child: const Text('OPEN', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
-                  ),
-              ],
+            if (!isText) ...[
+              Icon(
+                _getFileIcon(message),
+                color: Colors.white70, 
+                size: 20
+              ),
+              const SizedBox(width: 8),
+            ],
+            Flexible(
+              child: Text(
+                message.content,
+                style: const TextStyle(fontWeight: FontWeight.bold),
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
           ],
         ),
-      ),
+        const SizedBox(height: 4),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              message.fileSize != null ? _formatBytes(message.fileSize!) : 
+              (isText ? _formatTime(message.timestamp) : ''),
+              style: const TextStyle(fontSize: 10, color: Colors.white54),
+            ),
+            if (message.type == 'file' && message.filePath != null)
+              GestureDetector(
+                onTap: () {
+                  if (message.filePath != null) {
+                     ref.read(fileTransferServiceProvider).openFileByPath(message.filePath!);
+                }
+                },
+                child: const Text('OPEN', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
+              ),
+          ],
+        ),
+      ],
     );
+  }
+  
+  IconData _getFileIcon(Message message) {
+    final filename = message.content;
+    if (_isImageFile(filename)) return Icons.image_rounded;
+    if (_isVideoFile(filename)) return Icons.play_circle_rounded;
+    if (message.type == 'folder') return Icons.folder_rounded;
+    return message.isMe ? Icons.upload_rounded : Icons.download_rounded;
+  }
+  
+  bool _isImageFile(String filename) {
+    final ext = filename.toLowerCase().split('.').last;
+    return ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'heic', 'heif'].contains(ext);
+  }
+  
+  bool _isVideoFile(String filename) {
+    final ext = filename.toLowerCase().split('.').last;
+    return ['mp4', 'mov', 'avi', 'mkv', 'webm', '3gp', 'flv'].contains(ext);
   }
 
   String _formatTime(DateTime dt) {
