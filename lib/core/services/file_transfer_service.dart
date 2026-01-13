@@ -49,6 +49,27 @@ class TransferProgress {
   });
 }
 
+/// Represents a queued file transfer
+class QueueItem {
+  final String id;
+  final File file;
+  final Peer peer;
+  final String displayName;
+  final bool isFolder;
+  QueueItemStatus status;
+  
+  QueueItem({
+    required this.id,
+    required this.file,
+    required this.peer,
+    required this.displayName,
+    this.isFolder = false,
+    this.status = QueueItemStatus.pending,
+  });
+}
+
+enum QueueItemStatus { pending, inProgress, completed, failed }
+
 class FileTransferService {
   final Ref _ref;
   final _uuid = const Uuid();
@@ -60,12 +81,23 @@ class FileTransferService {
   // Incoming file buffers
   final Map<String, List<int>> _incomingBuffers = {};
   
+  // Transfer Queue
+  final List<QueueItem> _sendQueue = [];
+  bool _isProcessingQueue = false;
+  final _queueController = StreamController<List<QueueItem>>.broadcast();
+  
   // Constants
   static const int chunkSize = 16 * 1024; // 16KB chunks
 
   FileTransferService(this._ref) {
     _listenToConnectionService();
   }
+  
+  /// Stream of queue updates
+  Stream<List<QueueItem>> get queueStream => _queueController.stream;
+  
+  /// Current queue items
+  List<QueueItem> get queue => List.unmodifiable(_sendQueue);
 
   void _listenToConnectionService() {
     final connectionService = _ref.read(connectionServiceProvider);
@@ -78,14 +110,88 @@ class FileTransferService {
 
   Stream<Map<String, TransferProgress>> get progressStream => _progressController.stream;
 
-  /// Pick and send a file to a peer
-  Future<void> pickAndSendFile(Peer peer) async {
-    final result = await FilePicker.platform.pickFiles();
+  /// Pick and send file(s) to a peer - supports multi-select
+  Future<void> pickAndSendFile(Peer peer, {bool allowMultiple = true}) async {
+    final result = await FilePicker.platform.pickFiles(allowMultiple: allowMultiple);
     
     if (result != null && result.files.isNotEmpty) {
-      final file = File(result.files.single.path!);
-      await _sendFile(peer, file);
+      if (result.files.length == 1) {
+        // Single file - send directly
+        final file = File(result.files.single.path!);
+        await _sendFile(peer, file);
+      } else {
+        // Multiple files - add to queue
+        for (final picked in result.files) {
+          if (picked.path != null) {
+            final file = File(picked.path!);
+            _addToQueue(peer, file, picked.name);
+          }
+        }
+        _processQueue();
+      }
     }
+  }
+  
+  /// Add a file to the transfer queue
+  void _addToQueue(Peer peer, File file, String displayName, {bool isFolder = false}) {
+    final item = QueueItem(
+      id: _uuid.v4(),
+      file: file,
+      peer: peer,
+      displayName: displayName,
+      isFolder: isFolder,
+    );
+    _sendQueue.add(item);
+    _notifyQueueChanged();
+    print('📥 Added to queue: $displayName (${_sendQueue.length} items)');
+  }
+  
+  /// Remove item from queue
+  void removeFromQueue(String itemId) {
+    _sendQueue.removeWhere((item) => item.id == itemId && item.status == QueueItemStatus.pending);
+    _notifyQueueChanged();
+  }
+  
+  /// Clear completed/failed items from queue
+  void clearCompletedFromQueue() {
+    _sendQueue.removeWhere((item) => 
+      item.status == QueueItemStatus.completed || 
+      item.status == QueueItemStatus.failed
+    );
+    _notifyQueueChanged();
+  }
+  
+  void _notifyQueueChanged() {
+    _queueController.add(List.unmodifiable(_sendQueue));
+  }
+  
+  /// Process the transfer queue sequentially
+  Future<void> _processQueue() async {
+    if (_isProcessingQueue) return;
+    _isProcessingQueue = true;
+    
+    while (_sendQueue.any((item) => item.status == QueueItemStatus.pending)) {
+      final item = _sendQueue.firstWhere((item) => item.status == QueueItemStatus.pending);
+      
+      item.status = QueueItemStatus.inProgress;
+      _notifyQueueChanged();
+      
+      try {
+        await _sendFile(item.peer, item.file, isFolder: item.isFolder, originalName: item.displayName);
+        item.status = QueueItemStatus.completed;
+      } catch (e) {
+        print('❌ Queue transfer failed: ${item.displayName}: $e');
+        item.status = QueueItemStatus.failed;
+      }
+      _notifyQueueChanged();
+    }
+    
+    _isProcessingQueue = false;
+    
+    // Auto-clear completed items after a delay
+    Future.delayed(const Duration(seconds: 3), () {
+      clearCompletedFromQueue();
+    });
   }
   
   /// Pick and send a folder as ZIP to a peer

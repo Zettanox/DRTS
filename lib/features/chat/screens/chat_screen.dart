@@ -190,46 +190,88 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   }
 
   Widget _buildInputArea(Peer peer) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      color: Colors.black12,
-      child: Row(
-        children: [
-          IconButton(
-            onPressed: () {
-               ref.read(fileTransferServiceProvider).pickAndSendFile(peer);
-            },
-            icon: const Icon(Icons.add_circle, size: 32),
-            color: Colors.white70,
-            tooltip: 'Send File',
-          ),
-          IconButton(
-            onPressed: () {
-               ref.read(fileTransferServiceProvider).pickAndSendFolder(peer);
-            },
-            icon: const Icon(Icons.folder, size: 28),
-            color: Colors.white54,
-            tooltip: 'Send Folder',
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: TextField(
-              controller: _messageController,
-              decoration: const InputDecoration(
-                hintText: 'Type a message...',
-                border: InputBorder.none,
-                hintStyle: TextStyle(color: Colors.grey),
+    final fileTransferService = ref.watch(fileTransferServiceProvider);
+    
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // Queue indicator
+        StreamBuilder<List<QueueItem>>(
+          stream: fileTransferService.queueStream,
+          builder: (context, snapshot) {
+            final queue = snapshot.data ?? [];
+            final pending = queue.where((q) => 
+              q.status == QueueItemStatus.pending || 
+              q.status == QueueItemStatus.inProgress
+            ).toList();
+            
+            if (pending.isEmpty) return const SizedBox.shrink();
+            
+            return Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              color: Theme.of(context).primaryColor.withOpacity(0.1),
+              child: Row(
+                children: [
+                  const Icon(Icons.queue, size: 20, color: Colors.white70),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '${pending.length} file(s) in queue',
+                      style: const TextStyle(fontSize: 12, color: Colors.white70),
+                    ),
+                  ),
+                  if (pending.any((q) => q.status == QueueItemStatus.inProgress))
+                    const SizedBox(
+                      width: 16, height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                ],
               ),
-              onSubmitted: (_) => _sendMessage(peer),
-            ),
+            );
+          },
+        ),
+        Container(
+          padding: const EdgeInsets.all(16),
+          color: Colors.black12,
+          child: Row(
+            children: [
+              IconButton(
+                onPressed: () {
+                   ref.read(fileTransferServiceProvider).pickAndSendFile(peer);
+                },
+                icon: const Icon(Icons.add_circle, size: 32),
+                color: Colors.white70,
+                tooltip: 'Send File(s)',
+              ),
+              IconButton(
+                onPressed: () {
+                   ref.read(fileTransferServiceProvider).pickAndSendFolder(peer);
+                },
+                icon: const Icon(Icons.folder, size: 28),
+                color: Colors.white54,
+                tooltip: 'Send Folder',
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: TextField(
+                  controller: _messageController,
+                  decoration: const InputDecoration(
+                    hintText: 'Type a message...',
+                    border: InputBorder.none,
+                    hintStyle: TextStyle(color: Colors.grey),
+                  ),
+                  onSubmitted: (_) => _sendMessage(peer),
+                ),
+              ),
+              IconButton(
+                onPressed: () => _sendMessage(peer),
+                icon: const Icon(Icons.send),
+                color: Theme.of(context).primaryColor,
+              ),
+            ],
           ),
-          IconButton(
-            onPressed: () => _sendMessage(peer),
-            icon: const Icon(Icons.send),
-            color: Theme.of(context).primaryColor,
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
   
