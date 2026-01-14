@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'dart:io';
 
 import '../../../core/models/peer.dart';
+import '../../../app/theme.dart';
 import '../../../core/services/connection_service.dart';
 import '../../../core/services/file_transfer_service.dart';
 import '../../../core/services/discovery_service.dart';
@@ -266,7 +267,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               IconButton(
                 onPressed: () => _sendMessage(peer),
                 icon: const Icon(Icons.send),
-                color: Theme.of(context).primaryColor,
+                color: StoaTheme.secondaryColor,
               ),
             ],
           ),
@@ -423,6 +424,27 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   Widget _buildFileBubbleContent(Message message, bool isMe, Color color) {
     final isText = message.type == 'text';
     
+    if (isText) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SelectableText(
+            message.content,
+            style: const TextStyle(fontSize: 15, color: Colors.white),
+          ),
+          const SizedBox(height: 4),
+          Align(
+            alignment: Alignment.bottomRight,
+            child: Text(
+              _formatTime(message.timestamp),
+              style: const TextStyle(fontSize: 10, color: Colors.white54),
+            ),
+          ),
+        ],
+      );
+    }
+
+    // File content
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
@@ -430,14 +452,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (!isText) ...[
-              Icon(
-                _getFileIcon(message),
-                color: Colors.white70, 
-                size: 20
-              ),
-              const SizedBox(width: 8),
-            ],
+            Icon(
+              _getFileIcon(message),
+              color: Colors.white70, 
+              size: 20
+            ),
+            const SizedBox(width: 8),
             Flexible(
               child: Text(
                 message.content,
@@ -452,8 +472,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Text(
-              message.fileSize != null ? _formatBytes(message.fileSize!) : 
-              (isText ? _formatTime(message.timestamp) : ''),
+              message.fileSize != null ? _formatBytes(message.fileSize!) : '',
               style: const TextStyle(fontSize: 10, color: Colors.white54),
             ),
             if (message.type == 'file' && message.filePath != null)

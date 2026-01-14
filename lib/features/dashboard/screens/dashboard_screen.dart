@@ -162,12 +162,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             ],
           ),
           actions: [
-            IconButton(
-              icon: const Icon(Icons.settings_outlined),
-              onPressed: () {
-                // TODO: Open settings
-              },
-            ),
+            // Settings icon removed as requested
           ],
         ),
         

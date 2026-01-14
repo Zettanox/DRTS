@@ -67,12 +67,40 @@ class GroupMessages extends Table {
   DateTimeColumn get timestamp => dateTime()();
 }
 
-@DriftDatabase(tables: [LocalPeers, Messages, Groups, GroupMembers, GroupMessages])
+// Shared Spaces (CRDT) Tables
+class SharedFolders extends Table {
+  TextColumn get id => text()();              // UUID
+  TextColumn get key => text()();             // Share Key (for joining)
+  TextColumn get name => text()();
+  TextColumn get ownerId => text()();         // Peer ID of owner
+  TextColumn get path => text()();            // Local path
+  DateTimeColumn get createdAt => dateTime()(); 
+  DateTimeColumn get lastSync => dateTime().nullable()();
+  
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+class SharedFiles extends Table {
+  TextColumn get id => text()();              // UUID (Used for CRDT tracking)
+  TextColumn get folderId => text().references(SharedFolders, #id)();
+  TextColumn get relativePath => text()();    // Path relative to folder root
+  TextColumn get hash => text()();            // SHA-256 for loop prevention
+  TextColumn get hlc => text()();             // Hybrid Logical Clock
+  BoolColumn get isDeleted => boolean().withDefault(const Constant(false))();
+  IntColumn get size => integer()();
+  DateTimeColumn get updatedAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+@DriftDatabase(tables: [LocalPeers, Messages, Groups, GroupMembers, GroupMessages, SharedFolders, SharedFiles])
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_openConnection());
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
   
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -81,12 +109,17 @@ class AppDatabase extends _$AppDatabase {
     },
     onUpgrade: (Migrator m, int from, int to) async {
       if (from < 2) {
-        // Add group tables
-        await m.createTable(groups);
-        await m.createTable(groupMembers);
-        await m.createTable(groupMessages);
+         // Migration from v1 to v2 (Groups)
+         await m.createTable(groups);
+         await m.createTable(groupMembers);
+         await m.createTable(groupMessages);
       }
-    },
+      if (from < 3) {
+         // Migration from v2 to v3 (Shared Spaces)
+         await m.createTable(sharedFolders);
+         await m.createTable(sharedFiles);
+      }
+    }
   );
   
   // Peer Queries
@@ -248,6 +281,62 @@ class AppDatabase extends _$AppDatabase {
     }
     
     print('❌ Failed to find matching group message for file update after retries.');
+  }
+
+  // ==================== SHARED SPACES QUERIES ====================
+  
+  Stream<List<SharedFolder>> watchAllSharedFolders() {
+    return (select(sharedFolders)
+      ..orderBy([(t) => OrderingTerm(expression: t.createdAt, mode: OrderingMode.desc)]))
+      .watch();
+  }
+  
+  Future<int> insertSharedFolder(SharedFoldersCompanion folder) {
+    return into(sharedFolders).insert(folder);
+  }
+  
+  Future<SharedFolder?> getSharedFolder(String id) {
+    return (select(sharedFolders)..where((t) => t.id.equals(id))).getSingleOrNull();
+  }
+  
+  Stream<List<SharedFile>> watchSharedFiles(String folderId) {
+    return (select(sharedFiles)
+      ..where((t) => t.folderId.equals(folderId) & t.isDeleted.equals(false))
+      ..orderBy([(t) => OrderingTerm(expression: t.relativePath)]))
+      .watch();
+  }
+  
+  Future<int> insertSharedFile(SharedFilesCompanion file) {
+    return into(sharedFiles).insert(file, mode: InsertMode.insertOrReplace);
+  }
+
+  Future<void> deleteSharedFolder(String id) async {
+    await (delete(sharedFiles)..where((t) => t.folderId.equals(id))).go();
+    await (delete(sharedFolders)..where((t) => t.id.equals(id))).go();
+  }
+
+  Future<void> purgeIgnoredFiles() async {
+     // Delete files that match ignored patterns
+     // SQLite GLOB or LIKE can be used, or just fetch all and filter in Dart if complex regex needed.
+     // For simplicity and power, let's fetch all and filter in Dart, then delete by ID.
+     final all = await select(sharedFiles).get();
+     final toDelete = <String>[];
+     
+     for (final f in all) {
+       final name = p.basename(f.relativePath);
+       if (name.startsWith('.') || 
+           name.endsWith('~') || 
+           name.endsWith('.tmp') ||
+           name.endsWith('.swp') ||
+           name == 'Thumbs.db') {
+         toDelete.add(f.id);
+       }
+     }
+     
+     if (toDelete.isNotEmpty) {
+       await (delete(sharedFiles)..where((t) => t.id.isIn(toDelete))).go();
+       print('🧹 Purged ${toDelete.length} ignored files from database.');
+     }
   }
 }
 

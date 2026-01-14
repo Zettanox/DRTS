@@ -127,7 +127,7 @@ class _GroupChatScreenState extends ConsumerState<GroupChatScreen> {
           IconButton(
             onPressed: _sendMessage,
             icon: const Icon(Icons.send),
-            color: StoaTheme.primaryColor,
+            color: StoaTheme.secondaryColor,
           ),
         ],
       ),
@@ -369,7 +369,10 @@ class _MessageBubble extends StatelessWidget {
                 ),
               )
             else
-              Text(message.content),
+              SelectableText(
+                message.content, 
+                style: const TextStyle(color: Colors.white),
+              ),
               
             const SizedBox(height: 4),
             Text(

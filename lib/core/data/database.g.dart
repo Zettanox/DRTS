@@ -2209,6 +2209,973 @@ class GroupMessagesCompanion extends UpdateCompanion<GroupMessage> {
   }
 }
 
+class $SharedFoldersTable extends SharedFolders
+    with TableInfo<$SharedFoldersTable, SharedFolder> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $SharedFoldersTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _keyMeta = const VerificationMeta('key');
+  @override
+  late final GeneratedColumn<String> key = GeneratedColumn<String>(
+    'key',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _nameMeta = const VerificationMeta('name');
+  @override
+  late final GeneratedColumn<String> name = GeneratedColumn<String>(
+    'name',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _ownerIdMeta = const VerificationMeta(
+    'ownerId',
+  );
+  @override
+  late final GeneratedColumn<String> ownerId = GeneratedColumn<String>(
+    'owner_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _pathMeta = const VerificationMeta('path');
+  @override
+  late final GeneratedColumn<String> path = GeneratedColumn<String>(
+    'path',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> createdAt = GeneratedColumn<DateTime>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _lastSyncMeta = const VerificationMeta(
+    'lastSync',
+  );
+  @override
+  late final GeneratedColumn<DateTime> lastSync = GeneratedColumn<DateTime>(
+    'last_sync',
+    aliasedName,
+    true,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    key,
+    name,
+    ownerId,
+    path,
+    createdAt,
+    lastSync,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'shared_folders';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<SharedFolder> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('key')) {
+      context.handle(
+        _keyMeta,
+        key.isAcceptableOrUnknown(data['key']!, _keyMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_keyMeta);
+    }
+    if (data.containsKey('name')) {
+      context.handle(
+        _nameMeta,
+        name.isAcceptableOrUnknown(data['name']!, _nameMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_nameMeta);
+    }
+    if (data.containsKey('owner_id')) {
+      context.handle(
+        _ownerIdMeta,
+        ownerId.isAcceptableOrUnknown(data['owner_id']!, _ownerIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_ownerIdMeta);
+    }
+    if (data.containsKey('path')) {
+      context.handle(
+        _pathMeta,
+        path.isAcceptableOrUnknown(data['path']!, _pathMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_pathMeta);
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    if (data.containsKey('last_sync')) {
+      context.handle(
+        _lastSyncMeta,
+        lastSync.isAcceptableOrUnknown(data['last_sync']!, _lastSyncMeta),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  SharedFolder map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return SharedFolder(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      key: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}key'],
+      )!,
+      name: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}name'],
+      )!,
+      ownerId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}owner_id'],
+      )!,
+      path: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}path'],
+      )!,
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}created_at'],
+      )!,
+      lastSync: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}last_sync'],
+      ),
+    );
+  }
+
+  @override
+  $SharedFoldersTable createAlias(String alias) {
+    return $SharedFoldersTable(attachedDatabase, alias);
+  }
+}
+
+class SharedFolder extends DataClass implements Insertable<SharedFolder> {
+  final String id;
+  final String key;
+  final String name;
+  final String ownerId;
+  final String path;
+  final DateTime createdAt;
+  final DateTime? lastSync;
+  const SharedFolder({
+    required this.id,
+    required this.key,
+    required this.name,
+    required this.ownerId,
+    required this.path,
+    required this.createdAt,
+    this.lastSync,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['key'] = Variable<String>(key);
+    map['name'] = Variable<String>(name);
+    map['owner_id'] = Variable<String>(ownerId);
+    map['path'] = Variable<String>(path);
+    map['created_at'] = Variable<DateTime>(createdAt);
+    if (!nullToAbsent || lastSync != null) {
+      map['last_sync'] = Variable<DateTime>(lastSync);
+    }
+    return map;
+  }
+
+  SharedFoldersCompanion toCompanion(bool nullToAbsent) {
+    return SharedFoldersCompanion(
+      id: Value(id),
+      key: Value(key),
+      name: Value(name),
+      ownerId: Value(ownerId),
+      path: Value(path),
+      createdAt: Value(createdAt),
+      lastSync: lastSync == null && nullToAbsent
+          ? const Value.absent()
+          : Value(lastSync),
+    );
+  }
+
+  factory SharedFolder.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return SharedFolder(
+      id: serializer.fromJson<String>(json['id']),
+      key: serializer.fromJson<String>(json['key']),
+      name: serializer.fromJson<String>(json['name']),
+      ownerId: serializer.fromJson<String>(json['ownerId']),
+      path: serializer.fromJson<String>(json['path']),
+      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+      lastSync: serializer.fromJson<DateTime?>(json['lastSync']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'key': serializer.toJson<String>(key),
+      'name': serializer.toJson<String>(name),
+      'ownerId': serializer.toJson<String>(ownerId),
+      'path': serializer.toJson<String>(path),
+      'createdAt': serializer.toJson<DateTime>(createdAt),
+      'lastSync': serializer.toJson<DateTime?>(lastSync),
+    };
+  }
+
+  SharedFolder copyWith({
+    String? id,
+    String? key,
+    String? name,
+    String? ownerId,
+    String? path,
+    DateTime? createdAt,
+    Value<DateTime?> lastSync = const Value.absent(),
+  }) => SharedFolder(
+    id: id ?? this.id,
+    key: key ?? this.key,
+    name: name ?? this.name,
+    ownerId: ownerId ?? this.ownerId,
+    path: path ?? this.path,
+    createdAt: createdAt ?? this.createdAt,
+    lastSync: lastSync.present ? lastSync.value : this.lastSync,
+  );
+  SharedFolder copyWithCompanion(SharedFoldersCompanion data) {
+    return SharedFolder(
+      id: data.id.present ? data.id.value : this.id,
+      key: data.key.present ? data.key.value : this.key,
+      name: data.name.present ? data.name.value : this.name,
+      ownerId: data.ownerId.present ? data.ownerId.value : this.ownerId,
+      path: data.path.present ? data.path.value : this.path,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      lastSync: data.lastSync.present ? data.lastSync.value : this.lastSync,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('SharedFolder(')
+          ..write('id: $id, ')
+          ..write('key: $key, ')
+          ..write('name: $name, ')
+          ..write('ownerId: $ownerId, ')
+          ..write('path: $path, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('lastSync: $lastSync')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode =>
+      Object.hash(id, key, name, ownerId, path, createdAt, lastSync);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is SharedFolder &&
+          other.id == this.id &&
+          other.key == this.key &&
+          other.name == this.name &&
+          other.ownerId == this.ownerId &&
+          other.path == this.path &&
+          other.createdAt == this.createdAt &&
+          other.lastSync == this.lastSync);
+}
+
+class SharedFoldersCompanion extends UpdateCompanion<SharedFolder> {
+  final Value<String> id;
+  final Value<String> key;
+  final Value<String> name;
+  final Value<String> ownerId;
+  final Value<String> path;
+  final Value<DateTime> createdAt;
+  final Value<DateTime?> lastSync;
+  final Value<int> rowid;
+  const SharedFoldersCompanion({
+    this.id = const Value.absent(),
+    this.key = const Value.absent(),
+    this.name = const Value.absent(),
+    this.ownerId = const Value.absent(),
+    this.path = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.lastSync = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  SharedFoldersCompanion.insert({
+    required String id,
+    required String key,
+    required String name,
+    required String ownerId,
+    required String path,
+    required DateTime createdAt,
+    this.lastSync = const Value.absent(),
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       key = Value(key),
+       name = Value(name),
+       ownerId = Value(ownerId),
+       path = Value(path),
+       createdAt = Value(createdAt);
+  static Insertable<SharedFolder> custom({
+    Expression<String>? id,
+    Expression<String>? key,
+    Expression<String>? name,
+    Expression<String>? ownerId,
+    Expression<String>? path,
+    Expression<DateTime>? createdAt,
+    Expression<DateTime>? lastSync,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (key != null) 'key': key,
+      if (name != null) 'name': name,
+      if (ownerId != null) 'owner_id': ownerId,
+      if (path != null) 'path': path,
+      if (createdAt != null) 'created_at': createdAt,
+      if (lastSync != null) 'last_sync': lastSync,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  SharedFoldersCompanion copyWith({
+    Value<String>? id,
+    Value<String>? key,
+    Value<String>? name,
+    Value<String>? ownerId,
+    Value<String>? path,
+    Value<DateTime>? createdAt,
+    Value<DateTime?>? lastSync,
+    Value<int>? rowid,
+  }) {
+    return SharedFoldersCompanion(
+      id: id ?? this.id,
+      key: key ?? this.key,
+      name: name ?? this.name,
+      ownerId: ownerId ?? this.ownerId,
+      path: path ?? this.path,
+      createdAt: createdAt ?? this.createdAt,
+      lastSync: lastSync ?? this.lastSync,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (key.present) {
+      map['key'] = Variable<String>(key.value);
+    }
+    if (name.present) {
+      map['name'] = Variable<String>(name.value);
+    }
+    if (ownerId.present) {
+      map['owner_id'] = Variable<String>(ownerId.value);
+    }
+    if (path.present) {
+      map['path'] = Variable<String>(path.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<DateTime>(createdAt.value);
+    }
+    if (lastSync.present) {
+      map['last_sync'] = Variable<DateTime>(lastSync.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('SharedFoldersCompanion(')
+          ..write('id: $id, ')
+          ..write('key: $key, ')
+          ..write('name: $name, ')
+          ..write('ownerId: $ownerId, ')
+          ..write('path: $path, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('lastSync: $lastSync, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $SharedFilesTable extends SharedFiles
+    with TableInfo<$SharedFilesTable, SharedFile> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $SharedFilesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _folderIdMeta = const VerificationMeta(
+    'folderId',
+  );
+  @override
+  late final GeneratedColumn<String> folderId = GeneratedColumn<String>(
+    'folder_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'REFERENCES shared_folders (id)',
+    ),
+  );
+  static const VerificationMeta _relativePathMeta = const VerificationMeta(
+    'relativePath',
+  );
+  @override
+  late final GeneratedColumn<String> relativePath = GeneratedColumn<String>(
+    'relative_path',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _hashMeta = const VerificationMeta('hash');
+  @override
+  late final GeneratedColumn<String> hash = GeneratedColumn<String>(
+    'hash',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _hlcMeta = const VerificationMeta('hlc');
+  @override
+  late final GeneratedColumn<String> hlc = GeneratedColumn<String>(
+    'hlc',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _isDeletedMeta = const VerificationMeta(
+    'isDeleted',
+  );
+  @override
+  late final GeneratedColumn<bool> isDeleted = GeneratedColumn<bool>(
+    'is_deleted',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("is_deleted" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  static const VerificationMeta _sizeMeta = const VerificationMeta('size');
+  @override
+  late final GeneratedColumn<int> size = GeneratedColumn<int>(
+    'size',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> updatedAt = GeneratedColumn<DateTime>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    folderId,
+    relativePath,
+    hash,
+    hlc,
+    isDeleted,
+    size,
+    updatedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'shared_files';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<SharedFile> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('folder_id')) {
+      context.handle(
+        _folderIdMeta,
+        folderId.isAcceptableOrUnknown(data['folder_id']!, _folderIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_folderIdMeta);
+    }
+    if (data.containsKey('relative_path')) {
+      context.handle(
+        _relativePathMeta,
+        relativePath.isAcceptableOrUnknown(
+          data['relative_path']!,
+          _relativePathMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_relativePathMeta);
+    }
+    if (data.containsKey('hash')) {
+      context.handle(
+        _hashMeta,
+        hash.isAcceptableOrUnknown(data['hash']!, _hashMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_hashMeta);
+    }
+    if (data.containsKey('hlc')) {
+      context.handle(
+        _hlcMeta,
+        hlc.isAcceptableOrUnknown(data['hlc']!, _hlcMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_hlcMeta);
+    }
+    if (data.containsKey('is_deleted')) {
+      context.handle(
+        _isDeletedMeta,
+        isDeleted.isAcceptableOrUnknown(data['is_deleted']!, _isDeletedMeta),
+      );
+    }
+    if (data.containsKey('size')) {
+      context.handle(
+        _sizeMeta,
+        size.isAcceptableOrUnknown(data['size']!, _sizeMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_sizeMeta);
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  SharedFile map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return SharedFile(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      folderId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}folder_id'],
+      )!,
+      relativePath: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}relative_path'],
+      )!,
+      hash: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}hash'],
+      )!,
+      hlc: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}hlc'],
+      )!,
+      isDeleted: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}is_deleted'],
+      )!,
+      size: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}size'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}updated_at'],
+      )!,
+    );
+  }
+
+  @override
+  $SharedFilesTable createAlias(String alias) {
+    return $SharedFilesTable(attachedDatabase, alias);
+  }
+}
+
+class SharedFile extends DataClass implements Insertable<SharedFile> {
+  final String id;
+  final String folderId;
+  final String relativePath;
+  final String hash;
+  final String hlc;
+  final bool isDeleted;
+  final int size;
+  final DateTime updatedAt;
+  const SharedFile({
+    required this.id,
+    required this.folderId,
+    required this.relativePath,
+    required this.hash,
+    required this.hlc,
+    required this.isDeleted,
+    required this.size,
+    required this.updatedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['folder_id'] = Variable<String>(folderId);
+    map['relative_path'] = Variable<String>(relativePath);
+    map['hash'] = Variable<String>(hash);
+    map['hlc'] = Variable<String>(hlc);
+    map['is_deleted'] = Variable<bool>(isDeleted);
+    map['size'] = Variable<int>(size);
+    map['updated_at'] = Variable<DateTime>(updatedAt);
+    return map;
+  }
+
+  SharedFilesCompanion toCompanion(bool nullToAbsent) {
+    return SharedFilesCompanion(
+      id: Value(id),
+      folderId: Value(folderId),
+      relativePath: Value(relativePath),
+      hash: Value(hash),
+      hlc: Value(hlc),
+      isDeleted: Value(isDeleted),
+      size: Value(size),
+      updatedAt: Value(updatedAt),
+    );
+  }
+
+  factory SharedFile.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return SharedFile(
+      id: serializer.fromJson<String>(json['id']),
+      folderId: serializer.fromJson<String>(json['folderId']),
+      relativePath: serializer.fromJson<String>(json['relativePath']),
+      hash: serializer.fromJson<String>(json['hash']),
+      hlc: serializer.fromJson<String>(json['hlc']),
+      isDeleted: serializer.fromJson<bool>(json['isDeleted']),
+      size: serializer.fromJson<int>(json['size']),
+      updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'folderId': serializer.toJson<String>(folderId),
+      'relativePath': serializer.toJson<String>(relativePath),
+      'hash': serializer.toJson<String>(hash),
+      'hlc': serializer.toJson<String>(hlc),
+      'isDeleted': serializer.toJson<bool>(isDeleted),
+      'size': serializer.toJson<int>(size),
+      'updatedAt': serializer.toJson<DateTime>(updatedAt),
+    };
+  }
+
+  SharedFile copyWith({
+    String? id,
+    String? folderId,
+    String? relativePath,
+    String? hash,
+    String? hlc,
+    bool? isDeleted,
+    int? size,
+    DateTime? updatedAt,
+  }) => SharedFile(
+    id: id ?? this.id,
+    folderId: folderId ?? this.folderId,
+    relativePath: relativePath ?? this.relativePath,
+    hash: hash ?? this.hash,
+    hlc: hlc ?? this.hlc,
+    isDeleted: isDeleted ?? this.isDeleted,
+    size: size ?? this.size,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
+  SharedFile copyWithCompanion(SharedFilesCompanion data) {
+    return SharedFile(
+      id: data.id.present ? data.id.value : this.id,
+      folderId: data.folderId.present ? data.folderId.value : this.folderId,
+      relativePath: data.relativePath.present
+          ? data.relativePath.value
+          : this.relativePath,
+      hash: data.hash.present ? data.hash.value : this.hash,
+      hlc: data.hlc.present ? data.hlc.value : this.hlc,
+      isDeleted: data.isDeleted.present ? data.isDeleted.value : this.isDeleted,
+      size: data.size.present ? data.size.value : this.size,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('SharedFile(')
+          ..write('id: $id, ')
+          ..write('folderId: $folderId, ')
+          ..write('relativePath: $relativePath, ')
+          ..write('hash: $hash, ')
+          ..write('hlc: $hlc, ')
+          ..write('isDeleted: $isDeleted, ')
+          ..write('size: $size, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    folderId,
+    relativePath,
+    hash,
+    hlc,
+    isDeleted,
+    size,
+    updatedAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is SharedFile &&
+          other.id == this.id &&
+          other.folderId == this.folderId &&
+          other.relativePath == this.relativePath &&
+          other.hash == this.hash &&
+          other.hlc == this.hlc &&
+          other.isDeleted == this.isDeleted &&
+          other.size == this.size &&
+          other.updatedAt == this.updatedAt);
+}
+
+class SharedFilesCompanion extends UpdateCompanion<SharedFile> {
+  final Value<String> id;
+  final Value<String> folderId;
+  final Value<String> relativePath;
+  final Value<String> hash;
+  final Value<String> hlc;
+  final Value<bool> isDeleted;
+  final Value<int> size;
+  final Value<DateTime> updatedAt;
+  final Value<int> rowid;
+  const SharedFilesCompanion({
+    this.id = const Value.absent(),
+    this.folderId = const Value.absent(),
+    this.relativePath = const Value.absent(),
+    this.hash = const Value.absent(),
+    this.hlc = const Value.absent(),
+    this.isDeleted = const Value.absent(),
+    this.size = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  SharedFilesCompanion.insert({
+    required String id,
+    required String folderId,
+    required String relativePath,
+    required String hash,
+    required String hlc,
+    this.isDeleted = const Value.absent(),
+    required int size,
+    required DateTime updatedAt,
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       folderId = Value(folderId),
+       relativePath = Value(relativePath),
+       hash = Value(hash),
+       hlc = Value(hlc),
+       size = Value(size),
+       updatedAt = Value(updatedAt);
+  static Insertable<SharedFile> custom({
+    Expression<String>? id,
+    Expression<String>? folderId,
+    Expression<String>? relativePath,
+    Expression<String>? hash,
+    Expression<String>? hlc,
+    Expression<bool>? isDeleted,
+    Expression<int>? size,
+    Expression<DateTime>? updatedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (folderId != null) 'folder_id': folderId,
+      if (relativePath != null) 'relative_path': relativePath,
+      if (hash != null) 'hash': hash,
+      if (hlc != null) 'hlc': hlc,
+      if (isDeleted != null) 'is_deleted': isDeleted,
+      if (size != null) 'size': size,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  SharedFilesCompanion copyWith({
+    Value<String>? id,
+    Value<String>? folderId,
+    Value<String>? relativePath,
+    Value<String>? hash,
+    Value<String>? hlc,
+    Value<bool>? isDeleted,
+    Value<int>? size,
+    Value<DateTime>? updatedAt,
+    Value<int>? rowid,
+  }) {
+    return SharedFilesCompanion(
+      id: id ?? this.id,
+      folderId: folderId ?? this.folderId,
+      relativePath: relativePath ?? this.relativePath,
+      hash: hash ?? this.hash,
+      hlc: hlc ?? this.hlc,
+      isDeleted: isDeleted ?? this.isDeleted,
+      size: size ?? this.size,
+      updatedAt: updatedAt ?? this.updatedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (folderId.present) {
+      map['folder_id'] = Variable<String>(folderId.value);
+    }
+    if (relativePath.present) {
+      map['relative_path'] = Variable<String>(relativePath.value);
+    }
+    if (hash.present) {
+      map['hash'] = Variable<String>(hash.value);
+    }
+    if (hlc.present) {
+      map['hlc'] = Variable<String>(hlc.value);
+    }
+    if (isDeleted.present) {
+      map['is_deleted'] = Variable<bool>(isDeleted.value);
+    }
+    if (size.present) {
+      map['size'] = Variable<int>(size.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<DateTime>(updatedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('SharedFilesCompanion(')
+          ..write('id: $id, ')
+          ..write('folderId: $folderId, ')
+          ..write('relativePath: $relativePath, ')
+          ..write('hash: $hash, ')
+          ..write('hlc: $hlc, ')
+          ..write('isDeleted: $isDeleted, ')
+          ..write('size: $size, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -2217,6 +3184,8 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $GroupsTable groups = $GroupsTable(this);
   late final $GroupMembersTable groupMembers = $GroupMembersTable(this);
   late final $GroupMessagesTable groupMessages = $GroupMessagesTable(this);
+  late final $SharedFoldersTable sharedFolders = $SharedFoldersTable(this);
+  late final $SharedFilesTable sharedFiles = $SharedFilesTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -2227,6 +3196,8 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     groups,
     groupMembers,
     groupMessages,
+    sharedFolders,
+    sharedFiles,
   ];
 }
 
@@ -4032,6 +5003,730 @@ typedef $$GroupMessagesTableProcessedTableManager =
       GroupMessage,
       PrefetchHooks Function({bool groupId})
     >;
+typedef $$SharedFoldersTableCreateCompanionBuilder =
+    SharedFoldersCompanion Function({
+      required String id,
+      required String key,
+      required String name,
+      required String ownerId,
+      required String path,
+      required DateTime createdAt,
+      Value<DateTime?> lastSync,
+      Value<int> rowid,
+    });
+typedef $$SharedFoldersTableUpdateCompanionBuilder =
+    SharedFoldersCompanion Function({
+      Value<String> id,
+      Value<String> key,
+      Value<String> name,
+      Value<String> ownerId,
+      Value<String> path,
+      Value<DateTime> createdAt,
+      Value<DateTime?> lastSync,
+      Value<int> rowid,
+    });
+
+final class $$SharedFoldersTableReferences
+    extends BaseReferences<_$AppDatabase, $SharedFoldersTable, SharedFolder> {
+  $$SharedFoldersTableReferences(
+    super.$_db,
+    super.$_table,
+    super.$_typedResult,
+  );
+
+  static MultiTypedResultKey<$SharedFilesTable, List<SharedFile>>
+  _sharedFilesRefsTable(_$AppDatabase db) => MultiTypedResultKey.fromTable(
+    db.sharedFiles,
+    aliasName: $_aliasNameGenerator(
+      db.sharedFolders.id,
+      db.sharedFiles.folderId,
+    ),
+  );
+
+  $$SharedFilesTableProcessedTableManager get sharedFilesRefs {
+    final manager = $$SharedFilesTableTableManager(
+      $_db,
+      $_db.sharedFiles,
+    ).filter((f) => f.folderId.id.sqlEquals($_itemColumn<String>('id')!));
+
+    final cache = $_typedResult.readTableOrNull(_sharedFilesRefsTable($_db));
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: cache),
+    );
+  }
+}
+
+class $$SharedFoldersTableFilterComposer
+    extends Composer<_$AppDatabase, $SharedFoldersTable> {
+  $$SharedFoldersTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get key => $composableBuilder(
+    column: $table.key,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get ownerId => $composableBuilder(
+    column: $table.ownerId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get path => $composableBuilder(
+    column: $table.path,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get lastSync => $composableBuilder(
+    column: $table.lastSync,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  Expression<bool> sharedFilesRefs(
+    Expression<bool> Function($$SharedFilesTableFilterComposer f) f,
+  ) {
+    final $$SharedFilesTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.sharedFiles,
+      getReferencedColumn: (t) => t.folderId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$SharedFilesTableFilterComposer(
+            $db: $db,
+            $table: $db.sharedFiles,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return f(composer);
+  }
+}
+
+class $$SharedFoldersTableOrderingComposer
+    extends Composer<_$AppDatabase, $SharedFoldersTable> {
+  $$SharedFoldersTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get key => $composableBuilder(
+    column: $table.key,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get ownerId => $composableBuilder(
+    column: $table.ownerId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get path => $composableBuilder(
+    column: $table.path,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get lastSync => $composableBuilder(
+    column: $table.lastSync,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$SharedFoldersTableAnnotationComposer
+    extends Composer<_$AppDatabase, $SharedFoldersTable> {
+  $$SharedFoldersTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get key =>
+      $composableBuilder(column: $table.key, builder: (column) => column);
+
+  GeneratedColumn<String> get name =>
+      $composableBuilder(column: $table.name, builder: (column) => column);
+
+  GeneratedColumn<String> get ownerId =>
+      $composableBuilder(column: $table.ownerId, builder: (column) => column);
+
+  GeneratedColumn<String> get path =>
+      $composableBuilder(column: $table.path, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get lastSync =>
+      $composableBuilder(column: $table.lastSync, builder: (column) => column);
+
+  Expression<T> sharedFilesRefs<T extends Object>(
+    Expression<T> Function($$SharedFilesTableAnnotationComposer a) f,
+  ) {
+    final $$SharedFilesTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.sharedFiles,
+      getReferencedColumn: (t) => t.folderId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$SharedFilesTableAnnotationComposer(
+            $db: $db,
+            $table: $db.sharedFiles,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return f(composer);
+  }
+}
+
+class $$SharedFoldersTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $SharedFoldersTable,
+          SharedFolder,
+          $$SharedFoldersTableFilterComposer,
+          $$SharedFoldersTableOrderingComposer,
+          $$SharedFoldersTableAnnotationComposer,
+          $$SharedFoldersTableCreateCompanionBuilder,
+          $$SharedFoldersTableUpdateCompanionBuilder,
+          (SharedFolder, $$SharedFoldersTableReferences),
+          SharedFolder,
+          PrefetchHooks Function({bool sharedFilesRefs})
+        > {
+  $$SharedFoldersTableTableManager(_$AppDatabase db, $SharedFoldersTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$SharedFoldersTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$SharedFoldersTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$SharedFoldersTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> key = const Value.absent(),
+                Value<String> name = const Value.absent(),
+                Value<String> ownerId = const Value.absent(),
+                Value<String> path = const Value.absent(),
+                Value<DateTime> createdAt = const Value.absent(),
+                Value<DateTime?> lastSync = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => SharedFoldersCompanion(
+                id: id,
+                key: key,
+                name: name,
+                ownerId: ownerId,
+                path: path,
+                createdAt: createdAt,
+                lastSync: lastSync,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String key,
+                required String name,
+                required String ownerId,
+                required String path,
+                required DateTime createdAt,
+                Value<DateTime?> lastSync = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => SharedFoldersCompanion.insert(
+                id: id,
+                key: key,
+                name: name,
+                ownerId: ownerId,
+                path: path,
+                createdAt: createdAt,
+                lastSync: lastSync,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable(table),
+                  $$SharedFoldersTableReferences(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: ({sharedFilesRefs = false}) {
+            return PrefetchHooks(
+              db: db,
+              explicitlyWatchedTables: [if (sharedFilesRefs) db.sharedFiles],
+              addJoins: null,
+              getPrefetchedDataCallback: (items) async {
+                return [
+                  if (sharedFilesRefs)
+                    await $_getPrefetchedData<
+                      SharedFolder,
+                      $SharedFoldersTable,
+                      SharedFile
+                    >(
+                      currentTable: table,
+                      referencedTable: $$SharedFoldersTableReferences
+                          ._sharedFilesRefsTable(db),
+                      managerFromTypedResult: (p0) =>
+                          $$SharedFoldersTableReferences(
+                            db,
+                            table,
+                            p0,
+                          ).sharedFilesRefs,
+                      referencedItemsForCurrentItem: (item, referencedItems) =>
+                          referencedItems.where((e) => e.folderId == item.id),
+                      typedResults: items,
+                    ),
+                ];
+              },
+            );
+          },
+        ),
+      );
+}
+
+typedef $$SharedFoldersTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $SharedFoldersTable,
+      SharedFolder,
+      $$SharedFoldersTableFilterComposer,
+      $$SharedFoldersTableOrderingComposer,
+      $$SharedFoldersTableAnnotationComposer,
+      $$SharedFoldersTableCreateCompanionBuilder,
+      $$SharedFoldersTableUpdateCompanionBuilder,
+      (SharedFolder, $$SharedFoldersTableReferences),
+      SharedFolder,
+      PrefetchHooks Function({bool sharedFilesRefs})
+    >;
+typedef $$SharedFilesTableCreateCompanionBuilder =
+    SharedFilesCompanion Function({
+      required String id,
+      required String folderId,
+      required String relativePath,
+      required String hash,
+      required String hlc,
+      Value<bool> isDeleted,
+      required int size,
+      required DateTime updatedAt,
+      Value<int> rowid,
+    });
+typedef $$SharedFilesTableUpdateCompanionBuilder =
+    SharedFilesCompanion Function({
+      Value<String> id,
+      Value<String> folderId,
+      Value<String> relativePath,
+      Value<String> hash,
+      Value<String> hlc,
+      Value<bool> isDeleted,
+      Value<int> size,
+      Value<DateTime> updatedAt,
+      Value<int> rowid,
+    });
+
+final class $$SharedFilesTableReferences
+    extends BaseReferences<_$AppDatabase, $SharedFilesTable, SharedFile> {
+  $$SharedFilesTableReferences(super.$_db, super.$_table, super.$_typedResult);
+
+  static $SharedFoldersTable _folderIdTable(_$AppDatabase db) =>
+      db.sharedFolders.createAlias(
+        $_aliasNameGenerator(db.sharedFiles.folderId, db.sharedFolders.id),
+      );
+
+  $$SharedFoldersTableProcessedTableManager get folderId {
+    final $_column = $_itemColumn<String>('folder_id')!;
+
+    final manager = $$SharedFoldersTableTableManager(
+      $_db,
+      $_db.sharedFolders,
+    ).filter((f) => f.id.sqlEquals($_column));
+    final item = $_typedResult.readTableOrNull(_folderIdTable($_db));
+    if (item == null) return manager;
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: [item]),
+    );
+  }
+}
+
+class $$SharedFilesTableFilterComposer
+    extends Composer<_$AppDatabase, $SharedFilesTable> {
+  $$SharedFilesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get relativePath => $composableBuilder(
+    column: $table.relativePath,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get hash => $composableBuilder(
+    column: $table.hash,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get hlc => $composableBuilder(
+    column: $table.hlc,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get isDeleted => $composableBuilder(
+    column: $table.isDeleted,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get size => $composableBuilder(
+    column: $table.size,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  $$SharedFoldersTableFilterComposer get folderId {
+    final $$SharedFoldersTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.folderId,
+      referencedTable: $db.sharedFolders,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$SharedFoldersTableFilterComposer(
+            $db: $db,
+            $table: $db.sharedFolders,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$SharedFilesTableOrderingComposer
+    extends Composer<_$AppDatabase, $SharedFilesTable> {
+  $$SharedFilesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get relativePath => $composableBuilder(
+    column: $table.relativePath,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get hash => $composableBuilder(
+    column: $table.hash,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get hlc => $composableBuilder(
+    column: $table.hlc,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get isDeleted => $composableBuilder(
+    column: $table.isDeleted,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get size => $composableBuilder(
+    column: $table.size,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  $$SharedFoldersTableOrderingComposer get folderId {
+    final $$SharedFoldersTableOrderingComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.folderId,
+      referencedTable: $db.sharedFolders,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$SharedFoldersTableOrderingComposer(
+            $db: $db,
+            $table: $db.sharedFolders,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$SharedFilesTableAnnotationComposer
+    extends Composer<_$AppDatabase, $SharedFilesTable> {
+  $$SharedFilesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get relativePath => $composableBuilder(
+    column: $table.relativePath,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get hash =>
+      $composableBuilder(column: $table.hash, builder: (column) => column);
+
+  GeneratedColumn<String> get hlc =>
+      $composableBuilder(column: $table.hlc, builder: (column) => column);
+
+  GeneratedColumn<bool> get isDeleted =>
+      $composableBuilder(column: $table.isDeleted, builder: (column) => column);
+
+  GeneratedColumn<int> get size =>
+      $composableBuilder(column: $table.size, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+
+  $$SharedFoldersTableAnnotationComposer get folderId {
+    final $$SharedFoldersTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.folderId,
+      referencedTable: $db.sharedFolders,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$SharedFoldersTableAnnotationComposer(
+            $db: $db,
+            $table: $db.sharedFolders,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$SharedFilesTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $SharedFilesTable,
+          SharedFile,
+          $$SharedFilesTableFilterComposer,
+          $$SharedFilesTableOrderingComposer,
+          $$SharedFilesTableAnnotationComposer,
+          $$SharedFilesTableCreateCompanionBuilder,
+          $$SharedFilesTableUpdateCompanionBuilder,
+          (SharedFile, $$SharedFilesTableReferences),
+          SharedFile,
+          PrefetchHooks Function({bool folderId})
+        > {
+  $$SharedFilesTableTableManager(_$AppDatabase db, $SharedFilesTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$SharedFilesTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$SharedFilesTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$SharedFilesTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> folderId = const Value.absent(),
+                Value<String> relativePath = const Value.absent(),
+                Value<String> hash = const Value.absent(),
+                Value<String> hlc = const Value.absent(),
+                Value<bool> isDeleted = const Value.absent(),
+                Value<int> size = const Value.absent(),
+                Value<DateTime> updatedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => SharedFilesCompanion(
+                id: id,
+                folderId: folderId,
+                relativePath: relativePath,
+                hash: hash,
+                hlc: hlc,
+                isDeleted: isDeleted,
+                size: size,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String folderId,
+                required String relativePath,
+                required String hash,
+                required String hlc,
+                Value<bool> isDeleted = const Value.absent(),
+                required int size,
+                required DateTime updatedAt,
+                Value<int> rowid = const Value.absent(),
+              }) => SharedFilesCompanion.insert(
+                id: id,
+                folderId: folderId,
+                relativePath: relativePath,
+                hash: hash,
+                hlc: hlc,
+                isDeleted: isDeleted,
+                size: size,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable(table),
+                  $$SharedFilesTableReferences(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: ({folderId = false}) {
+            return PrefetchHooks(
+              db: db,
+              explicitlyWatchedTables: [],
+              addJoins:
+                  <
+                    T extends TableManagerState<
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic
+                    >
+                  >(state) {
+                    if (folderId) {
+                      state =
+                          state.withJoin(
+                                currentTable: table,
+                                currentColumn: table.folderId,
+                                referencedTable: $$SharedFilesTableReferences
+                                    ._folderIdTable(db),
+                                referencedColumn: $$SharedFilesTableReferences
+                                    ._folderIdTable(db)
+                                    .id,
+                              )
+                              as T;
+                    }
+
+                    return state;
+                  },
+              getPrefetchedDataCallback: (items) async {
+                return [];
+              },
+            );
+          },
+        ),
+      );
+}
+
+typedef $$SharedFilesTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $SharedFilesTable,
+      SharedFile,
+      $$SharedFilesTableFilterComposer,
+      $$SharedFilesTableOrderingComposer,
+      $$SharedFilesTableAnnotationComposer,
+      $$SharedFilesTableCreateCompanionBuilder,
+      $$SharedFilesTableUpdateCompanionBuilder,
+      (SharedFile, $$SharedFilesTableReferences),
+      SharedFile,
+      PrefetchHooks Function({bool folderId})
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -4046,4 +5741,8 @@ class $AppDatabaseManager {
       $$GroupMembersTableTableManager(_db, _db.groupMembers);
   $$GroupMessagesTableTableManager get groupMessages =>
       $$GroupMessagesTableTableManager(_db, _db.groupMessages);
+  $$SharedFoldersTableTableManager get sharedFolders =>
+      $$SharedFoldersTableTableManager(_db, _db.sharedFolders);
+  $$SharedFilesTableTableManager get sharedFiles =>
+      $$SharedFilesTableTableManager(_db, _db.sharedFiles);
 }

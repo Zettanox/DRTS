@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/services/connection_service.dart';
 import '../core/services/discovery_service.dart';
 import '../core/services/group_service.dart';
+import '../core/services/shared_folder_service.dart';
+import '../core/services/sync_service.dart';
 import '../core/data/database.dart';
 import 'router.dart';
 
@@ -51,8 +53,14 @@ class _GlobalConnectionHandlerState extends ConsumerState<GlobalConnectionHandle
     try {
       debugPrint('🌐 GlobalConnectionHandler: Initializing connection service');
       await ref.read(connectionServiceProvider).initialize();
+      
+      // Initialize Shared Spaces Services
+      debugPrint('📂 GlobalConnectionHandler: Initializing Shared Spaces');
+      await ref.read(sharedFolderServiceProvider).initialize();
+      ref.read(syncServiceProvider).initialize();
+      
     } catch (e) {
-      debugPrint('❌ GlobalConnectionHandler: Failed to initialize connection service: $e');
+      debugPrint('❌ GlobalConnectionHandler: Failed to initialize services: $e');
     }
   }
 

@@ -45,6 +45,9 @@ class ConnectionService {
   bool _isInitialized = false;
   
   /// Initialize server and keys (safe to call multiple times)
+  // Get list of currently connected peer IDs
+  List<String> get connectedPeers => _connections.keys.toList();
+
   Future<void> initialize() async {
     if (_isInitialized) return; // Prevent double initialization
     _isInitialized = true;
