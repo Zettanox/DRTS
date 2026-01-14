@@ -60,8 +60,13 @@ class SharedSpacesScreen extends ConsumerWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(folder.path, maxLines: 1, overflow: TextOverflow.ellipsis),
-                      const SizedBox(height: 4),
-                      SelectableText('ID: ${folder.id}', style: const TextStyle(fontSize: 12, fontFamily: 'monospace')),
+                      if (folder.key != 'unknown') ...[
+                        const SizedBox(height: 4),
+                        SelectableText('ID: ${folder.id}\nKey: ${folder.key}', style: const TextStyle(fontSize: 12, fontFamily: 'monospace')),
+                      ] else ...[
+                        const SizedBox(height: 4),
+                        SelectableText('ID: ${folder.id}', style: const TextStyle(fontSize: 12, fontFamily: 'monospace')),
+                      ],
                     ],
                   ),
                   trailing: PopupMenuButton<String>(
@@ -101,9 +106,9 @@ class SharedSpacesScreen extends ConsumerWidget {
                         value: 'sync',
                         child: Row(
                           children: [
-                            Icon(Icons.sync, size: 20, color: Colors.blue),
+                            Icon(Icons.refresh, size: 20, color: Colors.blue),
                             SizedBox(width: 8),
-                            Text('Force Sync'),
+                            Text('Refresh (Sync)'),
                           ],
                         ),
                       ),

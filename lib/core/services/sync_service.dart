@@ -9,6 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:stoa/core/data/database.dart';
 import 'package:stoa/core/services/connection_service.dart';
 import 'package:stoa/core/services/storage_service.dart';
+import 'package:uuid/uuid.dart';
 
 final syncServiceProvider = Provider((ref) => SyncService(ref));
 
@@ -45,14 +46,11 @@ class SyncService {
     final data = payload['data'];
     
     switch (syncType) {
-      case 'handshake':
-        _handleHandshake(message.peerId, data);
+      case 'sync_req':
+        _handleSyncReq(message.peerId, data);
         break;
-      case 'delta_req':
-        _handleDeltaReq(message.peerId, data);
-        break;
-      case 'delta_ack':
-        _handleDeltaAck(message.peerId, data);
+      case 'sync_state':
+        _handleSyncState(message.peerId, data);
         break;
       case 'content_req':
         _handleContentReq(message.peerId, data);
@@ -63,155 +61,54 @@ class SyncService {
     }
   }
   
-  // 1. Handshake: Triggered when we want to sync (e.g. on connect)
+  // Triggered on connect or manual refresh
   Future<void> initiateSync(String peerId) async {
-    // Get latest HLC for all folders provided by this peer?
-    // Or just send OUR latest HLC for all folders we know.
-    
-    // For simplicity, let's just sync ALL shared folders we have in common.
-    // In a real app, we'd filter by what the peer has access to.
-    // Here we assume if you have the Key, you have access.
-    
+    // Request state for all folders we know about
     final folders = await _db.select(_db.sharedFolders).get();
-    final Map<String, String> folderHlcs = {};
-    
     for (final f in folders) {
-      // Get max HLC for this folder
-      final latest = await _getLatestHlc(f.id);
-      folderHlcs[f.id] = latest;
+      _sendSyncMessage(peerId, 'sync_req', {'folderId': f.id});
     }
-
-    // Map of FolderID -> Name
-    final Map<String, String> folderNames = {
-      for (var f in folders) f.id: f.name
-    };
-    
-    _sendSyncMessage(peerId, 'handshake', {
-      'folders': folderHlcs,
-      'names': folderNames,
-    });
   }
   
-  Future<void> _handleHandshake(String peerId, Map<String, dynamic> data) async {
-    final remoteFolders = Map<String, String>.from(data['folders']);
-    final remoteNames = data['names'] != null ? Map<String, String>.from(data['names']) : <String, String>{};
+  Future<void> _handleSyncState(String peerId, Map<String, dynamic> data) async {
+    final folderId = data['folderId'];
+    final name = data['name'];
+    final remoteFiles = List<Map<String, dynamic>>.from(data['files']);
     
-    for (final entry in remoteFolders.entries) {
-      final folderId = entry.key;
-      final remoteHlc = entry.value;
+    final folder = await (_db.select(_db.sharedFolders)..where((t) => t.id.equals(folderId))).getSingleOrNull();
+    if (folder == null) return;
+    
+    // 1. Update Name
+    if (folder.name.startsWith('Joined Space') && name != 'Joined Space') {
+         await (_db.update(_db.sharedFolders)..where((t) => t.id.equals(folderId))).write(
+           SharedFoldersCompanion(name: Value(name)),
+         );
+         debugPrint('🏷️ Updated folder name to: $name');
+    }
+    
+    // 2. Compare Files
+    for (final rf in remoteFiles) {
+      final relativePath = rf['relativePath'];
+      final hash = rf['hash'];
       
-      // Do we have this folder?
-      final folder = await (_db.select(_db.sharedFolders)..where((t) => t.id.equals(folderId))).getSingleOrNull();
-      if (folder == null) continue; 
+      final localFile = await (_db.select(_db.sharedFiles)
+        ..where((t) => t.folderId.equals(folderId) & t.relativePath.equals(relativePath)))
+        .getSingleOrNull();
+        
+      bool needsDownload = false;
       
-      // Metadata Update: Fix "Joined Space" name if remote has real name
-      if (folder.name.startsWith('Joined Space') && remoteNames.containsKey(folderId)) {
-        final realName = remoteNames[folderId]!;
-        if (realName != 'Joined Space') {
-           await (_db.update(_db.sharedFolders)..where((t) => t.id.equals(folderId))).write(
-             SharedFoldersCompanion(name: Value(realName)),
-           );
-           debugPrint('🏷️ Updated folder name to: $realName');
-        }
+      if (localFile == null) {
+        needsDownload = true; // New file
+      } else if (localFile.hash != hash) {
+        needsDownload = true; // Changed file (hash mismatch)
       }
       
-      final localHlc = await _getLatestHlc(folderId);
-      
-      // Compare HLCs
-      if (remoteHlc.compareTo(localHlc) > 0) {
-        // Peer is ahead, request deltas from our Local HLC to Remote HLC
-        _sendSyncMessage(peerId, 'delta_req', {
+      if (needsDownload) {
+        debugPrint('📥 Requesting file content: $relativePath');
+        _sendSyncMessage(peerId, 'content_req', {
           'folderId': folderId,
-          'sinceHlc': localHlc,
+          'relativePath': relativePath,
         });
-      } else if (localHlc.compareTo(remoteHlc) > 0) {
-        // We are ahead, we could push, or wait for them to pull.
-        // Let's wait for them to pull (they will see our handshake and request).
-        // But we should also reply with our HLC if this was an initial handshake?
-        // Protocol: A sends Handshake. B replies Handshake.
-        // To avoid loops, we can check if we already checked recently?
-        // Or just Request Deltas if we are behind.
-      }
-    }
-  }
-  
-  Future<void> _handleDeltaReq(String peerId, Map<String, dynamic> data) async {
-    final folderId = data['folderId'];
-    final sinceHlc = data['sinceHlc'];
-    
-    // Get all files updated since 'sinceHlc'
-    final changes = await (_db.select(_db.sharedFiles)
-      ..where((t) => t.folderId.equals(folderId) & t.hlc.isBiggerThan(Variable(sinceHlc)))
-    ).get();
-    
-    final List<Map<String, dynamic>> deltaPayload = changes.map((f) => {
-      'id': f.id,
-      'relativePath': f.relativePath,
-      'hash': f.hash,
-      'hlc': f.hlc,
-      'isDeleted': f.isDeleted,
-      'size': f.size,
-    }).toList();
-    
-    _sendSyncMessage(peerId, 'delta_ack', {
-      'folderId': folderId,
-      'deltas': deltaPayload,
-    });
-  }
-  
-  Future<void> _handleDeltaAck(String peerId, Map<String, dynamic> data) async {
-    final folderId = data['folderId'];
-    final deltas = List<Map<String, dynamic>>.from(data['deltas']);
-    
-    for (final delta in deltas) {
-      final id = delta['id'];
-      final hlc = delta['hlc'];
-      
-      // Last-Write-Wins: Check if we have a newer version locally
-      final local = await (_db.select(_db.sharedFiles)..where((t) => t.id.equals(id))).getSingleOrNull();
-      
-      if (local != null && local.hlc.compareTo(hlc) >= 0) {
-        continue; // We have newer or same (LWW)
-      }
-      
-      // Apply Update (Metadata)
-      await _db.into(_db.sharedFiles).insertOnConflictUpdate(SharedFilesCompanion.insert(
-        id: id,
-        folderId: folderId,
-        relativePath: delta['relativePath'],
-        hash: delta['hash'],
-        hlc: hlc,
-        isDeleted: delta['isDeleted'],
-        size: delta['size'],
-        updatedAt: DateTime.now(),
-      ));
-      
-      debugPrint('🔄 Applied sync delta: ${delta['relativePath']}');
-      
-      // If not deleted, we might need the content
-      if (!delta['isDeleted']) {
-        // Check if we have file content matching hash
-        final folder = await (_db.select(_db.sharedFolders)..where((t) => t.id.equals(folderId))).getSingle();
-        final filePath = p.join(folder.path, delta['relativePath']);
-        final file = File(filePath);
-        
-        bool needsDownload = true;
-        if (await file.exists()) {
-           final bytes = await file.readAsBytes();
-           final hash = sha256.convert(bytes).toString();
-           if (hash == delta['hash']) {
-             needsDownload = false;
-           }
-        }
-        
-        if (needsDownload) {
-           debugPrint('📥 Requesting file content: ${delta['relativePath']}');
-           // Request content from peer
-           _sendSyncMessage(peerId, 'content_req', {
-             'folderId': folderId,
-             'relativePath': delta['relativePath'],
-           });
-        }
       }
     }
   }
@@ -233,6 +130,7 @@ class SyncService {
         'folderId': folderId,
         'relativePath': relativePath,
         'content': base64Encode(bytes),
+        'hash': sha256.convert(bytes).toString(),
       });
       debugPrint('📤 Sent content for $relativePath');
     }
@@ -242,6 +140,7 @@ class SyncService {
     final folderId = data['folderId'];
     final relativePath = data['relativePath'];
     final content = data['content'];
+    final hash = data['hash'];
     
     final folder = await (_db.select(_db.sharedFolders)..where((t) => t.id.equals(folderId))).getSingleOrNull();
     if (folder == null) return;
@@ -254,13 +153,28 @@ class SyncService {
         await file.parent.create(recursive: true);
       }
       
-      await file.writeAsBytes(base64Decode(content));
+      final bytes = base64Decode(content);
+      await file.writeAsBytes(bytes);
       debugPrint('📥 Wrote content for $relativePath');
       
-      // Update database hash to avoid loop?
-      // Watcher will pick this up as MODIFY/ADD.
-      // The Watcher calculates new hash. If it matches DB hash (which came from delta), it won't broadcast a new delta.
-      // So ensuring the file content matches the delta hash is key.
+      // Update DB
+      final existingFile = await (_db.select(_db.sharedFiles)
+        ..where((t) => t.folderId.equals(folderId) & t.relativePath.equals(relativePath)))
+        .getSingleOrNull();
+        
+      final id = existingFile?.id ?? const Uuid().v4();
+      
+      await _db.into(_db.sharedFiles).insertOnConflictUpdate(SharedFilesCompanion.insert(
+        id: id,
+        folderId: folderId,
+        relativePath: relativePath,
+        hash: hash ?? sha256.convert(bytes).toString(),
+        hlc: DateTime.now().toIso8601String(),
+        isDeleted: const Value(false),
+        size: bytes.length,
+        updatedAt: DateTime.now(),
+      ));
+      
     } catch (e) {
       debugPrint('❌ Failed to write file content: $e');
     }
@@ -275,21 +189,34 @@ class SyncService {
   }
   
   Future<void> broadcastFolderUpdate(String folderId) async {
-    // Notify all connected peers about the update
-    // In a real app, only notify peers who are in the space
+    // Notify all connected peers about the update by pushing our state
     final peers = _connectionService.connectedPeers;
     for (final peerId in peers) {
-      await initiateSync(peerId);
+       await _sendFullState(peerId, folderId);
     }
   }
 
-  Future<String> _getLatestHlc(String folderId) async {
-    final query = _db.select(_db.sharedFiles)
-      ..where((t) => t.folderId.equals(folderId))
-      ..orderBy([(t) => OrderingTerm(expression: t.hlc, mode: OrderingMode.desc)])
-      ..limit(1);
-      
-    final latest = await query.getSingleOrNull();
-    return latest?.hlc ?? ''; // Empty string < any timestamp
+  Future<void> _handleSyncReq(String peerId, Map<String, dynamic> data) async {
+    final folderId = data['folderId'];
+    await _sendFullState(peerId, folderId);
+  }
+  
+  Future<void> _sendFullState(String peerId, String folderId) async {
+    final folder = await (_db.select(_db.sharedFolders)..where((t) => t.id.equals(folderId))).getSingleOrNull();
+    if (folder == null) return;
+    
+    final files = await (_db.select(_db.sharedFiles)..where((t) => t.folderId.equals(folderId))).get();
+    
+    final fileList = files.where((f) => !f.isDeleted).map((f) => {
+      'relativePath': f.relativePath,
+      'hash': f.hash,
+      'size': f.size,
+    }).toList();
+    
+    _sendSyncMessage(peerId, 'sync_state', {
+      'folderId': folderId,
+      'name': folder.name,
+      'files': fileList,
+    });
   }
 }
