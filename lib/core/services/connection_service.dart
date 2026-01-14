@@ -437,8 +437,8 @@ class ConnectionService {
       final decryptedString = utf8.decode(decryptedBytes);
       final payload = jsonDecode(decryptedString);
       
-      // Persist text messages
-      if (payload['type'] == 'text') {
+      // Persist text messages (but not group messages - those are handled by GroupService)
+      if (payload['type'] == 'text' && payload['groupType'] == null) {
         final db = _ref.read(databaseProvider);
         await db.insertMessage(MessagesCompanion.insert(
           peerId: senderId,

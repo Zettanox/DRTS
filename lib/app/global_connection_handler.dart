@@ -3,6 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/services/connection_service.dart';
+import '../core/services/discovery_service.dart';
+import '../core/services/group_service.dart';
+import '../core/data/database.dart';
 import 'router.dart';
 
 /// Global handler for connection events that works regardless of which screen is active.
@@ -18,7 +21,9 @@ class GlobalConnectionHandler extends ConsumerStatefulWidget {
 }
 
 class _GlobalConnectionHandlerState extends ConsumerState<GlobalConnectionHandler> {
-  StreamSubscription<ConnectionMessage>? _subscription;
+  StreamSubscription<ConnectionMessage>? _connectionSubscription;
+  StreamSubscription<GroupInvitation>? _groupInviteSubscription;
+  StreamSubscription? _peerResolvedSubscription;
   bool _isDialogShowing = false;
   bool _isInitialized = false;
 
@@ -37,6 +42,8 @@ class _GlobalConnectionHandlerState extends ConsumerState<GlobalConnectionHandle
       debugPrint('🌐 GlobalConnectionHandler: Setting up in didChangeDependencies');
       _initializeConnectionService();
       _listenToConnections();
+      _listenToGroupInvitations();
+      _listenToPeerResolution();
     }
   }
 
@@ -51,9 +58,9 @@ class _GlobalConnectionHandlerState extends ConsumerState<GlobalConnectionHandle
 
   void _listenToConnections() {
     debugPrint('🌐 GlobalConnectionHandler: Subscribing to message stream');
-    _subscription?.cancel(); // Cancel any existing subscription
+    _connectionSubscription?.cancel(); // Cancel any existing subscription
     
-    _subscription = ref.read(connectionServiceProvider).messageStream.listen((message) {
+    _connectionSubscription = ref.read(connectionServiceProvider).messageStream.listen((message) async {
       debugPrint('🌐 GlobalConnectionHandler: Received message type: ${message.type}');
       
       if (!mounted) {
@@ -62,11 +69,55 @@ class _GlobalConnectionHandlerState extends ConsumerState<GlobalConnectionHandle
       }
 
       if (message.type == ConnectionMessageType.connectionRequest) {
-        debugPrint('🌐 GlobalConnectionHandler: Showing connection request dialog');
-        _showConnectionRequestDialog(message);
+        // Check if this peer is in a shared group (auto-connect)
+        final isGroupMember = await ref.read(databaseProvider).isPeerInAnyGroup(message.peerId);
+        
+        if (isGroupMember) {
+          debugPrint('🌐 Auto-accepting connection from group member: ${message.peerId}');
+          ref.read(connectionServiceProvider).acceptConnection(message.peerId);
+        } else {
+          debugPrint('🌐 GlobalConnectionHandler: Showing connection request dialog');
+          _showConnectionRequestDialog(message);
+        }
       }
     }, onError: (e) {
       debugPrint('🌐 GlobalConnectionHandler: Stream error: $e');
+    });
+  }
+
+  void _listenToGroupInvitations() {
+    debugPrint('🌐 GlobalConnectionHandler: Subscribing to group invitations');
+    _groupInviteSubscription?.cancel();
+    
+    _groupInviteSubscription = ref.read(groupServiceProvider).invitationStream.listen((invitation) {
+      if (!mounted) return;
+      _showGroupInvitationDialog(invitation);
+    });
+  }
+
+  void _listenToPeerResolution() {
+    debugPrint('🌐 GlobalConnectionHandler: Subscribing to peer resolution for auto-connect');
+    _peerResolvedSubscription?.cancel();
+    
+    _peerResolvedSubscription = ref.read(discoveryServiceProvider).peerResolvedStream.listen((peer) async {
+      if (!mounted) return;
+      
+      // Check if this peer is a group member
+      final isGroupMember = await ref.read(databaseProvider).isPeerInAnyGroup(peer.id);
+      
+      if (isGroupMember && peer.host != 'unknown') {
+        final connectionService = ref.read(connectionServiceProvider);
+        
+        // Only initiate if not already connected
+        if (!connectionService.isConnectedTo(peer.id)) {
+          debugPrint('🔄 Auto-initiating connection to group member: ${peer.username}');
+          try {
+            await connectionService.connectTo(peer);
+          } catch (e) {
+            debugPrint('⚠️ Auto-connect failed: $e');
+          }
+        }
+      }
     });
   }
 
@@ -122,10 +173,52 @@ class _GlobalConnectionHandlerState extends ConsumerState<GlobalConnectionHandle
     });
   }
 
+  void _showGroupInvitationDialog(GroupInvitation invitation) {
+    if (_isDialogShowing) return;
+    
+    final navigatorKey = ref.read(navigatorKeyProvider);
+    final navigatorContext = navigatorKey.currentContext;
+    
+    if (navigatorContext == null) return;
+    
+    _isDialogShowing = true;
+    
+    showDialog(
+      context: navigatorContext,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Group Invitation'),
+        content: Text('${invitation.ownerName} invites you to join "${invitation.groupName}"'),
+        actions: [
+          TextButton(
+            onPressed: () {
+              ref.read(groupServiceProvider).rejectInvitation(invitation.groupId);
+              Navigator.pop(ctx);
+              _isDialogShowing = false;
+            },
+            child: const Text('Decline', style: TextStyle(color: Colors.red)),
+          ),
+          FilledButton(
+            onPressed: () {
+              ref.read(groupServiceProvider).acceptInvitation(invitation.groupId);
+              Navigator.pop(ctx);
+              _isDialogShowing = false;
+            },
+            child: const Text('Join'),
+          ),
+        ],
+      ),
+    ).then((_) {
+      _isDialogShowing = false;
+    });
+  }
+
   @override
   void dispose() {
     debugPrint('🌐 GlobalConnectionHandler: dispose');
-    _subscription?.cancel();
+    _connectionSubscription?.cancel();
+    _groupInviteSubscription?.cancel();
+    _peerResolvedSubscription?.cancel();
     super.dispose();
   }
 
@@ -134,3 +227,4 @@ class _GlobalConnectionHandlerState extends ConsumerState<GlobalConnectionHandle
     return widget.child;
   }
 }
+

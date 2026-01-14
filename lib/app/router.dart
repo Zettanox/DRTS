@@ -6,6 +6,9 @@ import '../features/onboarding/screens/welcome_screen.dart';
 import '../features/dashboard/screens/dashboard_screen.dart';
 import '../features/peers/screens/peers_screen.dart';
 import '../features/chat/screens/chat_screen.dart';
+import '../features/groups/screens/groups_screen.dart';
+import '../features/groups/screens/create_group_screen.dart';
+import '../features/groups/screens/group_chat_screen.dart';
 import '../core/services/storage_service.dart';
 
 // Global navigator key for showing dialogs from anywhere
@@ -82,11 +85,25 @@ final routerProvider = Provider<GoRouter>((ref) {
           peerId: state.pathParameters['peerId']!,
         ),
       ),
-      // More routes will be added in later phases
-      // GoRoute(path: '/groups', ...),
-      // GoRoute(path: '/chat/:groupId', ...),
-      // GoRoute(path: '/files', ...),
-      // GoRoute(path: '/editor', ...),
+      // Groups routes
+      GoRoute(
+        path: '/groups',
+        name: 'groups',
+        builder: (context, state) => const GroupsScreen(),
+      ),
+      GoRoute(
+        path: '/groups/create',
+        name: 'createGroup',
+        builder: (context, state) => const CreateGroupScreen(),
+      ),
+      GoRoute(
+        path: '/groups/:groupId',
+        name: 'groupChat',
+        builder: (context, state) => GroupChatScreen(
+          groupId: state.pathParameters['groupId']!,
+        ),
+      ),
     ],
   );
 });
+

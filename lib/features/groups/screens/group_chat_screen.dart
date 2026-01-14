@@ -1,0 +1,301 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+
+import '../../../core/services/group_service.dart';
+import '../../../core/services/discovery_service.dart';
+import '../../../core/data/database.dart';
+import '../../../app/theme.dart';
+
+class GroupChatScreen extends ConsumerStatefulWidget {
+  final String groupId;
+  
+  const GroupChatScreen({super.key, required this.groupId});
+
+  @override
+  ConsumerState<GroupChatScreen> createState() => _GroupChatScreenState();
+}
+
+class _GroupChatScreenState extends ConsumerState<GroupChatScreen> {
+  final _messageController = TextEditingController();
+  
+  @override
+  void dispose() {
+    _messageController.dispose();
+    super.dispose();
+  }
+  
+  @override
+  Widget build(BuildContext context) {
+    final groupService = ref.watch(groupServiceProvider);
+    final myPeerId = ref.read(discoveryServiceProvider).myPeerId;
+    
+    return FutureBuilder<Group?>(
+      future: ref.read(databaseProvider).getGroup(widget.groupId),
+      builder: (context, groupSnapshot) {
+        final group = groupSnapshot.data;
+        
+        return Scaffold(
+          appBar: AppBar(
+            title: Text(group?.name ?? 'Group'),
+            actions: [
+              IconButton(
+                icon: const Icon(Icons.info_outline),
+                onPressed: () => _showGroupInfo(context, group),
+              ),
+            ],
+          ),
+          body: Column(
+            children: [
+              // Messages
+              Expanded(
+                child: StreamBuilder<List<GroupMessage>>(
+                  stream: groupService.watchGroupMessages(widget.groupId),
+                  builder: (context, snapshot) {
+                    if (!snapshot.hasData) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+                    
+                    final messages = snapshot.data!;
+                    
+                    if (messages.isEmpty) {
+                      return Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Icon(Icons.chat_bubble_outline, size: 64, color: Colors.white24),
+                            const SizedBox(height: 16),
+                            Text(
+                              'No messages yet',
+                              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                                color: Colors.white54,
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }
+                    
+                    return ListView.builder(
+                      reverse: true,
+                      padding: const EdgeInsets.all(16),
+                      itemCount: messages.length,
+                      itemBuilder: (context, index) {
+                        final message = messages[index];
+                        final isMe = message.senderId == myPeerId;
+                        return _MessageBubble(message: message, isMe: isMe);
+                      },
+                    );
+                  },
+                ),
+              ),
+              
+              // Input area
+              _buildInputArea(),
+            ],
+          ),
+        );
+      },
+    );
+  }
+  
+  Widget _buildInputArea() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      color: Colors.black12,
+      child: Row(
+        children: [
+          Expanded(
+            child: TextField(
+              controller: _messageController,
+              decoration: const InputDecoration(
+                hintText: 'Type a message...',
+                border: InputBorder.none,
+                hintStyle: TextStyle(color: Colors.grey),
+              ),
+              onSubmitted: (_) => _sendMessage(),
+            ),
+          ),
+          IconButton(
+            onPressed: _sendMessage,
+            icon: const Icon(Icons.send),
+            color: StoaTheme.primaryColor,
+          ),
+        ],
+      ),
+    );
+  }
+  
+  void _sendMessage() async {
+    final text = _messageController.text.trim();
+    if (text.isEmpty) return;
+    
+    _messageController.clear();
+    
+    await ref.read(groupServiceProvider).sendGroupMessage(widget.groupId, text);
+  }
+  
+  void _showGroupInfo(BuildContext context, Group? group) {
+    if (group == null) return;
+    
+    final groupService = ref.read(groupServiceProvider);
+    final myPeerId = ref.read(discoveryServiceProvider).myPeerId;
+    final isOwner = group.ownerId == myPeerId;
+    
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              group.name,
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const SizedBox(height: 16),
+            
+            // Members list
+            const Text('Members', style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            StreamBuilder<List<GroupMember>>(
+              stream: groupService.watchGroupMembers(widget.groupId),
+              builder: (context, snapshot) {
+                final members = snapshot.data ?? [];
+                final accepted = members.where((m) => m.status == 'accepted').toList();
+                
+                return Column(
+                  children: accepted.map((m) => ListTile(
+                    dense: true,
+                    leading: const CircleAvatar(child: Icon(Icons.person)),
+                    title: Text(m.username),
+                    trailing: m.peerId == group.ownerId 
+                        ? const Chip(label: Text('Owner'))
+                        : null,
+                  )).toList(),
+                );
+              },
+            ),
+            
+            const Divider(),
+            
+            // Actions
+            if (isOwner)
+              ListTile(
+                leading: const Icon(Icons.delete, color: Colors.red),
+                title: const Text('Delete Group', style: TextStyle(color: Colors.red)),
+                onTap: () => _deleteGroup(context, group),
+              )
+            else
+              ListTile(
+                leading: const Icon(Icons.exit_to_app, color: Colors.orange),
+                title: const Text('Leave Group', style: TextStyle(color: Colors.orange)),
+                onTap: () => _leaveGroup(context, group),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+  
+  void _deleteGroup(BuildContext context, Group group) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete Group?'),
+        content: const Text('This will delete the group for all members.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+    
+    if (confirmed == true) {
+      await ref.read(groupServiceProvider).deleteGroup(group.id);
+      if (mounted) {
+        Navigator.pop(context); // Close bottom sheet
+        context.pop(); // Go back to groups list
+      }
+    }
+  }
+  
+  void _leaveGroup(BuildContext context, Group group) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Leave Group?'),
+        content: const Text('You will no longer receive messages from this group.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Leave', style: TextStyle(color: Colors.orange)),
+          ),
+        ],
+      ),
+    );
+    
+    if (confirmed == true) {
+      await ref.read(groupServiceProvider).leaveGroup(group.id);
+      if (mounted) {
+        Navigator.pop(context); // Close bottom sheet
+        context.pop(); // Go back to groups list
+      }
+    }
+  }
+}
+
+class _MessageBubble extends StatelessWidget {
+  final GroupMessage message;
+  final bool isMe;
+  
+  const _MessageBubble({required this.message, required this.isMe});
+  
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 4),
+        padding: const EdgeInsets.all(12),
+        constraints: const BoxConstraints(maxWidth: 280),
+        decoration: BoxDecoration(
+          color: isMe 
+              ? StoaTheme.primaryColor.withOpacity(0.8) 
+              : Colors.grey[800]!.withOpacity(0.8),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (!isMe)
+              Text(
+                message.senderName,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  color: StoaTheme.secondaryColor,
+                ),
+              ),
+            Text(message.content),
+            const SizedBox(height: 4),
+            Text(
+              _formatTime(message.timestamp),
+              style: const TextStyle(fontSize: 10, color: Colors.white54),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+  
+  String _formatTime(DateTime dt) {
+    return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+  }
+}

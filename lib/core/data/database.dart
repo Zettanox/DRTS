@@ -32,12 +32,62 @@ class Messages extends Table {
   DateTimeColumn get timestamp => dateTime()();
 }
 
-@DriftDatabase(tables: [LocalPeers, Messages])
+// Group Tables
+class Groups extends Table {
+  TextColumn get id => text()();              // UUID
+  TextColumn get name => text()();
+  TextColumn get ownerId => text()();         // Creator/owner peer ID
+  BoolColumn get showHistoryToNew => boolean().withDefault(const Constant(false))();
+  DateTimeColumn get createdAt => dateTime()();
+  
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+class GroupMembers extends Table {
+  TextColumn get groupId => text().references(Groups, #id)();
+  TextColumn get peerId => text()();          // Peer ID (can be self or remote)
+  TextColumn get username => text()();        // Cached username
+  TextColumn get status => text()();          // 'pending', 'accepted', 'rejected'
+  DateTimeColumn get joinedAt => dateTime()();
+  
+  @override
+  Set<Column> get primaryKey => {groupId, peerId};
+}
+
+class GroupMessages extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  TextColumn get groupId => text().references(Groups, #id)();
+  TextColumn get senderId => text()();        // Who sent it
+  TextColumn get senderName => text()();      // Cached sender name
+  TextColumn get content => text()();
+  TextColumn get type => text()();            // 'text', 'file', 'system'
+  TextColumn get filePath => text().nullable()();
+  IntColumn get fileSize => integer().nullable()();
+  DateTimeColumn get timestamp => dateTime()();
+}
+
+@DriftDatabase(tables: [LocalPeers, Messages, Groups, GroupMembers, GroupMessages])
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_openConnection());
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
+  
+  @override
+  MigrationStrategy get migration => MigrationStrategy(
+    onCreate: (Migrator m) async {
+      await m.createAll();
+    },
+    onUpgrade: (Migrator m, int from, int to) async {
+      if (from < 2) {
+        // Add group tables
+        await m.createTable(groups);
+        await m.createTable(groupMembers);
+        await m.createTable(groupMessages);
+      }
+    },
+  );
   
   // Peer Queries
   Future<List<LocalPeer>> getAllPeers() => select(localPeers).get();
@@ -75,6 +125,84 @@ class AppDatabase extends _$AppDatabase {
   // Delete a message by ID
   Future<int> deleteMessage(int id) {
     return (delete(messages)..where((t) => t.id.equals(id))).go();
+  }
+  
+  // ==================== GROUP QUERIES ====================
+  
+  // Create a new group
+  Future<int> insertGroup(GroupsCompanion group) {
+    return into(groups).insert(group);
+  }
+  
+  // Get all groups the user is a member of
+  Future<List<Group>> getAllGroups() => select(groups).get();
+  
+  Stream<List<Group>> watchAllGroups() => select(groups).watch();
+  
+  // Get a specific group
+  Future<Group?> getGroup(String groupId) {
+    return (select(groups)..where((t) => t.id.equals(groupId))).getSingleOrNull();
+  }
+  
+  // Delete a group and all its data
+  Future<void> deleteGroup(String groupId) async {
+    await (delete(groupMessages)..where((t) => t.groupId.equals(groupId))).go();
+    await (delete(groupMembers)..where((t) => t.groupId.equals(groupId))).go();
+    await (delete(groups)..where((t) => t.id.equals(groupId))).go();
+  }
+  
+  // ==================== GROUP MEMBER QUERIES ====================
+  
+  Future<int> insertGroupMember(GroupMembersCompanion member) {
+    return into(groupMembers).insert(member, mode: InsertMode.insertOrReplace);
+  }
+  
+  Future<List<GroupMember>> getGroupMembers(String groupId) {
+    return (select(groupMembers)..where((t) => t.groupId.equals(groupId))).get();
+  }
+  
+  Stream<List<GroupMember>> watchGroupMembers(String groupId) {
+    return (select(groupMembers)..where((t) => t.groupId.equals(groupId))).watch();
+  }
+  
+  Future<void> removeGroupMember(String groupId, String peerId) {
+    return (delete(groupMembers)
+      ..where((t) => t.groupId.equals(groupId) & t.peerId.equals(peerId)))
+      .go();
+  }
+  
+  // Get all peer IDs that share a group with the user (for auto-connect)
+  Future<Set<String>> getAllGroupMemberIds() async {
+    final members = await select(groupMembers).get();
+    return members.map((m) => m.peerId).toSet();
+  }
+  
+  // Check if a peer is in any group with accepted status
+  Future<bool> isPeerInAnyGroup(String peerId) async {
+    final member = await (select(groupMembers)
+      ..where((t) => t.peerId.equals(peerId) & t.status.equals('accepted')))
+      .getSingleOrNull();
+    return member != null;
+  }
+  
+  // ==================== GROUP MESSAGE QUERIES ====================
+  
+  Future<int> insertGroupMessage(GroupMessagesCompanion message) {
+    return into(groupMessages).insert(message);
+  }
+  
+  Future<List<GroupMessage>> getGroupMessages(String groupId) {
+    return (select(groupMessages)
+      ..where((t) => t.groupId.equals(groupId))
+      ..orderBy([(t) => OrderingTerm(expression: t.timestamp, mode: OrderingMode.desc)]))
+      .get();
+  }
+  
+  Stream<List<GroupMessage>> watchGroupMessages(String groupId) {
+    return (select(groupMessages)
+      ..where((t) => t.groupId.equals(groupId))
+      ..orderBy([(t) => OrderingTerm(expression: t.timestamp, mode: OrderingMode.desc)]))
+      .watch();
   }
 }
 

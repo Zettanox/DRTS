@@ -17,6 +17,7 @@ class DiscoveryService {
   StreamSubscription? _discoverySubscription;
   
   final _peersController = StreamController<List<Peer>>.broadcast();
+  final _peerResolvedController = StreamController<Peer>.broadcast();
   final Map<String, Peer> _peers = {};
   
   bool _isBroadcasting = false;
@@ -26,6 +27,10 @@ class DiscoveryService {
   /// Stream of discovered peers
   Stream<List<Peer>> get peersStream => _peersController.stream;
   
+  /// Stream that emits when a peer is resolved (has valid IP)
+  /// Used for auto-connect to group members
+  Stream<Peer> get peerResolvedStream => _peerResolvedController.stream;
+  
   /// Current list of discovered peers
   List<Peer> get peers => _peers.values.toList();
   
@@ -34,6 +39,12 @@ class DiscoveryService {
   
   /// Whether we're currently discovering peers
   bool get isDiscovering => _isDiscovering;
+  
+  /// Get the current user's peer ID (for group identification)
+  String get myPeerId => _currentUser?.id ?? '';
+  
+  /// Get the current user's username
+  String get myUsername => _currentUser?.username ?? 'Unknown';
   
   /// Start broadcasting our presence on the network
   Future<void> startBroadcast(User user) async {
@@ -324,6 +335,11 @@ class DiscoveryService {
     _notifyPeersChanged();
     
     print('✅ Resolved peer: ${peer.username} at $host:${service.port}');
+    
+    // Emit resolved peer event for auto-connect handling
+    if (!isConnected && connectionStatus != PeerConnectionStatus.connecting) {
+      _peerResolvedController.add(peer);
+    }
   }
   
   /// Handle when a service is lost

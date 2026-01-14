@@ -10,6 +10,7 @@ import 'package:stoa/core/services/connection_service.dart';
 import 'package:stoa/app/theme.dart';
 import 'package:stoa/features/peers/screens/peers_screen.dart';
 import 'package:stoa/features/files/screens/files_screen.dart';
+import 'package:stoa/features/groups/screens/groups_screen.dart';
 import 'package:stoa/features/onboarding/widgets/edit_profile_dialog.dart';
 
 class DashboardScreen extends ConsumerStatefulWidget {
@@ -92,7 +93,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       case 1:
         return const PeersScreen();
       case 2:
-        return _buildPlaceholder('Groups', Icons.forum_outlined, 'Coming in Phase 5');
+        return const GroupsScreen();
       case 3:
         return const FilesScreen();
       default:
@@ -204,9 +205,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                       label: 'New Group',
                       color: StoaTheme.secondaryColor,
                       onTap: () {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Groups coming in Phase 5!')),
-                        );
+                        context.push('/groups/create');
                       },
                     ),
                   ),
