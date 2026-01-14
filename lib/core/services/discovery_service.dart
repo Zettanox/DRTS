@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/peer.dart';
 import '../models/user.dart';
 import '../utils/constants.dart';
+import 'connection_service.dart';
 import 'storage_service.dart';
 
 /// Service for discovering peers on the local network using mDNS
@@ -468,6 +469,7 @@ class DiscoveryState {
 class DiscoveryStateNotifier extends StateNotifier<DiscoveryState> {
   final Ref _ref;
   StreamSubscription<List<Peer>>? _peersSubscription;
+  StreamSubscription? _connectionSubscription;
   
   DiscoveryStateNotifier(this._ref) : super(const DiscoveryState());
   
@@ -489,8 +491,18 @@ class DiscoveryStateNotifier extends StateNotifier<DiscoveryState> {
       // Subscribe to peer updates
       _peersSubscription?.cancel();
       _peersSubscription = discovery.peersStream.listen((peers) {
-        print('📋 Peers updated: ${peers.length} peers');
         state = state.copyWith(peers: peers);
+      });
+      
+      // Subscribe to connection updates to sync status
+      final connectionService = _ref.read(connectionServiceProvider);
+      _connectionSubscription?.cancel();
+      _connectionSubscription = connectionService.messageStream.listen((message) {
+        if (message.type == ConnectionMessageType.connected) {
+          discovery.updatePeerStatus(message.peerId, true);
+        } else if (message.type == ConnectionMessageType.disconnected) {
+          discovery.updatePeerStatus(message.peerId, false);
+        }
       });
       
       // Start broadcasting and discovery
@@ -521,6 +533,9 @@ class DiscoveryStateNotifier extends StateNotifier<DiscoveryState> {
     _peersSubscription?.cancel();
     _peersSubscription = null;
     
+    _connectionSubscription?.cancel();
+    _connectionSubscription = null;
+    
     state = state.copyWith(
       isBroadcasting: false,
       isDiscovering: false,
@@ -530,6 +545,7 @@ class DiscoveryStateNotifier extends StateNotifier<DiscoveryState> {
   @override
   void dispose() {
     _peersSubscription?.cancel();
+    _connectionSubscription?.cancel();
     super.dispose();
   }
 }
