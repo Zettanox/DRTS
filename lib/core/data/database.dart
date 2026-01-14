@@ -198,6 +198,17 @@ class AppDatabase extends _$AppDatabase {
       .get();
   }
   
+  Future<int> deleteGroupMessage(int id) {
+    return (delete(groupMessages)..where((t) => t.id.equals(id))).go();
+  }
+  
+  Stream<List<GroupMessage>> watchAllGroupFiles() {
+    return (select(groupMessages)
+      ..where((t) => t.type.isIn(['file', 'folder']))
+      ..orderBy([(t) => OrderingTerm(expression: t.timestamp, mode: OrderingMode.desc)]))
+      .watch();
+  }
+  
   Stream<List<GroupMessage>> watchGroupMessages(String groupId) {
     return (select(groupMessages)
       ..where((t) => t.groupId.equals(groupId))

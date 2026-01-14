@@ -448,11 +448,28 @@ class FileTransferService {
     try {
       // Use Downloads folder on Android, Documents on other platforms
       Directory baseDir;
-      if (Platform.isAndroid) {
-        baseDir = Directory('/storage/emulated/0/Download/Stoa');
+      
+      if (transfer.groupId != null) {
+        // Group Transfer: Save to Stoa/GroupName
+        final db = _ref.read(databaseProvider);
+        final group = await db.getGroup(transfer.groupId!);
+        final groupName = group?.name ?? 'Unknown Group';
+        final sanitized = groupName.replaceAll(RegExp(r'[<>:"/\\|?*]'), '_');
+        
+        if (Platform.isAndroid) {
+          baseDir = Directory('/storage/emulated/0/Download/Stoa/$sanitized');
+        } else {
+          final downloadDir = await getDownloadsDirectory();
+          baseDir = Directory('${downloadDir?.path}/Stoa/$sanitized');
+        }
       } else {
-        final docDir = await getApplicationDocumentsDirectory();
-        baseDir = Directory('${docDir.path}/Stoa');
+        // Direct Transfer: Save to Stoa/
+        if (Platform.isAndroid) {
+          baseDir = Directory('/storage/emulated/0/Download/Stoa');
+        } else {
+          final downloadDir = await getDownloadsDirectory();
+          baseDir = Directory('${downloadDir?.path}/Stoa');
+        }
       }
       
       // Ensure Stoa folder exists
@@ -466,47 +483,41 @@ class FileTransferService {
       String displayPath;
       
       if (isZip) {
-        // Auto-extract ZIP to folder
-        final folderName = transfer.filename.substring(0, transfer.filename.length - 4);
-        var extractDir = Directory('${baseDir.path}/$folderName');
-        
-        // Ensure unique folder name
-        int counter = 1;
-        while (await extractDir.exists()) {
-          extractDir = Directory('${baseDir.path}/${folderName}_$counter');
-          counter++;
-        }
-        savePath = extractDir.path;
-        
-        // Create extraction directory
-        await extractDir.create(recursive: true);
-        
-        // Extract ZIP contents
-        try {
-          final archive = ZipDecoder().decodeBytes(buffer);
-          for (final file in archive) {
-            final filename = file.name;
-            if (file.isFile) {
-              final outputFile = File('${extractDir.path}/$filename');
-              await outputFile.create(recursive: true);
-              await outputFile.writeAsBytes(file.content as List<int>);
-            } else {
-              await Directory('${extractDir.path}/$filename').create(recursive: true);
-            }
-          }
-          print('📦 Extracted ${archive.length} files to: ${extractDir.path}');
-        } catch (e) {
-          print('⚠️ Failed to extract ZIP, saving as-is: $e');
-          // Fallback: save as ZIP file
-          savePath = '${baseDir.path}/${transfer.filename}';
-          final file = File(savePath);
-          await file.writeAsBytes(buffer);
-        }
-        
-        displayPath = savePath;
+         try {
+           final archive = ZipDecoder().decodeBytes(buffer);
+           
+           // Extract to folder
+           for (final file in archive) {
+             final filename = file.name;
+             if (file.isFile) {
+               final data = file.content as List<int>;
+               File('${baseDir.path}/$filename')
+                 ..createSync(recursive: true)
+                 ..writeAsBytesSync(data);
+             } else {
+               Directory('${baseDir.path}/$filename').createSync(recursive: true);
+             }
+           }
+           print('📦 Extracted ${archive.length} files to: ${baseDir.path}');
+           
+           if (archive.isNotEmpty && archive.first.name.endsWith('/')) {
+              displayPath = '${baseDir.path}/${archive.first.name}';
+           } else {
+              displayPath = baseDir.path;
+           }
+         } catch (e) {
+           print('⚠️ Failed to extract ZIP, saving as-is: $e');
+           // Fallback: save as ZIP file
+           savePath = '${baseDir.path}/${transfer.filename}';
+           final file = File(savePath);
+           await file.writeAsBytes(buffer);
+           displayPath = savePath;
+         }
       } else {
         // Regular file - save normally
         savePath = '${baseDir.path}/${transfer.filename}';
+        
+        // Ensure uniqueness
         int counter = 1;
         while (await File(savePath).exists()) {
           final name = transfer.filename.split('.').first;

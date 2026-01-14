@@ -1,6 +1,9 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:open_filex/open_filex.dart';
 import '../models/user.dart';
 
 /// Storage service for persisting user data locally
@@ -56,6 +59,38 @@ class StorageService {
   Future<void> clearAll() async {
     if (_prefs == null) await init();
     await _preferences.clear();
+  }
+  
+  /// Open the Stoa downloads folder
+  Future<void> openDownloadsFolder() async {
+    String? path;
+    if (Platform.isAndroid) {
+      path = '/storage/emulated/0/Download/Stoa';
+    } else {
+      final downloadDir = await getDownloadsDirectory();
+      path = '${downloadDir?.path}/Stoa';
+    }
+    
+    final dir = Directory(path);
+    if (!dir.existsSync()) {
+      await dir.create(recursive: true);
+    }
+    
+    if (Platform.isLinux) {
+      await Process.run('xdg-open', [path]);
+    } else if (Platform.isMacOS) {
+      await Process.run('open', [path]);
+    } else if (Platform.isWindows) {
+      await Process.run('explorer', [path]);
+    } else {
+      // Android/iOS: Try open_filex or fallback
+      // open_filex might not support directories, but we'll try
+      try {
+        await OpenFilex.open(path);
+      } catch (e) {
+        print('Could not open directory: $e');
+      }
+    }
   }
 }
 

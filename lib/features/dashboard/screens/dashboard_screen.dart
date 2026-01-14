@@ -11,6 +11,7 @@ import 'package:stoa/app/theme.dart';
 import 'package:stoa/features/peers/screens/peers_screen.dart';
 import 'package:stoa/features/files/screens/files_screen.dart';
 import 'package:stoa/features/groups/screens/groups_screen.dart';
+import 'package:stoa/features/shared_spaces/screens/shared_spaces_screen.dart';
 import 'package:stoa/features/onboarding/widgets/edit_profile_dialog.dart';
 
 class DashboardScreen extends ConsumerStatefulWidget {
@@ -77,6 +78,11 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             label: 'Groups',
           ),
           NavigationDestination(
+            icon: Icon(Icons.folder_shared_outlined),
+            selectedIcon: Icon(Icons.folder_shared),
+            label: 'Shared',
+          ),
+          NavigationDestination(
             icon: Icon(Icons.folder_outlined),
             selectedIcon: Icon(Icons.folder),
             label: 'Files',
@@ -95,6 +101,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       case 2:
         return const GroupsScreen();
       case 3:
+        return const SharedSpacesScreen(); // New Tab
+      case 4:
         return const FilesScreen();
       default:
         return _buildHomeContent();
@@ -212,12 +220,13 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                   const SizedBox(width: 12),
                   Expanded(
                     child: _buildQuickAction(
-                      icon: Icons.upload_file_outlined,
-                      label: 'Share File',
+                      icon: Icons.folder_open_outlined,
+                      label: 'Open Downloads',
                       color: StoaTheme.accentColor,
                       onTap: () {
+                        ref.read(storageServiceProvider).openDownloadsFolder();
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('File sharing coming in Phase 3!')),
+                           const SnackBar(content: Text('Opening downloads folder...'), duration: Duration(seconds: 1)),
                         );
                       },
                     ),
@@ -271,23 +280,51 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
               
               const SizedBox(height: 32),
               
-              // Recent activity placeholder
-              Text(
-                'Recent Activity',
-                style: Theme.of(context).textTheme.titleLarge,
+              // Shared Spaces Teaser (Replaces Recent Activity)
+              InkWell(
+                onTap: () => setState(() => _selectedIndex = 3),
+                borderRadius: BorderRadius.circular(20),
+                child: Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: StoaTheme.accentColor.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: StoaTheme.accentColor.withValues(alpha: 0.2)),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: StoaTheme.accentColor.withValues(alpha: 0.2),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Icon(Icons.folder_shared_outlined, color: StoaTheme.accentColor, size: 32),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Shared Spaces',
+                              style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Collaborative folders coming soon. Tap to learn more.',
+                              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.white70),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.white54),
+                    ],
+                  ),
+                ),
               )
                   .animate()
                   .fadeIn(delay: 500.ms, duration: 400.ms),
-              
-              const SizedBox(height: 12),
-              
-              _buildEmptyState(
-                icon: Icons.history_outlined,
-                title: 'No recent activity',
-                subtitle: 'Your recent files, messages, and collaborations will appear here',
-              )
-                  .animate()
-                  .fadeIn(delay: 600.ms, duration: 400.ms),
             ]),
           ),
         ),
@@ -301,15 +338,15 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [
-            StoaTheme.primaryColor.withOpacity(0.2),
-            StoaTheme.secondaryColor.withOpacity(0.1),
+            StoaTheme.primaryColor.withValues(alpha: 0.2),
+            StoaTheme.secondaryColor.withValues(alpha: 0.1),
           ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
-          color: StoaTheme.primaryColor.withOpacity(0.2),
+          color: StoaTheme.primaryColor.withValues(alpha: 0.2),
         ),
       ),
       child: Row(
@@ -390,9 +427,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 20),
           decoration: BoxDecoration(
-            color: color.withOpacity(0.1),
+            color: color.withValues(alpha: 0.1),
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: color.withOpacity(0.2)),
+            border: Border.all(color: color.withValues(alpha: 0.2)),
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -466,7 +503,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
           decoration: BoxDecoration(
-            color: statusColor.withOpacity(0.1),
+            color: statusColor.withValues(alpha: 0.1),
             borderRadius: BorderRadius.circular(20),
           ),
           child: Text(
