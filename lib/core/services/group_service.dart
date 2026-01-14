@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 import 'package:drift/drift.dart';
@@ -7,6 +8,7 @@ import '../data/database.dart';
 import '../models/peer.dart';
 import 'connection_service.dart';
 import 'discovery_service.dart';
+import 'file_transfer_service.dart';
 
 /// Group message types for the protocol
 enum GroupMessageType {
@@ -365,12 +367,16 @@ class GroupService {
   }
   
   void _handleGroupTextMessage(String senderId, Map<String, dynamic> payload) async {
+    final type = payload['type'] ?? 'text';
+    final fileSize = payload['fileSizeBytes'];
+    
     await _db.insertGroupMessage(GroupMessagesCompanion.insert(
       groupId: payload['groupId'],
       senderId: payload['senderId'],
       senderName: payload['senderName'],
       content: payload['content'],
-      type: payload['type'] ?? 'text',
+      type: type,
+      fileSize: fileSize != null ? Value(fileSize as int) : const Value.absent(),
       timestamp: DateTime.parse(payload['timestamp']),
     ));
   }
@@ -440,6 +446,68 @@ class GroupService {
   Stream<List<GroupMember>> watchGroupMembers(String groupId) => _db.watchGroupMembers(groupId);
   Stream<List<GroupMessage>> watchGroupMessages(String groupId) => _db.watchGroupMessages(groupId);
   
+  // ==================== FILE SHARING ====================
+  
+  /// Send a file to the group
+  Future<void> sendFile(String groupId, File file) async {
+    final group = await _db.getGroup(groupId);
+    if (group == null) return;
+    
+    final filename = file.uri.pathSegments.last;
+    final size = await file.length();
+    
+    // 1. Insert into database
+    await _db.insertGroupMessage(GroupMessagesCompanion.insert(
+      groupId: groupId,
+      senderId: _myPeerId,
+      senderName: _myUsername,
+      content: filename,
+      type: 'file',
+      timestamp: DateTime.now(),
+      filePath: Value(file.path),
+      fileSize: Value(size),
+    ));
+    
+    // 2. Broadcast file message to group members (so they see it in chat)
+    final payload = {
+      'groupType': 'message',
+      'groupId': groupId,
+      'groupName': group.name,
+      'senderId': _myPeerId,
+      'senderName': _myUsername,
+      'content': filename,
+      'type': 'file',
+      'fileSizeBytes': size,
+      'timestamp': DateTime.now().toIso8601String(),
+    };
+    
+    final members = await _db.getGroupMembers(groupId);
+    final fts = _ref.read(fileTransferServiceProvider);
+    
+    for (final member in members) {
+      if (member.peerId == _myPeerId) continue;
+      
+      // Send chat notification
+      if (_connectionService.isConnectedTo(member.peerId)) {
+        await _sendToPeer(member.peerId, payload);
+        
+        // 3. Initiate actual file transfer
+        // Construct peer object for FTS
+        final peer = _findPeerById(member.peerId) ?? Peer(
+          id: member.peerId, 
+          username: member.username, 
+          host: 'unknown', // FTS/ConnectionService handles lookup by ID usually, but FTS needs Peer object
+          port: 0,
+          isConnected: true, 
+        );
+        
+        // Queue the file transfer
+        print('📂 Queuing group file "$filename" for ${member.username}');
+        fts.queueFile(peer, file, groupId: groupId);
+      }
+    }
+  }
+
   Future<List<Group>> getAllGroups() => _db.getAllGroups();
 }
 

@@ -6,6 +6,9 @@ import '../../../core/services/group_service.dart';
 import '../../../core/services/discovery_service.dart';
 import '../../../core/data/database.dart';
 import '../../../app/theme.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:open_filex/open_filex.dart';
+import 'dart:io';
 
 class GroupChatScreen extends ConsumerStatefulWidget {
   final String groupId;
@@ -105,6 +108,11 @@ class _GroupChatScreenState extends ConsumerState<GroupChatScreen> {
       color: Colors.black12,
       child: Row(
         children: [
+          IconButton(
+            onPressed: _pickAndSendFile,
+            icon: const Icon(Icons.attach_file),
+            color: Colors.white70,
+          ),
           Expanded(
             child: TextField(
               controller: _messageController,
@@ -126,6 +134,19 @@ class _GroupChatScreenState extends ConsumerState<GroupChatScreen> {
     );
   }
   
+  Future<void> _pickAndSendFile() async {
+    final result = await FilePicker.platform.pickFiles(allowMultiple: true);
+    if (result == null || result.files.isEmpty) return;
+
+    final groupService = ref.read(groupServiceProvider);
+    
+    for (final file in result.files) {
+      if (file.path != null) {
+        await groupService.sendFile(widget.groupId, File(file.path!));
+      }
+    }
+  }
+
   void _sendMessage() async {
     final text = _messageController.text.trim();
     if (text.isEmpty) return;
@@ -283,7 +304,73 @@ class _MessageBubble extends StatelessWidget {
                   color: StoaTheme.secondaryColor,
                 ),
               ),
-            Text(message.content),
+            
+            if (message.type == 'file' || message.type == 'folder')
+              GestureDetector(
+                onTap: () {
+                   if (message.filePath != null) {
+                     OpenFilex.open(message.filePath!);
+                   }
+                },
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Image Preview
+                    if (message.filePath != null && 
+                        ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'].contains(message.filePath!.split('.').last.toLowerCase()))
+                      Container(
+                        margin: const EdgeInsets.only(bottom: 8),
+                         constraints: const BoxConstraints(maxHeight: 200),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Image.file(
+                            File(message.filePath!), 
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                          ),
+                        ),
+                      ),
+                    
+                    // File Info Row
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: Colors.black26,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Icon(
+                            message.type == 'folder' ? Icons.folder : Icons.insert_drive_file, 
+                            color: Colors.white
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Flexible(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                message.content,
+                                style: const TextStyle(fontWeight: FontWeight.bold),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              Text(
+                                _formatSize(message.fileSize ?? 0),
+                                style: const TextStyle(fontSize: 10, color: Colors.white70),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              )
+            else
+              Text(message.content),
+              
             const SizedBox(height: 4),
             Text(
               _formatTime(message.timestamp),
@@ -293,6 +380,12 @@ class _MessageBubble extends StatelessWidget {
         ),
       ),
     );
+  }
+  
+  String _formatSize(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    return '${(bytes / 1024 / 1024).toStringAsFixed(1)} MB';
   }
   
   String _formatTime(DateTime dt) {

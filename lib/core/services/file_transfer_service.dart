@@ -34,6 +34,7 @@ class TransferProgress {
   final TransferStatus status;
   final String? filePath;
   final String peerId;
+  final String? groupId;
 
   double get percentage => totalBytes == 0 ? 0 : transferredBytes / totalBytes;
 
@@ -46,6 +47,7 @@ class TransferProgress {
     required this.status,
     this.filePath,
     required this.peerId,
+    this.groupId,
   });
 }
 
@@ -56,6 +58,7 @@ class QueueItem {
   final Peer peer;
   final String displayName;
   final bool isFolder;
+  final String? groupId;
   QueueItemStatus status;
   
   QueueItem({
@@ -64,6 +67,7 @@ class QueueItem {
     required this.peer,
     required this.displayName,
     this.isFolder = false,
+    this.groupId,
     this.status = QueueItemStatus.pending,
   });
 }
@@ -132,14 +136,22 @@ class FileTransferService {
     }
   }
   
-  /// Add a file to the transfer queue
-  void _addToQueue(Peer peer, File file, String displayName, {bool isFolder = false}) {
+  /// Add a file to the transfer queue (Public for GroupService)
+  void queueFile(Peer peer, File file, {bool isFolder = false, String? groupId}) {
+    final filename = file.uri.pathSegments.last;
+    _addToQueue(peer, file, filename, isFolder: isFolder, groupId: groupId);
+    _processQueue();
+  }
+
+  /// Internal add to queue
+  void _addToQueue(Peer peer, File file, String displayName, {bool isFolder = false, String? groupId}) {
     final item = QueueItem(
       id: _uuid.v4(),
       file: file,
       peer: peer,
       displayName: displayName,
       isFolder: isFolder,
+      groupId: groupId,
     );
     _sendQueue.add(item);
     _notifyQueueChanged();
@@ -177,7 +189,7 @@ class FileTransferService {
       _notifyQueueChanged();
       
       try {
-        await _sendFile(item.peer, item.file, isFolder: item.isFolder, originalName: item.displayName);
+        await _sendFile(item.peer, item.file, isFolder: item.isFolder, originalName: item.displayName, groupId: item.groupId);
         item.status = QueueItemStatus.completed;
       } catch (e) {
         print('❌ Queue transfer failed: ${item.displayName}: $e');
@@ -235,7 +247,7 @@ class FileTransferService {
   }
   
   /// Send a file to a peer
-  Future<void> _sendFile(Peer peer, File file, {bool isFolder = false, String? originalName}) async {
+  Future<void> _sendFile(Peer peer, File file, {bool isFolder = false, String? originalName, String? groupId}) async {
     final filename = originalName ?? file.uri.pathSegments.last;
     final size = await file.length();
     final mimeType = lookupMimeType(file.path) ?? 'application/octet-stream';
@@ -251,6 +263,7 @@ class FileTransferService {
       status: TransferStatus.pending,
       peerId: peer.id,
       filePath: file.path,
+      groupId: groupId,
     ));
     
     final connectionService = _ref.read(connectionServiceProvider);
@@ -264,6 +277,7 @@ class FileTransferService {
         'filename': filename,
         'size': size,
         'mime': mimeType,
+        'groupId': groupId,
       });
       
       _updateProgress(_transfers[fileId]!.copyWith(status: TransferStatus.inProgress));
@@ -380,6 +394,7 @@ class FileTransferService {
     final fileId = message['fileId'];
     final filename = message['filename'];
     final size = message['size'];
+    final groupId = message['groupId'];
     
     print('📥 Receiving file offer: $filename from $senderId');
     
@@ -393,6 +408,7 @@ class FileTransferService {
       type: TransferType.receiving,
       status: TransferStatus.inProgress,
       peerId: senderId,
+      groupId: groupId,
     ));
     
     // Auto-accepting for now (Phase 3b)
@@ -518,16 +534,29 @@ class FileTransferService {
       // Log to database
       try {
         final db = _ref.read(databaseProvider);
-        await db.insertMessage(MessagesCompanion.insert(
-          peerId: transfer.peerId,
-          isMe: false,
-          content: isZip ? transfer.filename.substring(0, transfer.filename.length - 4) : transfer.filename,
-          type: isZip ? 'folder' : 'file',
-          status: 'received',
-          timestamp: DateTime.now(),
-          filePath: Value(displayPath),
-          fileSize: Value(transfer.totalBytes),
-        ));
+        
+        if (transfer.groupId != null) {
+          // Group Transfer: Update existing group message
+          await db.updateGroupMessageFile(
+            transfer.groupId!, 
+            transfer.peerId, 
+            transfer.filename, // Use original filename for lookup
+            displayPath
+          );
+          print('✅ Updated group message file path');
+        } else {
+          // Direct Transfer: Insert into Messages (DM)
+          await db.insertMessage(MessagesCompanion.insert(
+            peerId: transfer.peerId,
+            isMe: false,
+            content: isZip ? transfer.filename.substring(0, transfer.filename.length - 4) : transfer.filename,
+            type: isZip ? 'folder' : 'file',
+            status: 'received',
+            timestamp: DateTime.now(),
+            filePath: Value(displayPath),
+            fileSize: Value(transfer.totalBytes),
+          ));
+        }
       } catch (e) {
         print('⚠️ Failed to log transfer: $e');
       }
@@ -558,6 +587,7 @@ extension TransferProgressCopy on TransferProgress {
     int? transferredBytes,
     TransferStatus? status,
     String? filePath,
+    String? groupId,
   }) {
     return TransferProgress(
       id: id,
@@ -568,6 +598,7 @@ extension TransferProgressCopy on TransferProgress {
       status: status ?? this.status,
       peerId: peerId,
       filePath: filePath ?? this.filePath,
+      groupId: groupId ?? this.groupId,
     );
   }
 }

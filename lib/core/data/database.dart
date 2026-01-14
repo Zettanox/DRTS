@@ -204,6 +204,40 @@ class AppDatabase extends _$AppDatabase {
       ..orderBy([(t) => OrderingTerm(expression: t.timestamp, mode: OrderingMode.desc)]))
       .watch();
   }
+  
+  // Update file path for a group message after download
+  Future<void> updateGroupMessageFile(String groupId, String senderId, String filename, String path) async {
+    print('🔍 Attempting to update group message: groupId=$groupId, sender=$senderId, file=$filename');
+    
+    // Retry logic to handle race conditions where message insertion might lag behind file transfer
+    for (int i = 0; i < 3; i++) {
+        // Find the most recent message matching criteria
+        final query = select(groupMessages)
+          ..where((t) => t.groupId.equals(groupId) & 
+                         t.senderId.equals(senderId) & 
+                         t.content.equals(filename)) // Removed loose type check
+          ..orderBy([(t) => OrderingTerm(expression: t.timestamp, mode: OrderingMode.desc)])
+          ..limit(1);
+          
+        final message = await query.getSingleOrNull();
+        
+        if (message != null) {
+          print('✅ Found message ${message.id}, updating path to $path');
+          await (update(groupMessages)..where((t) => t.id.equals(message.id))).write(
+            GroupMessagesCompanion(
+                filePath: Value(path),
+                type: Value(path.endsWith('.zip') || Directory(path).existsSync() ? 'folder' : 'file') // Auto-detect folder type
+            )
+          );
+          return;
+        }
+        
+        print('⚠️ Message not found (attempt ${i + 1}/3), retrying in 500ms...');
+        await Future.delayed(const Duration(milliseconds: 500));
+    }
+    
+    print('❌ Failed to find matching group message for file update after retries.');
+  }
 }
 
 LazyDatabase _openConnection() {
