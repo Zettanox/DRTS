@@ -13,6 +13,7 @@ import 'package:archive/archive.dart';
 
 import '../models/peer.dart';
 import 'connection_service.dart';
+import 'storage_service.dart';
 import '../data/database.dart';
 import 'package:drift/drift.dart' hide Column; // Avoid conflict if any, though likely safe
 
@@ -446,31 +447,22 @@ class FileTransferService {
     if (transfer == null || buffer == null) return;
     
     try {
-      // Use Downloads folder on Android, Documents on other platforms
-      Directory baseDir;
+      // Use unified Stoa/Downloads path
+      String basePath;
       
       if (transfer.groupId != null) {
-        // Group Transfer: Save to Stoa/GroupName
+        // Group Transfer: Save to Downloads/Groups/<GroupName>
         final db = _ref.read(databaseProvider);
         final group = await db.getGroup(transfer.groupId!);
         final groupName = group?.name ?? 'Unknown Group';
         final sanitized = groupName.replaceAll(RegExp(r'[<>:"/\\|?*]'), '_');
-        
-        if (Platform.isAndroid) {
-          baseDir = Directory('/storage/emulated/0/Download/Stoa/$sanitized');
-        } else {
-          final downloadDir = await getDownloadsDirectory();
-          baseDir = Directory('${downloadDir?.path}/Stoa/$sanitized');
-        }
+        basePath = await StorageService.getStoaDownloadsPath('Groups/$sanitized');
       } else {
-        // Direct Transfer: Save to Stoa/
-        if (Platform.isAndroid) {
-          baseDir = Directory('/storage/emulated/0/Download/Stoa');
-        } else {
-          final downloadDir = await getDownloadsDirectory();
-          baseDir = Directory('${downloadDir?.path}/Stoa');
-        }
+        // Direct Transfer: Save to Downloads/DMs
+        basePath = await StorageService.getStoaDownloadsPath('DMs');
       }
+      
+      final baseDir = Directory(basePath);
       
       // Ensure Stoa folder exists
       if (!await baseDir.exists()) {

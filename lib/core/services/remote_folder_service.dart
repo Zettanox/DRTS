@@ -251,9 +251,9 @@ class RemoteFolderService {
     final folder = await (_db.select(_db.sharedFolders)..where((t) => t.id.equals(spaceId))).getSingleOrNull();
     if (folder == null) return;
     
-    // Save to SharedSpaces/Downloaded/<spaceName>/<relativePath>
-    final stoaPath = await StorageService.getStoaDocumentsPath();
-    final savePath = p.join(stoaPath, 'SharedSpaces', 'Downloaded', folder.name, relativePath);
+    // Save to Downloads/SharedSpaces/<spaceName>/<relativePath>
+    final downloadPath = await StorageService.getStoaDownloadsPath('SharedSpaces/${folder.name}');
+    final savePath = p.join(downloadPath, relativePath);
     final file = File(savePath);
     
     if (!await file.parent.exists()) {
@@ -381,6 +381,21 @@ class RemoteFolderService {
       content: content,
       fromPeerId: peerId,
     ));
+  }
+  
+  /// Get list of collaborator peer IDs for a space (for owner to broadcast)
+  Future<List<String>> getCollaboratorIds(String spaceId) async {
+    final collaborators = await _db.getCollaborators(spaceId);
+    return collaborators.map((c) => c.peerId).toList();
+  }
+  
+  /// Send text edit directly to a specific peer (for owner broadcasting)
+  void sendTextEditDirect(String peerId, String spaceId, String relativePath, String content) {
+    _sendSpaceMessage(peerId, 'text_edit', {
+      'spaceId': spaceId,
+      'path': relativePath,
+      'content': content,
+    });
   }
   
   // ==================== UPLOAD FILE ====================

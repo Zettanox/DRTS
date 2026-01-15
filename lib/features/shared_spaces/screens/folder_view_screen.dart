@@ -98,16 +98,21 @@ class _FolderViewScreenState extends ConsumerState<FolderViewScreen> {
               final entity = files[index];
               final isDir = entity is Directory;
               final stat = entity.statSync();
+              final fileName = p.basename(entity.path);
+              final isTextFile = _isTextFile(fileName);
               
               return _buildFileCard(
-                name: p.basename(entity.path),
+                name: fileName,
                 size: isDir ? 0 : stat.size,
                 isDirectory: isDir,
                 onTap: () {
-                  if (!isDir) {
+                  if (!isDir && isTextFile) {
+                     _openOwnerEditor(entity.path);
+                  } else if (!isDir) {
                      OpenFilex.open(entity.path);
                   }
                 },
+                onEdit: !isDir && isTextFile ? () => _openOwnerEditor(entity.path) : null,
                 onDelete: () => _confirmDeleteOwnerFile(entity.path),
               );
             },
@@ -282,6 +287,21 @@ class _FolderViewScreenState extends ConsumerState<FolderViewScreen> {
     final ext = p.extension(name).toLowerCase();
     const textExtensions = ['.txt', '.md', '.json', '.xml', '.yaml', '.yml', '.csv', '.log', '.ini', '.conf', '.sh', '.py', '.js', '.dart', '.html', '.css'];
     return textExtensions.contains(ext);
+  }
+  
+  void _openOwnerEditor(String absolutePath) {
+    final relativePath = p.relative(absolutePath, from: widget.folder.path);
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => TextEditorScreen(
+          spaceId: widget.folder.id,
+          spaceName: widget.folder.name,
+          ownerId: 'me',
+          relativePath: relativePath,
+          localPath: absolutePath, // Owner has local path
+        ),
+      ),
+    );
   }
   
   Future<void> _openInEditor(String relativePath) async {

@@ -73,6 +73,16 @@ class StorageService {
     }
   }
   
+  /// Get the downloads path (unified for all downloads)
+  /// Structure: <StoaBase>/Downloads/<category>/<files>
+  /// Categories: DMs, Groups, SharedSpaces
+  static Future<String> getStoaDownloadsPath([String? category]) async {
+    final basePath = await getStoaDocumentsPath();
+    if (category != null) {
+      return '$basePath/Downloads/$category';
+    }
+    return '$basePath/Downloads';
+  }
   /// Open the Stoa downloads folder
   Future<void> openDownloadsFolder() async {
     String? path;
