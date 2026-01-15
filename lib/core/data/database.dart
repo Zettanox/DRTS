@@ -72,8 +72,9 @@ class SharedFolders extends Table {
   TextColumn get id => text()();              // UUID
   TextColumn get key => text()();             // Share Key (for joining)
   TextColumn get name => text()();
-  TextColumn get ownerId => text()();         // Peer ID of owner
-  TextColumn get path => text()();            // Local path
+  TextColumn get ownerId => text()();         // Peer ID of owner ('me' if local)
+  TextColumn get path => text()();            // Local path (only for owner)
+  TextColumn get permission => text().withDefault(const Constant('read-write'))(); // 'read-only' or 'read-write'
   DateTimeColumn get createdAt => dateTime()(); 
   DateTimeColumn get lastSync => dateTime().nullable()();
   
@@ -95,12 +96,25 @@ class SharedFiles extends Table {
   Set<Column> get primaryKey => {id};
 }
 
-@DriftDatabase(tables: [LocalPeers, Messages, Groups, GroupMembers, GroupMessages, SharedFolders, SharedFiles])
+// Collaborators for Shared Spaces
+class SpaceCollaborators extends Table {
+  TextColumn get spaceId => text().references(SharedFolders, #id)();
+  TextColumn get peerId => text()();          // Peer ID of collaborator
+  TextColumn get peerName => text()();        // Cached peer name
+  TextColumn get permission => text().withDefault(const Constant('read-write'))(); // 'read-only' or 'read-write'
+  TextColumn get status => text().withDefault(const Constant('pending'))(); // 'pending', 'accepted', 'rejected'
+  DateTimeColumn get addedAt => dateTime()();
+  
+  @override
+  Set<Column> get primaryKey => {spaceId, peerId};
+}
+
+@DriftDatabase(tables: [LocalPeers, Messages, Groups, GroupMembers, GroupMessages, SharedFolders, SharedFiles, SpaceCollaborators])
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_openConnection());
 
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 4;
   
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -118,6 +132,11 @@ class AppDatabase extends _$AppDatabase {
          // Migration from v2 to v3 (Shared Spaces)
          await m.createTable(sharedFolders);
          await m.createTable(sharedFiles);
+      }
+      if (from < 4) {
+         // Migration from v3 to v4 (Collaborators + Permission)
+         await m.createTable(spaceCollaborators);
+         await m.addColumn(sharedFolders, sharedFolders.permission);
       }
     }
   );
@@ -337,6 +356,47 @@ class AppDatabase extends _$AppDatabase {
        await (delete(sharedFiles)..where((t) => t.id.isIn(toDelete))).go();
        print('🧹 Purged ${toDelete.length} ignored files from database.');
      }
+  }
+  
+  // ==================== SPACE COLLABORATOR QUERIES ====================
+  
+  Future<int> addCollaborator(SpaceCollaboratorsCompanion collaborator) {
+    return into(spaceCollaborators).insert(collaborator, mode: InsertMode.insertOrReplace);
+  }
+  
+  Future<void> removeCollaborator(String spaceId, String peerId) {
+    return (delete(spaceCollaborators)
+      ..where((t) => t.spaceId.equals(spaceId) & t.peerId.equals(peerId)))
+      .go();
+  }
+  
+  Stream<List<SpaceCollaborator>> watchCollaborators(String spaceId) {
+    return (select(spaceCollaborators)
+      ..where((t) => t.spaceId.equals(spaceId) & t.status.equals('accepted')))
+      .watch();
+  }
+  
+  Future<List<SpaceCollaborator>> getCollaborators(String spaceId) {
+    return (select(spaceCollaborators)
+      ..where((t) => t.spaceId.equals(spaceId) & t.status.equals('accepted')))
+      .get();
+  }
+  
+  Future<void> updateCollaboratorStatus(String spaceId, String peerId, String status) {
+    return (update(spaceCollaborators)
+      ..where((t) => t.spaceId.equals(spaceId) & t.peerId.equals(peerId)))
+      .write(SpaceCollaboratorsCompanion(status: Value(status)));
+  }
+  
+  Stream<List<SharedFolder>> watchSpacesAsCollaborator(String myPeerId) {
+    // Return spaces where I'm accepted as a collaborator (not owner)
+    final collaboratorSpaceIds = selectOnly(spaceCollaborators)
+      ..addColumns([spaceCollaborators.spaceId])
+      ..where(spaceCollaborators.peerId.equals(myPeerId) & spaceCollaborators.status.equals('accepted'));
+      
+    return (select(sharedFolders)
+      ..where((t) => t.id.isInQuery(collaboratorSpaceIds)))
+      .watch();
   }
 }
 

@@ -1,14 +1,9 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:path/path.dart' as p;
 import 'package:stoa/app/theme.dart';
 import 'package:stoa/core/data/database.dart';
-import 'package:stoa/core/services/shared_folder_service.dart';
+import 'package:stoa/core/services/remote_folder_service.dart';
 import 'package:stoa/core/services/connection_service.dart';
-import 'package:stoa/core/services/sync_service.dart';
 import 'package:stoa/features/shared_spaces/screens/folder_view_screen.dart';
 
 class SharedSpacesScreen extends ConsumerWidget {
@@ -40,7 +35,7 @@ class SharedSpacesScreen extends ConsumerWidget {
                    const SizedBox(height: 16),
                    Text('No shared spaces yet', style: Theme.of(context).textTheme.titleMedium),
                    const SizedBox(height: 8),
-                   Text('Create a space to sync files with peers', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.white54)),
+                   Text('Create a space to share files with peers', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.white54)),
                 ],
               ),
             );
@@ -51,74 +46,88 @@ class SharedSpacesScreen extends ConsumerWidget {
             padding: const EdgeInsets.all(16),
             itemBuilder: (context, index) {
               final folder = folders[index];
+              final isOwner = folder.ownerId == 'me';
+              
               return Card(
                 clipBehavior: Clip.antiAlias,
                 child: ListTile(
-                  leading: const Icon(Icons.folder_shared, color: StoaTheme.accentColor, size: 32),
-                  title: Text(folder.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                  leading: Icon(
+                    isOwner ? Icons.folder_shared : Icons.cloud_outlined,
+                    color: isOwner ? StoaTheme.accentColor : Colors.blueGrey,
+                    size: 32,
+                  ),
+                  title: Row(
+                    children: [
+                      Expanded(
+                        child: Text(folder.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                      ),
+                      if (isOwner)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: StoaTheme.accentColor.withAlpha(50),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Text('Owner', style: TextStyle(fontSize: 11, color: StoaTheme.accentColor)),
+                        ),
+                    ],
+                  ),
                   subtitle: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(folder.path, maxLines: 1, overflow: TextOverflow.ellipsis),
-                      if (folder.key != 'unknown') ...[
-                        const SizedBox(height: 4),
-                        SelectableText('ID: ${folder.id}\nKey: ${folder.key}', style: const TextStyle(fontSize: 12, fontFamily: 'monospace')),
+                      if (isOwner) ...[
+                        Text(folder.path, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12)),
                       ] else ...[
-                        const SizedBox(height: 4),
-                        SelectableText('ID: ${folder.id}', style: const TextStyle(fontSize: 12, fontFamily: 'monospace')),
+                        Text('Remote • ${folder.permission}', style: const TextStyle(fontSize: 12)),
                       ],
+                      const SizedBox(height: 4),
+                      SelectableText('ID: ${folder.id}', style: const TextStyle(fontSize: 11, fontFamily: 'monospace', color: Colors.white38)),
                     ],
                   ),
                   trailing: PopupMenuButton<String>(
                     onSelected: (value) async {
-                      if (value == 'sync') {
-                         final peers = ref.read(connectionServiceProvider).connectedPeers;
-                         int count = 0;
-                         for (final peerId in peers) {
-                           await ref.read(syncServiceProvider).initiateSync(peerId);
-                           count++;
+                      if (value == 'refresh') {
+                         // For peers, request file list from owner
+                         if (!isOwner) {
+                           ref.read(remoteFolderServiceProvider).requestFileList(folder.id, folder.ownerId);
+                           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Refreshing...')));
                          }
-                         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Triggered sync with $count peers')));
+                      } else if (value == 'collaborators') {
+                        _showCollaboratorsDialog(context, ref, folder);
                       } else if (value == 'delete') {
-                        final confirm = await showDialog<bool>(
-                          context: context,
-                          builder: (ctx) => AlertDialog(
-                            title: const Text('Delete Shared Space?'),
-                            content: const Text('This will remove the folder from your shared spaces list. The files on disk will NOT be deleted.'),
-                            actions: [
-                              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-                              FilledButton(
-                                style: FilledButton.styleFrom(backgroundColor: Colors.red),
-                                onPressed: () => Navigator.pop(ctx, true),
-                                child: const Text('Delete'),
-                              ),
-                            ],
-                          ),
-                        );
-                        
-                        if (confirm == true) {
-                          await ref.read(databaseProvider).deleteSharedFolder(folder.id);
-                        }
+                        _confirmDelete(context, ref, folder, isOwner);
                       }
                     },
                     itemBuilder: (context) => [
-                      const PopupMenuItem(
-                        value: 'sync',
-                        child: Row(
-                          children: [
-                            Icon(Icons.refresh, size: 20, color: Colors.blue),
-                            SizedBox(width: 8),
-                            Text('Refresh (Sync)'),
-                          ],
+                      if (!isOwner)
+                        const PopupMenuItem(
+                          value: 'refresh',
+                          child: Row(
+                            children: [
+                              Icon(Icons.refresh, size: 20, color: Colors.blue),
+                              SizedBox(width: 8),
+                              Text('Refresh'),
+                            ],
+                          ),
                         ),
-                      ),
-                      const PopupMenuItem(
+                      if (isOwner)
+                        const PopupMenuItem(
+                          value: 'collaborators',
+                          child: Row(
+                            children: [
+                              Icon(Icons.people, size: 20, color: Colors.green),
+                              SizedBox(width: 8),
+                              Text('Manage Collaborators'),
+                            ],
+                          ),
+                        ),
+                      PopupMenuItem(
                         value: 'delete',
                         child: Row(
                           children: [
                             Icon(Icons.delete, size: 20, color: Colors.red),
                             SizedBox(width: 8),
-                            Text('Delete Space'),
+                            Text(isOwner ? 'Delete Space' : 'Leave Space'),
                           ],
                         ),
                       ),
@@ -135,105 +144,161 @@ class SharedSpacesScreen extends ConsumerWidget {
           );
         },
       ),
-      floatingActionButton: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          FloatingActionButton.extended(
-            heroTag: 'join',
-            onPressed: () => _showJoinDialog(context, ref),
-            icon: const Icon(Icons.link),
-            label: const Text('Join Space'),
-            backgroundColor: StoaTheme.secondaryColor,
-          ),
-          const SizedBox(height: 16),
-          FloatingActionButton.extended(
-            heroTag: 'create',
-            onPressed: () => _showCreateDialog(context, ref),
-            icon: const Icon(Icons.add),
-            label: const Text('New Space'),
-          ),
-        ],
+      floatingActionButton: FloatingActionButton.extended(
+        heroTag: 'create',
+        onPressed: () => _showCreateDialog(context, ref),
+        icon: const Icon(Icons.add),
+        label: const Text('New Space'),
       ),
     );
   }
   
-  void _showJoinDialog(BuildContext context, WidgetRef ref) {
-    final controller = TextEditingController();
-    showDialog(
+  void _showCollaboratorsDialog(BuildContext context, WidgetRef ref, SharedFolder folder) {
+    showModalBottomSheet(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Join Shared Space'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
+      isScrollControlled: true,
+      builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.6,
+        minChildSize: 0.3,
+        maxChildSize: 0.9,
+        expand: false,
+        builder: (_, controller) => Column(
           children: [
-            const Text('Enter the Space ID shared by your peer.'),
-            const SizedBox(height: 16),
-            TextField(
-              controller: controller,
-              decoration: const InputDecoration(
-                labelText: 'Space ID',
-                hintText: 'e.g. 123e4567-e89b...',
-                border: OutlineInputBorder(),
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text('Collaborators', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            ),
+            Expanded(
+              child: StreamBuilder<List<SpaceCollaborator>>(
+                stream: ref.read(databaseProvider).watchCollaborators(folder.id),
+                builder: (context, snapshot) {
+                  if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+                  
+                  final collaborators = snapshot.data!;
+                  
+                  if (collaborators.isEmpty) {
+                    return const Center(
+                      child: Text('No collaborators yet', style: TextStyle(color: Colors.white54)),
+                    );
+                  }
+                  
+                  return ListView.builder(
+                    controller: controller,
+                    itemCount: collaborators.length,
+                    itemBuilder: (context, index) {
+                      final c = collaborators[index];
+                      return ListTile(
+                        leading: CircleAvatar(child: Text(c.peerName[0].toUpperCase())),
+                        title: Text(c.peerName),
+                        subtitle: Text(c.permission),
+                        trailing: IconButton(
+                          icon: const Icon(Icons.remove_circle_outline, color: Colors.red),
+                          onPressed: () {
+                            ref.read(remoteFolderServiceProvider).removeCollaborator(folder.id, c.peerId);
+                          },
+                        ),
+                      );
+                    },
+                  );
+                },
               ),
-              autofocus: true,
+            ),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: FilledButton.icon(
+                onPressed: () => _showInviteDialog(context, ref, folder.id),
+                icon: const Icon(Icons.person_add),
+                label: const Text('Invite Peer'),
+              ),
             ),
           ],
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          FilledButton(
-            onPressed: () {
-               // Logic to "join" - for now just add to DB with unknown path or ask for path
-               // Ideally: Ask where to save it locally
-               Navigator.pop(ctx);
-               _showPathSelectionDialog(context, ref, controller.text.trim());
-            },
-            child: const Text('Next'),
-          ),
-        ],
       ),
     );
   }
   
-  Future<void> _showPathSelectionDialog(BuildContext context, WidgetRef ref, String spaceId) async {
-    if (spaceId.isEmpty) return;
+  void _showInviteDialog(BuildContext context, WidgetRef ref, String spaceId) {
+    final connectedPeers = ref.read(connectionServiceProvider).connectedPeers;
     
-    // For simplicity in this iteration, we auto-create a folder in Documents/Stoa/Shared/<SpaceId>
-    // In a real app, use FilePicker to pick directory.
-    
-    // We don't verify validity yet (P2P handshake handles that).
-    // We just create the local record so SyncService can start talking about it.
-    
-    final docsDir = await getApplicationDocumentsDirectory();
-    final path = p.join(docsDir.path, 'Stoa', 'Shared', 'Joined_Space_${spaceId.substring(0, 8)}');
-    final dir = Directory(path);
-    if (!await dir.exists()) {
-      await dir.create(recursive: true);
+    if (connectedPeers.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No connected peers to invite')),
+      );
+      return;
     }
     
-    // Insert into DB
-    final folder = SharedFoldersCompanion.insert(
-      id: spaceId,
-      key: 'unknown', // We don't have the key yet, maybe protocol exchanges it? Or ID comes with key?
-      name: 'Joined Space',
-      ownerId: 'remote',
-      path: path,
-      createdAt: DateTime.now(),
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Invite Peer'),
+        content: FutureBuilder<List<LocalPeer>>(
+          future: ref.read(databaseProvider).getAllPeers(),
+          builder: (context, snapshot) {
+            if (!snapshot.hasData) return const CircularProgressIndicator();
+            
+            final peers = snapshot.data!.where((p) => connectedPeers.contains(p.id)).toList();
+            
+            return SizedBox(
+              width: double.maxFinite,
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: peers.length,
+                itemBuilder: (context, index) {
+                  final peer = peers[index];
+                  return ListTile(
+                    leading: CircleAvatar(
+                      backgroundColor: peer.avatarColor != null 
+                        ? Color(int.parse(peer.avatarColor!.replaceFirst('#', '0xFF')))
+                        : Colors.grey,
+                      child: Text(peer.username[0].toUpperCase()),
+                    ),
+                    title: Text(peer.username),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      ref.read(remoteFolderServiceProvider).inviteCollaborator(
+                        spaceId, 
+                        peer.id, 
+                        peer.username,
+                        'read-write',
+                      );
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Invited ${peer.username}')),
+                      );
+                    },
+                  );
+                },
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+  
+  void _confirmDelete(BuildContext context, WidgetRef ref, SharedFolder folder, bool isOwner) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(isOwner ? 'Delete Shared Space?' : 'Leave Shared Space?'),
+        content: Text(isOwner 
+          ? 'This will remove the space and notify all collaborators. Files on disk will NOT be deleted.'
+          : 'You will no longer have access to this space.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(isOwner ? 'Delete' : 'Leave'),
+          ),
+        ],
+      ),
     );
     
-    try {
-      await ref.read(databaseProvider).insertSharedFolder(folder);
-      
-      // Initialize watcher for it
-      // Re-init service or expose manual start
-      await ref.read(sharedFolderServiceProvider).initialize(); // Lazy reload
-      
-      if (context.mounted) {
-         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Joined space! syncing to: $path')));
-      }
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error joining space: $e')));
+    if (confirm == true) {
+      if (isOwner) {
+        await ref.read(remoteFolderServiceProvider).deleteSpace(folder.id);
+      } else {
+        await ref.read(databaseProvider).deleteSharedFolder(folder.id);
       }
     }
   }
@@ -258,7 +323,10 @@ class SharedSpacesScreen extends ConsumerWidget {
             onPressed: () async {
                if (controller.text.trim().isNotEmpty) {
                  Navigator.pop(ctx);
-                 await ref.read(sharedFolderServiceProvider).createSharedSpace(controller.text.trim());
+                 await ref.read(remoteFolderServiceProvider).createSharedSpace(controller.text.trim());
+                 ScaffoldMessenger.of(context).showSnackBar(
+                   const SnackBar(content: Text('Space created! Invite collaborators from the menu.')),
+                 );
                }
             },
             child: const Text('Create'),

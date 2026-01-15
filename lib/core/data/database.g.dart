@@ -2262,6 +2262,18 @@ class $SharedFoldersTable extends SharedFolders
     type: DriftSqlType.string,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _permissionMeta = const VerificationMeta(
+    'permission',
+  );
+  @override
+  late final GeneratedColumn<String> permission = GeneratedColumn<String>(
+    'permission',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('read-write'),
+  );
   static const VerificationMeta _createdAtMeta = const VerificationMeta(
     'createdAt',
   );
@@ -2291,6 +2303,7 @@ class $SharedFoldersTable extends SharedFolders
     name,
     ownerId,
     path,
+    permission,
     createdAt,
     lastSync,
   ];
@@ -2343,6 +2356,12 @@ class $SharedFoldersTable extends SharedFolders
     } else if (isInserting) {
       context.missing(_pathMeta);
     }
+    if (data.containsKey('permission')) {
+      context.handle(
+        _permissionMeta,
+        permission.isAcceptableOrUnknown(data['permission']!, _permissionMeta),
+      );
+    }
     if (data.containsKey('created_at')) {
       context.handle(
         _createdAtMeta,
@@ -2386,6 +2405,10 @@ class $SharedFoldersTable extends SharedFolders
         DriftSqlType.string,
         data['${effectivePrefix}path'],
       )!,
+      permission: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}permission'],
+      )!,
       createdAt: attachedDatabase.typeMapping.read(
         DriftSqlType.dateTime,
         data['${effectivePrefix}created_at'],
@@ -2409,6 +2432,7 @@ class SharedFolder extends DataClass implements Insertable<SharedFolder> {
   final String name;
   final String ownerId;
   final String path;
+  final String permission;
   final DateTime createdAt;
   final DateTime? lastSync;
   const SharedFolder({
@@ -2417,6 +2441,7 @@ class SharedFolder extends DataClass implements Insertable<SharedFolder> {
     required this.name,
     required this.ownerId,
     required this.path,
+    required this.permission,
     required this.createdAt,
     this.lastSync,
   });
@@ -2428,6 +2453,7 @@ class SharedFolder extends DataClass implements Insertable<SharedFolder> {
     map['name'] = Variable<String>(name);
     map['owner_id'] = Variable<String>(ownerId);
     map['path'] = Variable<String>(path);
+    map['permission'] = Variable<String>(permission);
     map['created_at'] = Variable<DateTime>(createdAt);
     if (!nullToAbsent || lastSync != null) {
       map['last_sync'] = Variable<DateTime>(lastSync);
@@ -2442,6 +2468,7 @@ class SharedFolder extends DataClass implements Insertable<SharedFolder> {
       name: Value(name),
       ownerId: Value(ownerId),
       path: Value(path),
+      permission: Value(permission),
       createdAt: Value(createdAt),
       lastSync: lastSync == null && nullToAbsent
           ? const Value.absent()
@@ -2460,6 +2487,7 @@ class SharedFolder extends DataClass implements Insertable<SharedFolder> {
       name: serializer.fromJson<String>(json['name']),
       ownerId: serializer.fromJson<String>(json['ownerId']),
       path: serializer.fromJson<String>(json['path']),
+      permission: serializer.fromJson<String>(json['permission']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
       lastSync: serializer.fromJson<DateTime?>(json['lastSync']),
     );
@@ -2473,6 +2501,7 @@ class SharedFolder extends DataClass implements Insertable<SharedFolder> {
       'name': serializer.toJson<String>(name),
       'ownerId': serializer.toJson<String>(ownerId),
       'path': serializer.toJson<String>(path),
+      'permission': serializer.toJson<String>(permission),
       'createdAt': serializer.toJson<DateTime>(createdAt),
       'lastSync': serializer.toJson<DateTime?>(lastSync),
     };
@@ -2484,6 +2513,7 @@ class SharedFolder extends DataClass implements Insertable<SharedFolder> {
     String? name,
     String? ownerId,
     String? path,
+    String? permission,
     DateTime? createdAt,
     Value<DateTime?> lastSync = const Value.absent(),
   }) => SharedFolder(
@@ -2492,6 +2522,7 @@ class SharedFolder extends DataClass implements Insertable<SharedFolder> {
     name: name ?? this.name,
     ownerId: ownerId ?? this.ownerId,
     path: path ?? this.path,
+    permission: permission ?? this.permission,
     createdAt: createdAt ?? this.createdAt,
     lastSync: lastSync.present ? lastSync.value : this.lastSync,
   );
@@ -2502,6 +2533,9 @@ class SharedFolder extends DataClass implements Insertable<SharedFolder> {
       name: data.name.present ? data.name.value : this.name,
       ownerId: data.ownerId.present ? data.ownerId.value : this.ownerId,
       path: data.path.present ? data.path.value : this.path,
+      permission: data.permission.present
+          ? data.permission.value
+          : this.permission,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       lastSync: data.lastSync.present ? data.lastSync.value : this.lastSync,
     );
@@ -2515,6 +2549,7 @@ class SharedFolder extends DataClass implements Insertable<SharedFolder> {
           ..write('name: $name, ')
           ..write('ownerId: $ownerId, ')
           ..write('path: $path, ')
+          ..write('permission: $permission, ')
           ..write('createdAt: $createdAt, ')
           ..write('lastSync: $lastSync')
           ..write(')'))
@@ -2522,8 +2557,16 @@ class SharedFolder extends DataClass implements Insertable<SharedFolder> {
   }
 
   @override
-  int get hashCode =>
-      Object.hash(id, key, name, ownerId, path, createdAt, lastSync);
+  int get hashCode => Object.hash(
+    id,
+    key,
+    name,
+    ownerId,
+    path,
+    permission,
+    createdAt,
+    lastSync,
+  );
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -2533,6 +2576,7 @@ class SharedFolder extends DataClass implements Insertable<SharedFolder> {
           other.name == this.name &&
           other.ownerId == this.ownerId &&
           other.path == this.path &&
+          other.permission == this.permission &&
           other.createdAt == this.createdAt &&
           other.lastSync == this.lastSync);
 }
@@ -2543,6 +2587,7 @@ class SharedFoldersCompanion extends UpdateCompanion<SharedFolder> {
   final Value<String> name;
   final Value<String> ownerId;
   final Value<String> path;
+  final Value<String> permission;
   final Value<DateTime> createdAt;
   final Value<DateTime?> lastSync;
   final Value<int> rowid;
@@ -2552,6 +2597,7 @@ class SharedFoldersCompanion extends UpdateCompanion<SharedFolder> {
     this.name = const Value.absent(),
     this.ownerId = const Value.absent(),
     this.path = const Value.absent(),
+    this.permission = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.lastSync = const Value.absent(),
     this.rowid = const Value.absent(),
@@ -2562,6 +2608,7 @@ class SharedFoldersCompanion extends UpdateCompanion<SharedFolder> {
     required String name,
     required String ownerId,
     required String path,
+    this.permission = const Value.absent(),
     required DateTime createdAt,
     this.lastSync = const Value.absent(),
     this.rowid = const Value.absent(),
@@ -2577,6 +2624,7 @@ class SharedFoldersCompanion extends UpdateCompanion<SharedFolder> {
     Expression<String>? name,
     Expression<String>? ownerId,
     Expression<String>? path,
+    Expression<String>? permission,
     Expression<DateTime>? createdAt,
     Expression<DateTime>? lastSync,
     Expression<int>? rowid,
@@ -2587,6 +2635,7 @@ class SharedFoldersCompanion extends UpdateCompanion<SharedFolder> {
       if (name != null) 'name': name,
       if (ownerId != null) 'owner_id': ownerId,
       if (path != null) 'path': path,
+      if (permission != null) 'permission': permission,
       if (createdAt != null) 'created_at': createdAt,
       if (lastSync != null) 'last_sync': lastSync,
       if (rowid != null) 'rowid': rowid,
@@ -2599,6 +2648,7 @@ class SharedFoldersCompanion extends UpdateCompanion<SharedFolder> {
     Value<String>? name,
     Value<String>? ownerId,
     Value<String>? path,
+    Value<String>? permission,
     Value<DateTime>? createdAt,
     Value<DateTime?>? lastSync,
     Value<int>? rowid,
@@ -2609,6 +2659,7 @@ class SharedFoldersCompanion extends UpdateCompanion<SharedFolder> {
       name: name ?? this.name,
       ownerId: ownerId ?? this.ownerId,
       path: path ?? this.path,
+      permission: permission ?? this.permission,
       createdAt: createdAt ?? this.createdAt,
       lastSync: lastSync ?? this.lastSync,
       rowid: rowid ?? this.rowid,
@@ -2633,6 +2684,9 @@ class SharedFoldersCompanion extends UpdateCompanion<SharedFolder> {
     if (path.present) {
       map['path'] = Variable<String>(path.value);
     }
+    if (permission.present) {
+      map['permission'] = Variable<String>(permission.value);
+    }
     if (createdAt.present) {
       map['created_at'] = Variable<DateTime>(createdAt.value);
     }
@@ -2653,6 +2707,7 @@ class SharedFoldersCompanion extends UpdateCompanion<SharedFolder> {
           ..write('name: $name, ')
           ..write('ownerId: $ownerId, ')
           ..write('path: $path, ')
+          ..write('permission: $permission, ')
           ..write('createdAt: $createdAt, ')
           ..write('lastSync: $lastSync, ')
           ..write('rowid: $rowid')
@@ -3176,6 +3231,419 @@ class SharedFilesCompanion extends UpdateCompanion<SharedFile> {
   }
 }
 
+class $SpaceCollaboratorsTable extends SpaceCollaborators
+    with TableInfo<$SpaceCollaboratorsTable, SpaceCollaborator> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $SpaceCollaboratorsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _spaceIdMeta = const VerificationMeta(
+    'spaceId',
+  );
+  @override
+  late final GeneratedColumn<String> spaceId = GeneratedColumn<String>(
+    'space_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'REFERENCES shared_folders (id)',
+    ),
+  );
+  static const VerificationMeta _peerIdMeta = const VerificationMeta('peerId');
+  @override
+  late final GeneratedColumn<String> peerId = GeneratedColumn<String>(
+    'peer_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _peerNameMeta = const VerificationMeta(
+    'peerName',
+  );
+  @override
+  late final GeneratedColumn<String> peerName = GeneratedColumn<String>(
+    'peer_name',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _permissionMeta = const VerificationMeta(
+    'permission',
+  );
+  @override
+  late final GeneratedColumn<String> permission = GeneratedColumn<String>(
+    'permission',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('read-write'),
+  );
+  static const VerificationMeta _statusMeta = const VerificationMeta('status');
+  @override
+  late final GeneratedColumn<String> status = GeneratedColumn<String>(
+    'status',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('pending'),
+  );
+  static const VerificationMeta _addedAtMeta = const VerificationMeta(
+    'addedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> addedAt = GeneratedColumn<DateTime>(
+    'added_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    spaceId,
+    peerId,
+    peerName,
+    permission,
+    status,
+    addedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'space_collaborators';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<SpaceCollaborator> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('space_id')) {
+      context.handle(
+        _spaceIdMeta,
+        spaceId.isAcceptableOrUnknown(data['space_id']!, _spaceIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_spaceIdMeta);
+    }
+    if (data.containsKey('peer_id')) {
+      context.handle(
+        _peerIdMeta,
+        peerId.isAcceptableOrUnknown(data['peer_id']!, _peerIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_peerIdMeta);
+    }
+    if (data.containsKey('peer_name')) {
+      context.handle(
+        _peerNameMeta,
+        peerName.isAcceptableOrUnknown(data['peer_name']!, _peerNameMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_peerNameMeta);
+    }
+    if (data.containsKey('permission')) {
+      context.handle(
+        _permissionMeta,
+        permission.isAcceptableOrUnknown(data['permission']!, _permissionMeta),
+      );
+    }
+    if (data.containsKey('status')) {
+      context.handle(
+        _statusMeta,
+        status.isAcceptableOrUnknown(data['status']!, _statusMeta),
+      );
+    }
+    if (data.containsKey('added_at')) {
+      context.handle(
+        _addedAtMeta,
+        addedAt.isAcceptableOrUnknown(data['added_at']!, _addedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_addedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {spaceId, peerId};
+  @override
+  SpaceCollaborator map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return SpaceCollaborator(
+      spaceId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}space_id'],
+      )!,
+      peerId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}peer_id'],
+      )!,
+      peerName: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}peer_name'],
+      )!,
+      permission: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}permission'],
+      )!,
+      status: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}status'],
+      )!,
+      addedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}added_at'],
+      )!,
+    );
+  }
+
+  @override
+  $SpaceCollaboratorsTable createAlias(String alias) {
+    return $SpaceCollaboratorsTable(attachedDatabase, alias);
+  }
+}
+
+class SpaceCollaborator extends DataClass
+    implements Insertable<SpaceCollaborator> {
+  final String spaceId;
+  final String peerId;
+  final String peerName;
+  final String permission;
+  final String status;
+  final DateTime addedAt;
+  const SpaceCollaborator({
+    required this.spaceId,
+    required this.peerId,
+    required this.peerName,
+    required this.permission,
+    required this.status,
+    required this.addedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['space_id'] = Variable<String>(spaceId);
+    map['peer_id'] = Variable<String>(peerId);
+    map['peer_name'] = Variable<String>(peerName);
+    map['permission'] = Variable<String>(permission);
+    map['status'] = Variable<String>(status);
+    map['added_at'] = Variable<DateTime>(addedAt);
+    return map;
+  }
+
+  SpaceCollaboratorsCompanion toCompanion(bool nullToAbsent) {
+    return SpaceCollaboratorsCompanion(
+      spaceId: Value(spaceId),
+      peerId: Value(peerId),
+      peerName: Value(peerName),
+      permission: Value(permission),
+      status: Value(status),
+      addedAt: Value(addedAt),
+    );
+  }
+
+  factory SpaceCollaborator.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return SpaceCollaborator(
+      spaceId: serializer.fromJson<String>(json['spaceId']),
+      peerId: serializer.fromJson<String>(json['peerId']),
+      peerName: serializer.fromJson<String>(json['peerName']),
+      permission: serializer.fromJson<String>(json['permission']),
+      status: serializer.fromJson<String>(json['status']),
+      addedAt: serializer.fromJson<DateTime>(json['addedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'spaceId': serializer.toJson<String>(spaceId),
+      'peerId': serializer.toJson<String>(peerId),
+      'peerName': serializer.toJson<String>(peerName),
+      'permission': serializer.toJson<String>(permission),
+      'status': serializer.toJson<String>(status),
+      'addedAt': serializer.toJson<DateTime>(addedAt),
+    };
+  }
+
+  SpaceCollaborator copyWith({
+    String? spaceId,
+    String? peerId,
+    String? peerName,
+    String? permission,
+    String? status,
+    DateTime? addedAt,
+  }) => SpaceCollaborator(
+    spaceId: spaceId ?? this.spaceId,
+    peerId: peerId ?? this.peerId,
+    peerName: peerName ?? this.peerName,
+    permission: permission ?? this.permission,
+    status: status ?? this.status,
+    addedAt: addedAt ?? this.addedAt,
+  );
+  SpaceCollaborator copyWithCompanion(SpaceCollaboratorsCompanion data) {
+    return SpaceCollaborator(
+      spaceId: data.spaceId.present ? data.spaceId.value : this.spaceId,
+      peerId: data.peerId.present ? data.peerId.value : this.peerId,
+      peerName: data.peerName.present ? data.peerName.value : this.peerName,
+      permission: data.permission.present
+          ? data.permission.value
+          : this.permission,
+      status: data.status.present ? data.status.value : this.status,
+      addedAt: data.addedAt.present ? data.addedAt.value : this.addedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('SpaceCollaborator(')
+          ..write('spaceId: $spaceId, ')
+          ..write('peerId: $peerId, ')
+          ..write('peerName: $peerName, ')
+          ..write('permission: $permission, ')
+          ..write('status: $status, ')
+          ..write('addedAt: $addedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode =>
+      Object.hash(spaceId, peerId, peerName, permission, status, addedAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is SpaceCollaborator &&
+          other.spaceId == this.spaceId &&
+          other.peerId == this.peerId &&
+          other.peerName == this.peerName &&
+          other.permission == this.permission &&
+          other.status == this.status &&
+          other.addedAt == this.addedAt);
+}
+
+class SpaceCollaboratorsCompanion extends UpdateCompanion<SpaceCollaborator> {
+  final Value<String> spaceId;
+  final Value<String> peerId;
+  final Value<String> peerName;
+  final Value<String> permission;
+  final Value<String> status;
+  final Value<DateTime> addedAt;
+  final Value<int> rowid;
+  const SpaceCollaboratorsCompanion({
+    this.spaceId = const Value.absent(),
+    this.peerId = const Value.absent(),
+    this.peerName = const Value.absent(),
+    this.permission = const Value.absent(),
+    this.status = const Value.absent(),
+    this.addedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  SpaceCollaboratorsCompanion.insert({
+    required String spaceId,
+    required String peerId,
+    required String peerName,
+    this.permission = const Value.absent(),
+    this.status = const Value.absent(),
+    required DateTime addedAt,
+    this.rowid = const Value.absent(),
+  }) : spaceId = Value(spaceId),
+       peerId = Value(peerId),
+       peerName = Value(peerName),
+       addedAt = Value(addedAt);
+  static Insertable<SpaceCollaborator> custom({
+    Expression<String>? spaceId,
+    Expression<String>? peerId,
+    Expression<String>? peerName,
+    Expression<String>? permission,
+    Expression<String>? status,
+    Expression<DateTime>? addedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (spaceId != null) 'space_id': spaceId,
+      if (peerId != null) 'peer_id': peerId,
+      if (peerName != null) 'peer_name': peerName,
+      if (permission != null) 'permission': permission,
+      if (status != null) 'status': status,
+      if (addedAt != null) 'added_at': addedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  SpaceCollaboratorsCompanion copyWith({
+    Value<String>? spaceId,
+    Value<String>? peerId,
+    Value<String>? peerName,
+    Value<String>? permission,
+    Value<String>? status,
+    Value<DateTime>? addedAt,
+    Value<int>? rowid,
+  }) {
+    return SpaceCollaboratorsCompanion(
+      spaceId: spaceId ?? this.spaceId,
+      peerId: peerId ?? this.peerId,
+      peerName: peerName ?? this.peerName,
+      permission: permission ?? this.permission,
+      status: status ?? this.status,
+      addedAt: addedAt ?? this.addedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (spaceId.present) {
+      map['space_id'] = Variable<String>(spaceId.value);
+    }
+    if (peerId.present) {
+      map['peer_id'] = Variable<String>(peerId.value);
+    }
+    if (peerName.present) {
+      map['peer_name'] = Variable<String>(peerName.value);
+    }
+    if (permission.present) {
+      map['permission'] = Variable<String>(permission.value);
+    }
+    if (status.present) {
+      map['status'] = Variable<String>(status.value);
+    }
+    if (addedAt.present) {
+      map['added_at'] = Variable<DateTime>(addedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('SpaceCollaboratorsCompanion(')
+          ..write('spaceId: $spaceId, ')
+          ..write('peerId: $peerId, ')
+          ..write('peerName: $peerName, ')
+          ..write('permission: $permission, ')
+          ..write('status: $status, ')
+          ..write('addedAt: $addedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -3186,6 +3654,8 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $GroupMessagesTable groupMessages = $GroupMessagesTable(this);
   late final $SharedFoldersTable sharedFolders = $SharedFoldersTable(this);
   late final $SharedFilesTable sharedFiles = $SharedFilesTable(this);
+  late final $SpaceCollaboratorsTable spaceCollaborators =
+      $SpaceCollaboratorsTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -3198,6 +3668,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     groupMessages,
     sharedFolders,
     sharedFiles,
+    spaceCollaborators,
   ];
 }
 
@@ -5010,6 +5481,7 @@ typedef $$SharedFoldersTableCreateCompanionBuilder =
       required String name,
       required String ownerId,
       required String path,
+      Value<String> permission,
       required DateTime createdAt,
       Value<DateTime?> lastSync,
       Value<int> rowid,
@@ -5021,6 +5493,7 @@ typedef $$SharedFoldersTableUpdateCompanionBuilder =
       Value<String> name,
       Value<String> ownerId,
       Value<String> path,
+      Value<String> permission,
       Value<DateTime> createdAt,
       Value<DateTime?> lastSync,
       Value<int> rowid,
@@ -5050,6 +5523,30 @@ final class $$SharedFoldersTableReferences
     ).filter((f) => f.folderId.id.sqlEquals($_itemColumn<String>('id')!));
 
     final cache = $_typedResult.readTableOrNull(_sharedFilesRefsTable($_db));
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: cache),
+    );
+  }
+
+  static MultiTypedResultKey<$SpaceCollaboratorsTable, List<SpaceCollaborator>>
+  _spaceCollaboratorsRefsTable(_$AppDatabase db) =>
+      MultiTypedResultKey.fromTable(
+        db.spaceCollaborators,
+        aliasName: $_aliasNameGenerator(
+          db.sharedFolders.id,
+          db.spaceCollaborators.spaceId,
+        ),
+      );
+
+  $$SpaceCollaboratorsTableProcessedTableManager get spaceCollaboratorsRefs {
+    final manager = $$SpaceCollaboratorsTableTableManager(
+      $_db,
+      $_db.spaceCollaborators,
+    ).filter((f) => f.spaceId.id.sqlEquals($_itemColumn<String>('id')!));
+
+    final cache = $_typedResult.readTableOrNull(
+      _spaceCollaboratorsRefsTable($_db),
+    );
     return ProcessedTableManager(
       manager.$state.copyWith(prefetchedData: cache),
     );
@@ -5090,6 +5587,11 @@ class $$SharedFoldersTableFilterComposer
     builder: (column) => ColumnFilters(column),
   );
 
+  ColumnFilters<String> get permission => $composableBuilder(
+    column: $table.permission,
+    builder: (column) => ColumnFilters(column),
+  );
+
   ColumnFilters<DateTime> get createdAt => $composableBuilder(
     column: $table.createdAt,
     builder: (column) => ColumnFilters(column),
@@ -5116,6 +5618,31 @@ class $$SharedFoldersTableFilterComposer
           }) => $$SharedFilesTableFilterComposer(
             $db: $db,
             $table: $db.sharedFiles,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return f(composer);
+  }
+
+  Expression<bool> spaceCollaboratorsRefs(
+    Expression<bool> Function($$SpaceCollaboratorsTableFilterComposer f) f,
+  ) {
+    final $$SpaceCollaboratorsTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.spaceCollaborators,
+      getReferencedColumn: (t) => t.spaceId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$SpaceCollaboratorsTableFilterComposer(
+            $db: $db,
+            $table: $db.spaceCollaborators,
             $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
             joinBuilder: joinBuilder,
             $removeJoinBuilderFromRootComposer:
@@ -5160,6 +5687,11 @@ class $$SharedFoldersTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get permission => $composableBuilder(
+    column: $table.permission,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<DateTime> get createdAt => $composableBuilder(
     column: $table.createdAt,
     builder: (column) => ColumnOrderings(column),
@@ -5195,6 +5727,11 @@ class $$SharedFoldersTableAnnotationComposer
   GeneratedColumn<String> get path =>
       $composableBuilder(column: $table.path, builder: (column) => column);
 
+  GeneratedColumn<String> get permission => $composableBuilder(
+    column: $table.permission,
+    builder: (column) => column,
+  );
+
   GeneratedColumn<DateTime> get createdAt =>
       $composableBuilder(column: $table.createdAt, builder: (column) => column);
 
@@ -5225,6 +5762,32 @@ class $$SharedFoldersTableAnnotationComposer
     );
     return f(composer);
   }
+
+  Expression<T> spaceCollaboratorsRefs<T extends Object>(
+    Expression<T> Function($$SpaceCollaboratorsTableAnnotationComposer a) f,
+  ) {
+    final $$SpaceCollaboratorsTableAnnotationComposer composer =
+        $composerBuilder(
+          composer: this,
+          getCurrentColumn: (t) => t.id,
+          referencedTable: $db.spaceCollaborators,
+          getReferencedColumn: (t) => t.spaceId,
+          builder:
+              (
+                joinBuilder, {
+                $addJoinBuilderToRootComposer,
+                $removeJoinBuilderFromRootComposer,
+              }) => $$SpaceCollaboratorsTableAnnotationComposer(
+                $db: $db,
+                $table: $db.spaceCollaborators,
+                $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+                joinBuilder: joinBuilder,
+                $removeJoinBuilderFromRootComposer:
+                    $removeJoinBuilderFromRootComposer,
+              ),
+        );
+    return f(composer);
+  }
 }
 
 class $$SharedFoldersTableTableManager
@@ -5240,7 +5803,10 @@ class $$SharedFoldersTableTableManager
           $$SharedFoldersTableUpdateCompanionBuilder,
           (SharedFolder, $$SharedFoldersTableReferences),
           SharedFolder,
-          PrefetchHooks Function({bool sharedFilesRefs})
+          PrefetchHooks Function({
+            bool sharedFilesRefs,
+            bool spaceCollaboratorsRefs,
+          })
         > {
   $$SharedFoldersTableTableManager(_$AppDatabase db, $SharedFoldersTable table)
     : super(
@@ -5260,6 +5826,7 @@ class $$SharedFoldersTableTableManager
                 Value<String> name = const Value.absent(),
                 Value<String> ownerId = const Value.absent(),
                 Value<String> path = const Value.absent(),
+                Value<String> permission = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<DateTime?> lastSync = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
@@ -5269,6 +5836,7 @@ class $$SharedFoldersTableTableManager
                 name: name,
                 ownerId: ownerId,
                 path: path,
+                permission: permission,
                 createdAt: createdAt,
                 lastSync: lastSync,
                 rowid: rowid,
@@ -5280,6 +5848,7 @@ class $$SharedFoldersTableTableManager
                 required String name,
                 required String ownerId,
                 required String path,
+                Value<String> permission = const Value.absent(),
                 required DateTime createdAt,
                 Value<DateTime?> lastSync = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
@@ -5289,6 +5858,7 @@ class $$SharedFoldersTableTableManager
                 name: name,
                 ownerId: ownerId,
                 path: path,
+                permission: permission,
                 createdAt: createdAt,
                 lastSync: lastSync,
                 rowid: rowid,
@@ -5301,36 +5871,63 @@ class $$SharedFoldersTableTableManager
                 ),
               )
               .toList(),
-          prefetchHooksCallback: ({sharedFilesRefs = false}) {
-            return PrefetchHooks(
-              db: db,
-              explicitlyWatchedTables: [if (sharedFilesRefs) db.sharedFiles],
-              addJoins: null,
-              getPrefetchedDataCallback: (items) async {
-                return [
-                  if (sharedFilesRefs)
-                    await $_getPrefetchedData<
-                      SharedFolder,
-                      $SharedFoldersTable,
-                      SharedFile
-                    >(
-                      currentTable: table,
-                      referencedTable: $$SharedFoldersTableReferences
-                          ._sharedFilesRefsTable(db),
-                      managerFromTypedResult: (p0) =>
-                          $$SharedFoldersTableReferences(
-                            db,
-                            table,
-                            p0,
-                          ).sharedFilesRefs,
-                      referencedItemsForCurrentItem: (item, referencedItems) =>
-                          referencedItems.where((e) => e.folderId == item.id),
-                      typedResults: items,
-                    ),
-                ];
+          prefetchHooksCallback:
+              ({sharedFilesRefs = false, spaceCollaboratorsRefs = false}) {
+                return PrefetchHooks(
+                  db: db,
+                  explicitlyWatchedTables: [
+                    if (sharedFilesRefs) db.sharedFiles,
+                    if (spaceCollaboratorsRefs) db.spaceCollaborators,
+                  ],
+                  addJoins: null,
+                  getPrefetchedDataCallback: (items) async {
+                    return [
+                      if (sharedFilesRefs)
+                        await $_getPrefetchedData<
+                          SharedFolder,
+                          $SharedFoldersTable,
+                          SharedFile
+                        >(
+                          currentTable: table,
+                          referencedTable: $$SharedFoldersTableReferences
+                              ._sharedFilesRefsTable(db),
+                          managerFromTypedResult: (p0) =>
+                              $$SharedFoldersTableReferences(
+                                db,
+                                table,
+                                p0,
+                              ).sharedFilesRefs,
+                          referencedItemsForCurrentItem:
+                              (item, referencedItems) => referencedItems.where(
+                                (e) => e.folderId == item.id,
+                              ),
+                          typedResults: items,
+                        ),
+                      if (spaceCollaboratorsRefs)
+                        await $_getPrefetchedData<
+                          SharedFolder,
+                          $SharedFoldersTable,
+                          SpaceCollaborator
+                        >(
+                          currentTable: table,
+                          referencedTable: $$SharedFoldersTableReferences
+                              ._spaceCollaboratorsRefsTable(db),
+                          managerFromTypedResult: (p0) =>
+                              $$SharedFoldersTableReferences(
+                                db,
+                                table,
+                                p0,
+                              ).spaceCollaboratorsRefs,
+                          referencedItemsForCurrentItem:
+                              (item, referencedItems) => referencedItems.where(
+                                (e) => e.spaceId == item.id,
+                              ),
+                          typedResults: items,
+                        ),
+                    ];
+                  },
+                );
               },
-            );
-          },
         ),
       );
 }
@@ -5347,7 +5944,10 @@ typedef $$SharedFoldersTableProcessedTableManager =
       $$SharedFoldersTableUpdateCompanionBuilder,
       (SharedFolder, $$SharedFoldersTableReferences),
       SharedFolder,
-      PrefetchHooks Function({bool sharedFilesRefs})
+      PrefetchHooks Function({
+        bool sharedFilesRefs,
+        bool spaceCollaboratorsRefs,
+      })
     >;
 typedef $$SharedFilesTableCreateCompanionBuilder =
     SharedFilesCompanion Function({
@@ -5727,6 +6327,365 @@ typedef $$SharedFilesTableProcessedTableManager =
       SharedFile,
       PrefetchHooks Function({bool folderId})
     >;
+typedef $$SpaceCollaboratorsTableCreateCompanionBuilder =
+    SpaceCollaboratorsCompanion Function({
+      required String spaceId,
+      required String peerId,
+      required String peerName,
+      Value<String> permission,
+      Value<String> status,
+      required DateTime addedAt,
+      Value<int> rowid,
+    });
+typedef $$SpaceCollaboratorsTableUpdateCompanionBuilder =
+    SpaceCollaboratorsCompanion Function({
+      Value<String> spaceId,
+      Value<String> peerId,
+      Value<String> peerName,
+      Value<String> permission,
+      Value<String> status,
+      Value<DateTime> addedAt,
+      Value<int> rowid,
+    });
+
+final class $$SpaceCollaboratorsTableReferences
+    extends
+        BaseReferences<
+          _$AppDatabase,
+          $SpaceCollaboratorsTable,
+          SpaceCollaborator
+        > {
+  $$SpaceCollaboratorsTableReferences(
+    super.$_db,
+    super.$_table,
+    super.$_typedResult,
+  );
+
+  static $SharedFoldersTable _spaceIdTable(_$AppDatabase db) =>
+      db.sharedFolders.createAlias(
+        $_aliasNameGenerator(
+          db.spaceCollaborators.spaceId,
+          db.sharedFolders.id,
+        ),
+      );
+
+  $$SharedFoldersTableProcessedTableManager get spaceId {
+    final $_column = $_itemColumn<String>('space_id')!;
+
+    final manager = $$SharedFoldersTableTableManager(
+      $_db,
+      $_db.sharedFolders,
+    ).filter((f) => f.id.sqlEquals($_column));
+    final item = $_typedResult.readTableOrNull(_spaceIdTable($_db));
+    if (item == null) return manager;
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: [item]),
+    );
+  }
+}
+
+class $$SpaceCollaboratorsTableFilterComposer
+    extends Composer<_$AppDatabase, $SpaceCollaboratorsTable> {
+  $$SpaceCollaboratorsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get peerId => $composableBuilder(
+    column: $table.peerId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get peerName => $composableBuilder(
+    column: $table.peerName,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get permission => $composableBuilder(
+    column: $table.permission,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get status => $composableBuilder(
+    column: $table.status,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get addedAt => $composableBuilder(
+    column: $table.addedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  $$SharedFoldersTableFilterComposer get spaceId {
+    final $$SharedFoldersTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.spaceId,
+      referencedTable: $db.sharedFolders,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$SharedFoldersTableFilterComposer(
+            $db: $db,
+            $table: $db.sharedFolders,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$SpaceCollaboratorsTableOrderingComposer
+    extends Composer<_$AppDatabase, $SpaceCollaboratorsTable> {
+  $$SpaceCollaboratorsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get peerId => $composableBuilder(
+    column: $table.peerId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get peerName => $composableBuilder(
+    column: $table.peerName,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get permission => $composableBuilder(
+    column: $table.permission,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get status => $composableBuilder(
+    column: $table.status,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get addedAt => $composableBuilder(
+    column: $table.addedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  $$SharedFoldersTableOrderingComposer get spaceId {
+    final $$SharedFoldersTableOrderingComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.spaceId,
+      referencedTable: $db.sharedFolders,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$SharedFoldersTableOrderingComposer(
+            $db: $db,
+            $table: $db.sharedFolders,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$SpaceCollaboratorsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $SpaceCollaboratorsTable> {
+  $$SpaceCollaboratorsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get peerId =>
+      $composableBuilder(column: $table.peerId, builder: (column) => column);
+
+  GeneratedColumn<String> get peerName =>
+      $composableBuilder(column: $table.peerName, builder: (column) => column);
+
+  GeneratedColumn<String> get permission => $composableBuilder(
+    column: $table.permission,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get status =>
+      $composableBuilder(column: $table.status, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get addedAt =>
+      $composableBuilder(column: $table.addedAt, builder: (column) => column);
+
+  $$SharedFoldersTableAnnotationComposer get spaceId {
+    final $$SharedFoldersTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.spaceId,
+      referencedTable: $db.sharedFolders,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$SharedFoldersTableAnnotationComposer(
+            $db: $db,
+            $table: $db.sharedFolders,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$SpaceCollaboratorsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $SpaceCollaboratorsTable,
+          SpaceCollaborator,
+          $$SpaceCollaboratorsTableFilterComposer,
+          $$SpaceCollaboratorsTableOrderingComposer,
+          $$SpaceCollaboratorsTableAnnotationComposer,
+          $$SpaceCollaboratorsTableCreateCompanionBuilder,
+          $$SpaceCollaboratorsTableUpdateCompanionBuilder,
+          (SpaceCollaborator, $$SpaceCollaboratorsTableReferences),
+          SpaceCollaborator,
+          PrefetchHooks Function({bool spaceId})
+        > {
+  $$SpaceCollaboratorsTableTableManager(
+    _$AppDatabase db,
+    $SpaceCollaboratorsTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$SpaceCollaboratorsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$SpaceCollaboratorsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$SpaceCollaboratorsTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<String> spaceId = const Value.absent(),
+                Value<String> peerId = const Value.absent(),
+                Value<String> peerName = const Value.absent(),
+                Value<String> permission = const Value.absent(),
+                Value<String> status = const Value.absent(),
+                Value<DateTime> addedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => SpaceCollaboratorsCompanion(
+                spaceId: spaceId,
+                peerId: peerId,
+                peerName: peerName,
+                permission: permission,
+                status: status,
+                addedAt: addedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String spaceId,
+                required String peerId,
+                required String peerName,
+                Value<String> permission = const Value.absent(),
+                Value<String> status = const Value.absent(),
+                required DateTime addedAt,
+                Value<int> rowid = const Value.absent(),
+              }) => SpaceCollaboratorsCompanion.insert(
+                spaceId: spaceId,
+                peerId: peerId,
+                peerName: peerName,
+                permission: permission,
+                status: status,
+                addedAt: addedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable(table),
+                  $$SpaceCollaboratorsTableReferences(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: ({spaceId = false}) {
+            return PrefetchHooks(
+              db: db,
+              explicitlyWatchedTables: [],
+              addJoins:
+                  <
+                    T extends TableManagerState<
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic
+                    >
+                  >(state) {
+                    if (spaceId) {
+                      state =
+                          state.withJoin(
+                                currentTable: table,
+                                currentColumn: table.spaceId,
+                                referencedTable:
+                                    $$SpaceCollaboratorsTableReferences
+                                        ._spaceIdTable(db),
+                                referencedColumn:
+                                    $$SpaceCollaboratorsTableReferences
+                                        ._spaceIdTable(db)
+                                        .id,
+                              )
+                              as T;
+                    }
+
+                    return state;
+                  },
+              getPrefetchedDataCallback: (items) async {
+                return [];
+              },
+            );
+          },
+        ),
+      );
+}
+
+typedef $$SpaceCollaboratorsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $SpaceCollaboratorsTable,
+      SpaceCollaborator,
+      $$SpaceCollaboratorsTableFilterComposer,
+      $$SpaceCollaboratorsTableOrderingComposer,
+      $$SpaceCollaboratorsTableAnnotationComposer,
+      $$SpaceCollaboratorsTableCreateCompanionBuilder,
+      $$SpaceCollaboratorsTableUpdateCompanionBuilder,
+      (SpaceCollaborator, $$SpaceCollaboratorsTableReferences),
+      SpaceCollaborator,
+      PrefetchHooks Function({bool spaceId})
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -5745,4 +6704,6 @@ class $AppDatabaseManager {
       $$SharedFoldersTableTableManager(_db, _db.sharedFolders);
   $$SharedFilesTableTableManager get sharedFiles =>
       $$SharedFilesTableTableManager(_db, _db.sharedFiles);
+  $$SpaceCollaboratorsTableTableManager get spaceCollaborators =>
+      $$SpaceCollaboratorsTableTableManager(_db, _db.spaceCollaborators);
 }
