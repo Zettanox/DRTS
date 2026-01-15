@@ -1,12 +1,16 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:go_router/go_router.dart';
+import 'package:open_filex/open_filex.dart';
+import 'package:path/path.dart' as p;
 
 import 'package:stoa/core/models/user.dart';
 import 'package:stoa/core/services/storage_service.dart';
 import 'package:stoa/core/services/discovery_service.dart';
 import 'package:stoa/core/services/connection_service.dart';
+import 'package:stoa/core/data/database.dart';
 import 'package:stoa/app/theme.dart';
 import 'package:stoa/features/peers/screens/peers_screen.dart';
 import 'package:stoa/features/files/screens/files_screen.dart';
@@ -275,56 +279,184 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
               
               const SizedBox(height: 32),
               
-              // Shared Spaces Teaser (Replaces Recent Activity)
-              InkWell(
-                onTap: () => setState(() => _selectedIndex = 3),
-                borderRadius: BorderRadius.circular(20),
-                child: Container(
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: StoaTheme.accentColor.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: StoaTheme.accentColor.withValues(alpha: 0.2)),
-                  ),
-                  child: Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: StoaTheme.accentColor.withValues(alpha: 0.2),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: const Icon(Icons.folder_shared_outlined, color: StoaTheme.accentColor, size: 32),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Shared Spaces',
-                              style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              'Collaborative folders coming soon. Tap to learn more.',
-                              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.white70),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.white54),
-                    ],
-                  ),
-                ),
+              // Recent Activity Section
+              Text(
+                'Recent Activity',
+                style: Theme.of(context).textTheme.titleLarge,
               )
                   .animate()
                   .fadeIn(delay: 500.ms, duration: 400.ms),
+              
+              const SizedBox(height: 12),
+              
+              _buildRecentActivity()
+                  .animate()
+                  .fadeIn(delay: 600.ms, duration: 400.ms),
             ]),
           ),
         ),
       ],
     );
+  }
+  
+  Widget _buildRecentActivity() {
+    final db = ref.watch(databaseProvider);
+    
+    return Column(
+      children: [
+        // Recent Messages
+        StreamBuilder<List<Message>>(
+          stream: db.watchRecentMessages(5),
+          builder: (context, snapshot) {
+            final messages = snapshot.data ?? [];
+            
+            if (messages.isEmpty) {
+              return const SizedBox.shrink();
+            }
+            
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('Messages', style: Theme.of(context).textTheme.titleSmall?.copyWith(color: Colors.white70)),
+                    TextButton(
+                      onPressed: () => setState(() => _selectedIndex = 1),
+                      child: const Text('See all'),
+                    ),
+                  ],
+                ),
+                ...messages.take(3).map((msg) => _buildRecentMessageItem(msg)),
+              ],
+            );
+          },
+        ),
+        
+        const SizedBox(height: 16),
+        
+        // Recent Downloads
+        FutureBuilder<List<FileSystemEntity>>(
+          future: _getRecentDownloads(),
+          builder: (context, snapshot) {
+            final files = snapshot.data ?? [];
+            
+            if (files.isEmpty) {
+              return const SizedBox.shrink();
+            }
+            
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('Downloads', style: Theme.of(context).textTheme.titleSmall?.copyWith(color: Colors.white70)),
+                    TextButton(
+                      onPressed: () => setState(() => _selectedIndex = 2),
+                      child: const Text('See all'),
+                    ),
+                  ],
+                ),
+                ...files.take(3).map((file) => _buildRecentDownloadItem(file)),
+              ],
+            );
+          },
+        ),
+      ],
+    );
+  }
+  
+  Widget _buildRecentMessageItem(Message msg) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: ListTile(
+        leading: CircleAvatar(
+          backgroundColor: StoaTheme.primaryColor.withValues(alpha: 0.2),
+          child: Icon(
+            msg.isMe ? Icons.arrow_upward : Icons.arrow_downward,
+            color: msg.isMe ? Colors.blue : Colors.green,
+            size: 20,
+          ),
+        ),
+        title: Text(
+          msg.content.length > 40 ? '${msg.content.substring(0, 40)}...' : msg.content,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        subtitle: Text(
+          _formatTime(msg.timestamp),
+          style: const TextStyle(fontSize: 12, color: Colors.white54),
+        ),
+        trailing: msg.type == 'file' 
+          ? const Icon(Icons.attach_file, size: 16, color: Colors.white38)
+          : null,
+        onTap: () {
+          context.pushNamed('chat', pathParameters: {'peerId': msg.peerId});
+        },
+      ),
+    );
+  }
+  
+  Widget _buildRecentDownloadItem(FileSystemEntity file) {
+    final name = p.basename(file.path);
+    final stat = file.statSync();
+    
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: ListTile(
+        leading: CircleAvatar(
+          backgroundColor: StoaTheme.accentColor.withValues(alpha: 0.2),
+          child: Icon(_getFileIcon(name), color: StoaTheme.accentColor, size: 20),
+        ),
+        title: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis),
+        subtitle: Text(
+          _formatTime(stat.modified),
+          style: const TextStyle(fontSize: 12, color: Colors.white54),
+        ),
+        onTap: () => OpenFilex.open(file.path),
+      ),
+    );
+  }
+  
+  Future<List<FileSystemEntity>> _getRecentDownloads() async {
+    final basePath = await StorageService.getStoaDownloadsPath();
+    final dir = Directory(basePath);
+    
+    if (!await dir.exists()) return [];
+    
+    final files = <FileSystemEntity>[];
+    await for (final entity in dir.list(recursive: true)) {
+      if (entity is File && !p.basename(entity.path).startsWith('.')) {
+        files.add(entity);
+      }
+    }
+    
+    // Sort by modification time (newest first)
+    files.sort((a, b) => b.statSync().modified.compareTo(a.statSync().modified));
+    
+    return files.take(5).toList();
+  }
+  
+  IconData _getFileIcon(String name) {
+    final ext = p.extension(name).toLowerCase();
+    if (['.jpg', '.jpeg', '.png', '.gif', '.webp'].contains(ext)) return Icons.image;
+    if (['.mp4', '.mov', '.avi', '.mkv'].contains(ext)) return Icons.video_file;
+    if (['.mp3', '.wav', '.aac', '.flac'].contains(ext)) return Icons.audio_file;
+    if (['.pdf'].contains(ext)) return Icons.picture_as_pdf;
+    if (['.txt', '.md', '.json', '.xml'].contains(ext)) return Icons.description;
+    return Icons.insert_drive_file;
+  }
+  
+  String _formatTime(DateTime time) {
+    final now = DateTime.now();
+    final diff = now.difference(time);
+    
+    if (diff.inMinutes < 1) return 'Just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    if (diff.inDays < 7) return '${diff.inDays}d ago';
+    return '${time.day}/${time.month}/${time.year}';
   }
 
   Widget _buildWelcomeCard() {

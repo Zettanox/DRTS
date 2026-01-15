@@ -179,6 +179,14 @@ class AppDatabase extends _$AppDatabase {
     return (delete(messages)..where((t) => t.id.equals(id))).go();
   }
   
+  // Watch recent messages (all types, for home screen)
+  Stream<List<Message>> watchRecentMessages(int limit) {
+    return (select(messages)
+           ..orderBy([(t) => OrderingTerm(expression: t.timestamp, mode: OrderingMode.desc)])
+           ..limit(limit))
+           .watch();
+  }
+  
   // ==================== GROUP QUERIES ====================
   
   // Create a new group
