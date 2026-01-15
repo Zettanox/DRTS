@@ -61,6 +61,18 @@ class StorageService {
     await _preferences.clear();
   }
   
+  /// Get the base Stoa documents path (uses external storage on Android)
+  static Future<String> getStoaDocumentsPath() async {
+    if (Platform.isAndroid) {
+      // Use external storage Documents folder on Android
+      return '/storage/emulated/0/Documents/Stoa';
+    } else {
+      // Use app documents on other platforms
+      final docsDir = await getApplicationDocumentsDirectory();
+      return '${docsDir.path}/Stoa';
+    }
+  }
+  
   /// Open the Stoa downloads folder
   Future<void> openDownloadsFolder() async {
     String? path;

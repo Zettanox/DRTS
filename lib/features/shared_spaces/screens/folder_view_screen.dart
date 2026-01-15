@@ -7,6 +7,7 @@ import 'package:open_filex/open_filex.dart';
 import 'package:stoa/app/theme.dart';
 import 'package:stoa/core/data/database.dart';
 import 'package:stoa/core/services/remote_folder_service.dart';
+import 'package:stoa/features/shared_spaces/screens/text_editor_screen.dart';
 import 'package:path/path.dart' as p;
 
 class FolderViewScreen extends ConsumerStatefulWidget {
@@ -26,27 +27,8 @@ class _FolderViewScreenState extends ConsumerState<FolderViewScreen> {
     if (widget.folder.ownerId != 'me') {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         ref.read(remoteFolderServiceProvider).requestFileList(widget.folder.id, widget.folder.ownerId);
-        
-        // Register download callback to auto-open files
-        ref.read(remoteFolderServiceProvider).setDownloadCallback((path) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Downloaded: ${p.basename(path)}')),
-            );
-            OpenFilex.open(path);
-          }
-        });
       });
     }
-  }
-  
-  @override
-  void dispose() {
-    // Clear callback
-    if (widget.folder.ownerId != 'me') {
-      ref.read(remoteFolderServiceProvider).setDownloadCallback(null);
-    }
-    super.dispose();
   }
 
   @override
@@ -202,15 +184,22 @@ class _FolderViewScreenState extends ConsumerState<FolderViewScreen> {
           padding: const EdgeInsets.all(16),
           itemBuilder: (context, index) {
             final file = files[index];
+            final isTextFile = _isTextFile(file.name);
+            
             return _buildFileCard(
               name: file.name,
               size: file.size,
               isDirectory: file.isDirectory,
               onTap: () {
-                if (!file.isDirectory) {
+                if (!file.isDirectory && isTextFile) {
+                  _openInEditor(file.relativePath);
+                } else if (!file.isDirectory) {
                   _downloadFile(file.relativePath);
                 }
               },
+              onEdit: isTextFile && !file.isDirectory && widget.folder.permission == 'read-write'
+                ? () => _openInEditor(file.relativePath)
+                : null,
               onDownload: !file.isDirectory ? () => _downloadFile(file.relativePath) : null,
               onDelete: widget.folder.permission == 'read-write' && !file.isDirectory
                 ? () => _confirmDeleteRemote(file.relativePath)
@@ -247,35 +236,67 @@ class _FolderViewScreenState extends ConsumerState<FolderViewScreen> {
     required int size,
     required bool isDirectory,
     required VoidCallback onTap,
+    VoidCallback? onEdit,
     VoidCallback? onDownload,
     VoidCallback? onDelete,
   }) {
+    final isText = _isTextFile(name);
+    
     return Card(
       child: ListTile(
         leading: Icon(
-          isDirectory ? Icons.folder : Icons.insert_drive_file_outlined,
-          color: isDirectory ? StoaTheme.accentColor : null,
+          isDirectory ? Icons.folder : (isText ? Icons.description : Icons.insert_drive_file_outlined),
+          color: isDirectory ? StoaTheme.accentColor : (isText ? Colors.amber : null),
         ),
         title: Text(name),
         subtitle: Text(isDirectory ? 'Folder' : _formatBytes(size)),
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
+            if (onEdit != null)
+              IconButton(
+                icon: const Icon(Icons.edit, color: Colors.amber),
+                onPressed: onEdit,
+                tooltip: 'Edit',
+              ),
             if (onDownload != null)
               IconButton(
                 icon: const Icon(Icons.download, color: Colors.blue),
                 onPressed: onDownload,
+                tooltip: 'Download',
               ),
             if (onDelete != null)
               IconButton(
                 icon: const Icon(Icons.delete, color: Colors.red),
                 onPressed: onDelete,
+                tooltip: 'Delete',
               ),
           ],
         ),
         onTap: onTap,
       ),
     );
+  }
+  
+  bool _isTextFile(String name) {
+    final ext = p.extension(name).toLowerCase();
+    const textExtensions = ['.txt', '.md', '.json', '.xml', '.yaml', '.yml', '.csv', '.log', '.ini', '.conf', '.sh', '.py', '.js', '.dart', '.html', '.css'];
+    return textExtensions.contains(ext);
+  }
+  
+  Future<void> _openInEditor(String relativePath) async {
+    if (mounted) {
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => TextEditorScreen(
+            spaceId: widget.folder.id,
+            spaceName: widget.folder.name,
+            ownerId: widget.folder.ownerId,
+            relativePath: relativePath,
+          ),
+        ),
+      );
+    }
   }
   
   void _downloadFile(String relativePath) {

@@ -16,10 +16,12 @@ class DiscoveryService {
   BonsoirBroadcast? _broadcast;
   BonsoirDiscovery? _discovery;
   StreamSubscription? _discoverySubscription;
+  Timer? _retryTimer;
   
   final _peersController = StreamController<List<Peer>>.broadcast();
   final _peerResolvedController = StreamController<Peer>.broadcast();
   final Map<String, Peer> _peers = {};
+  final Map<String, BonsoirService> _unresolvedServices = {};
   
   bool _isBroadcasting = false;
   bool _isDiscovering = false;
@@ -46,6 +48,18 @@ class DiscoveryService {
   
   /// Get the current user's username
   String get myUsername => _currentUser?.username ?? 'Unknown';
+  
+  /// Force retry resolution for all unresolved peers
+  void retryUnresolvedPeers() {
+    print('🔄 Retrying resolution for ${_unresolvedServices.length} unresolved services...');
+    for (final entry in _unresolvedServices.entries) {
+      final service = entry.value;
+      if (_discovery != null) {
+        print('🔄 Retrying: ${service.name}');
+        service.resolve(_discovery!.serviceResolver);
+      }
+    }
+  }
   
   /// Start broadcasting our presence on the network
   Future<void> startBroadcast(User user) async {
@@ -162,6 +176,14 @@ class DiscoveryService {
       await _discovery!.start();
       _isDiscovering = true;
       
+      // Start periodic retry for unresolved services
+      _retryTimer?.cancel();
+      _retryTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+        if (_unresolvedServices.isNotEmpty) {
+          retryUnresolvedPeers();
+        }
+      });
+      
       print('🔍 ✅ Peer discovery started');
     } catch (e, stack) {
       print('🔍 ❌ Discovery error: $e');
@@ -261,9 +283,10 @@ class DiscoveryService {
     _peers[peer.id] = peer;
     _notifyPeersChanged();
     
-    // If not resolved (unknown host), force resolution now
+    // If not resolved (unknown host), track for retry and force resolution now
     if (host == 'unknown' && _discovery != null) {
       print('🔍 Attempting to resolve ${service.name}...');
+      _unresolvedServices[peerId] = service;
       service.resolve(_discovery!.serviceResolver);
     }
 
@@ -334,6 +357,9 @@ class DiscoveryService {
     
     _peers[peer.id] = peer;
     _notifyPeersChanged();
+    
+    // Remove from unresolved tracking since we now have a valid host
+    _unresolvedServices.remove(peerId);
     
     print('✅ Resolved peer: ${peer.username} at $host:${service.port}');
     

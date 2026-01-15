@@ -8,9 +8,9 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:stoa/core/data/database.dart';
 import 'package:stoa/core/services/connection_service.dart';
+import 'package:stoa/core/services/storage_service.dart';
 import 'package:uuid/uuid.dart';
 import 'package:watcher/watcher.dart';
-import 'package:path_provider/path_provider.dart';
 
 final remoteFolderServiceProvider = Provider((ref) => RemoteFolderService(ref));
 
@@ -22,8 +22,13 @@ class RemoteFolderService {
   final Ref _ref;
   final Map<String, StreamSubscription> _watchers = {};
   final Map<String, StreamController<List<RemoteFile>>> _remoteFileControllers = {};
+  final Map<String, Completer<String>> _contentCompleters = {};
+  final _textEditController = StreamController<TextEditEvent>.broadcast();
   
   RemoteFolderService(this._ref);
+  
+  /// Stream of incoming text edits from collaborators
+  Stream<TextEditEvent> get textEditStream => _textEditController.stream;
   
   ConnectionService get _connectionService => _ref.read(connectionServiceProvider);
   AppDatabase get _db => _ref.read(databaseProvider);
@@ -67,6 +72,12 @@ class RemoteFolderService {
       case 'download_ack':
         _handleDownloadAck(message.peerId, data);
         break;
+      case 'fetch_content_req':
+        _handleFetchContentReq(message.peerId, data);
+        break;
+      case 'fetch_content_ack':
+        _handleFetchContentAck(message.peerId, data);
+        break;
       case 'upload_req':
         _handleUploadReq(message.peerId, data);
         break;
@@ -81,6 +92,9 @@ class RemoteFolderService {
         break;
       case 'change_notify':
         _handleChangeNotify(message.peerId, data);
+        break;
+      case 'text_edit':
+        _handleTextEdit(message.peerId, data);
         break;
       case 'space_invite':
         _handleSpaceInvite(message.peerId, data);
@@ -97,8 +111,8 @@ class RemoteFolderService {
   // ==================== OWNER CREATES SPACE ====================
   
   Future<String> createSharedSpace(String name) async {
-    final docsDir = await getApplicationDocumentsDirectory();
-    final path = p.join(docsDir.path, 'Stoa', 'SharedSpaces', name);
+    final stoaPath = await StorageService.getStoaDocumentsPath();
+    final path = p.join(stoaPath, 'SharedSpaces', name);
     final dir = Directory(path);
     
     if (!await dir.exists()) {
@@ -234,12 +248,12 @@ class RemoteFolderService {
     final relativePath = data['path'];
     final content = data['content'];
     
-    // Save to Downloads/Stoa/<spaceName>/<relativePath>
     final folder = await (_db.select(_db.sharedFolders)..where((t) => t.id.equals(spaceId))).getSingleOrNull();
     if (folder == null) return;
     
-    final docsDir = await getApplicationDocumentsDirectory();
-    final savePath = p.join(docsDir.path, 'Downloads', 'Stoa', folder.name, relativePath);
+    // Save to SharedSpaces/Downloaded/<spaceName>/<relativePath>
+    final stoaPath = await StorageService.getStoaDocumentsPath();
+    final savePath = p.join(stoaPath, 'SharedSpaces', 'Downloaded', folder.name, relativePath);
     final file = File(savePath);
     
     if (!await file.parent.exists()) {
@@ -247,17 +261,126 @@ class RemoteFolderService {
     }
     
     await file.writeAsBytes(base64Decode(content));
-    debugPrint('📥 Downloaded: $savePath');
-    
-    // Notify via callback (if set)
-    _onDownloadComplete?.call(savePath);
+    debugPrint('📥 Downloaded to: $savePath');
   }
   
-  // Download completion callback
-  void Function(String path)? _onDownloadComplete;
+  // ==================== FETCH CONTENT (for editing) ====================
   
-  void setDownloadCallback(void Function(String path)? callback) {
-    _onDownloadComplete = callback;
+  /// Fetch file content from owner (returns content as String)
+  Future<String> fetchContent(String spaceId, String ownerId, String relativePath) async {
+    final key = '$spaceId:$relativePath';
+    
+    // Create completer to wait for response
+    final completer = Completer<String>();
+    _contentCompleters[key] = completer;
+    
+    _sendSpaceMessage(ownerId, 'fetch_content_req', {
+      'spaceId': spaceId,
+      'path': relativePath,
+    });
+    
+    // Wait for response with timeout
+    try {
+      return await completer.future.timeout(const Duration(seconds: 10));
+    } catch (e) {
+      _contentCompleters.remove(key);
+      throw Exception('Failed to fetch content: $e');
+    }
+  }
+  
+  Future<void> _handleFetchContentReq(String peerId, Map<String, dynamic> data) async {
+    final spaceId = data['spaceId'];
+    final relativePath = data['path'];
+    
+    final folder = await (_db.select(_db.sharedFolders)..where((t) => t.id.equals(spaceId))).getSingleOrNull();
+    if (folder == null || folder.ownerId != 'me') return;
+    
+    // Check if peer is collaborator
+    final collaborator = await (_db.select(_db.spaceCollaborators)
+      ..where((t) => t.spaceId.equals(spaceId) & t.peerId.equals(peerId) & t.status.equals('accepted')))
+      .getSingleOrNull();
+      
+    if (collaborator == null) return;
+    
+    final file = File(p.join(folder.path, relativePath));
+    if (await file.exists()) {
+      final content = await file.readAsString();
+      _sendSpaceMessage(peerId, 'fetch_content_ack', {
+        'spaceId': spaceId,
+        'path': relativePath,
+        'content': content,
+        'success': true,
+      });
+    } else {
+      _sendSpaceMessage(peerId, 'fetch_content_ack', {
+        'spaceId': spaceId,
+        'path': relativePath,
+        'success': false,
+        'error': 'File not found',
+      });
+    }
+  }
+  
+  void _handleFetchContentAck(String peerId, Map<String, dynamic> data) {
+    final spaceId = data['spaceId'];
+    final relativePath = data['path'];
+    final key = '$spaceId:$relativePath';
+    
+    final completer = _contentCompleters.remove(key);
+    if (completer == null) return;
+    
+    if (data['success'] == true) {
+      completer.complete(data['content'] as String);
+    } else {
+      completer.completeError(data['error'] ?? 'Unknown error');
+    }
+  }
+  
+  // ==================== REAL-TIME TEXT EDITING ====================
+  
+  /// Send text edit to owner and other collaborators
+  void sendTextEdit(String spaceId, String ownerId, String relativePath, String newContent) {
+    _sendSpaceMessage(ownerId, 'text_edit', {
+      'spaceId': spaceId,
+      'path': relativePath,
+      'content': newContent,
+    });
+  }
+  
+  Future<void> _handleTextEdit(String peerId, Map<String, dynamic> data) async {
+    final spaceId = data['spaceId'];
+    final relativePath = data['path'];
+    final content = data['content'] as String;
+    
+    final folder = await (_db.select(_db.sharedFolders)..where((t) => t.id.equals(spaceId))).getSingleOrNull();
+    if (folder == null) return;
+    
+    // If we are the owner, save the file and broadcast to other collaborators
+    if (folder.ownerId == 'me') {
+      final file = File(p.join(folder.path, relativePath));
+      await file.writeAsString(content);
+      debugPrint('✏️ Text edit saved: ${file.path}');
+      
+      // Broadcast to other collaborators (except the sender)
+      final collaborators = await _db.getCollaborators(spaceId);
+      for (final c in collaborators) {
+        if (c.peerId != peerId) {
+          _sendSpaceMessage(c.peerId, 'text_edit', {
+            'spaceId': spaceId,
+            'path': relativePath,
+            'content': content,
+          });
+        }
+      }
+    }
+    
+    // Emit event for UI to update
+    _textEditController.add(TextEditEvent(
+      spaceId: spaceId,
+      relativePath: relativePath,
+      content: content,
+      fromPeerId: peerId,
+    ));
   }
   
   // ==================== UPLOAD FILE ====================
@@ -569,4 +692,19 @@ class RemoteFile {
   });
   
   String get name => p.basename(relativePath);
+}
+
+/// Event for real-time text edits from collaborators
+class TextEditEvent {
+  final String spaceId;
+  final String relativePath;
+  final String content;
+  final String fromPeerId;
+  
+  TextEditEvent({
+    required this.spaceId,
+    required this.relativePath,
+    required this.content,
+    required this.fromPeerId,
+  });
 }
