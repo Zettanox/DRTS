@@ -55,6 +55,59 @@ flutter build apk
 flutter build appbundle
 ```
 
+## Development Setup (Windows)
+
+To develop on Windows, you'll need to set up the Flutter environment manually as Nix is not natively supported.
+
+### Prerequisites
+
+1.  **Git for Windows**: [Download & Install](https://git-scm.com/download/win)
+2.  **Flutter SDK**: [Download & Install](https://docs.flutter.dev/get-started/install/windows)
+3.  **Visual Studio 2022** (for Windows Desktop):
+    *   Download Community Edition.
+    *   Select "Desktop development with C++" workload during installation.
+4.  **Android Studio** (for Android):
+    *   Install Android SDK and Command-line Tools.
+    *   Set up an Android Emulator or connect a physical device.
+
+### Getting Started
+
+1.  **Clone the repository:**
+    ```powershell
+    git clone https://github.com/your-username/stoa.git
+    cd stoa
+    ```
+
+2.  **Initialize Flutter:**
+    ```powershell
+    flutter doctor
+    flutter pub get
+    ```
+
+3.  **Run on Windows:**
+    ```powershell
+    flutter run -d windows
+    ```
+
+4.  **Recieve on Network (Important):**
+    *   When running for the first time, Windows Firewall may pop up.
+    *   **Allow access** for both Private and Public networks to ensure local discovery works.
+
+5.  **Run on Android:**
+    ```powershell
+    flutter run -d android
+    ```
+
+### Building on Windows
+
+```powershell
+# Windows EXE
+flutter build windows
+
+# Android APK
+flutter build apk
+```
+
 ## Project Structure
 
 ```
