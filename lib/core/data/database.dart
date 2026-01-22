@@ -179,6 +179,11 @@ class AppDatabase extends _$AppDatabase {
     return (delete(messages)..where((t) => t.id.equals(id))).go();
   }
   
+  // Clear all messages for a specific peer
+  Future<int> clearMessagesForPeer(String peerId) {
+    return (delete(messages)..where((t) => t.peerId.equals(peerId))).go();
+  }
+  
   // Watch recent messages (all types, for home screen)
   Stream<List<Message>> watchRecentMessages(int limit) {
     return (select(messages)

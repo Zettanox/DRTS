@@ -109,7 +109,54 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           IconButton(
             icon: const Icon(Icons.info_outline),
             onPressed: () {
-              // Show peer details
+              showModalBottomSheet(
+                context: context,
+                builder: (context) => Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    ListTile(
+                      leading: const Icon(Icons.person),
+                      title: Text('Peer ID: ${peer.id.substring(0, 8)}...'),
+                      subtitle: Text(peer.host),
+                    ),
+                    const Divider(),
+                    ListTile(
+                      leading: const Icon(Icons.delete_outline, color: Colors.red),
+                      title: const Text('Clear Chat History', style: TextStyle(color: Colors.red)),
+                      onTap: () {
+                        Navigator.pop(context); // Close sheet
+                        showDialog(
+                          context: context,
+                          builder: (ctx) => AlertDialog(
+                            title: const Text('Clear Chat?'),
+                            content: const Text('This will delete all messages in this chat. This action cannot be undone.'),
+                            actions: [
+                              TextButton(
+                                onPressed: () => Navigator.pop(ctx),
+                                child: const Text('Cancel'),
+                              ),
+                              FilledButton(
+                                onPressed: () async {
+                                  Navigator.pop(ctx);
+                                  await db.clearMessagesForPeer(peer.id);
+                                  if (mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(content: Text('Chat history cleared')),
+                                    );
+                                  }
+                                },
+                                style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                                child: const Text('Clear'),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+                ),
+              );
             },
           ),
         ],
