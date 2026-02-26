@@ -1,3 +1,4 @@
+import 'package:stoa/core/utils/logger.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -8,7 +9,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 
 import '../models/peer.dart';
-import '../models/user.dart';
 import '../utils/constants.dart';
 import 'encryption_service.dart';
 import 'storage_service.dart';
@@ -61,15 +61,15 @@ class ConnectionService {
     try {
       _serverSocket = await ServerSocket.bind(InternetAddress.anyIPv4, AppConstants.transferPort);
       _serverSocket!.listen(_handleIncomingConnection);
-      print('🚀 Connection service listening on port ${AppConstants.transferPort}');
+      appLogger.i('🚀 Connection service listening on port ${AppConstants.transferPort}');
     } catch (e) {
-      print('❌ Failed to start connection server: $e');
+      appLogger.i('❌ Failed to start connection server: $e');
     }
   }
   
   /// Handle incoming TCP connection
   void _handleIncomingConnection(Socket socket) {
-    print('🔌 New incoming connection from ${socket.remoteAddress.address}');
+    appLogger.i('🔌 New incoming connection from ${socket.remoteAddress.address}');
     _incomingSockets.add(socket);
     
     // We don't know who this is yet, wait for handshake
@@ -83,29 +83,29 @@ class ConnectionService {
   /// Connect to a peer
   Future<void> connectTo(Peer peer) async {
     if (_connections.containsKey(peer.id)) {
-      print('🔌 Already connected to ${peer.username}');
+      appLogger.i('🔌 Already connected to ${peer.username}');
       return;
     }
     
     // Prevent duplicate connection attempts
     if (_handshakeTimers.containsKey(peer.id)) {
-      print('🔌 Connection attempt already in progress for ${peer.username}');
+      appLogger.i('🔌 Connection attempt already in progress for ${peer.username}');
       return;
     }
     
     try {
-      print('🔌 Connecting to ${peer.host}:${AppConstants.transferPort}...');
+      appLogger.i('🔌 Connecting to ${peer.host}:${AppConstants.transferPort}...');
       final socket = await Socket.connect(peer.host, AppConstants.transferPort, timeout: AppConstants.peerTimeout);
       
       // Initiate handshake
-      print('🤝 Sending handshake to ${peer.username}...');
+      appLogger.i('🤝 Sending handshake to ${peer.username}...');
       await _sendHandshake(socket);
       
       // Set a timeout for the handshake response (15 seconds)
       // This timer will be cancelled in _finalizeConnection on success
       _handshakeTimers[peer.id] = Timer(const Duration(seconds: 15), () {
         if (!_connections.containsKey(peer.id)) {
-          print('⏰ Handshake timed out for ${peer.username}');
+          appLogger.i('⏰ Handshake timed out for ${peer.username}');
           socket.destroy();
           _handshakeTimers.remove(peer.id);
           
@@ -141,7 +141,7 @@ class ConnectionService {
       );
       
     } catch (e) {
-      print('❌ Failed to connect to ${peer.username}: $e');
+      appLogger.i('❌ Failed to connect to ${peer.username}: $e');
       _handshakeTimers.remove(peer.id);
       rethrow;
     }
@@ -208,7 +208,7 @@ class ConnectionService {
         }
       }
     } catch (e) {
-      print('❌ Error handling data: $e');
+      appLogger.i('❌ Error handling data: $e');
     }
   }
   
@@ -249,7 +249,7 @@ class ConnectionService {
         },
       ));
     } catch (e) {
-      print('❌ Failed to decrypt binary chunk: $e');
+      appLogger.i('❌ Failed to decrypt binary chunk: $e');
     }
   }
   
@@ -259,7 +259,7 @@ class ConnectionService {
     final peerUsername = json['username'];
     final peerPublicKey = base64Decode(json['publicKey']);
     
-    print('🤝 Handshake received from $peerUsername ($peerId)');
+    appLogger.i('🤝 Handshake received from $peerUsername ($peerId)');
     
     // 2. If we are the server (incoming socket), we need approval first
     if (_incomingSockets.contains(socket)) {
@@ -268,7 +268,7 @@ class ConnectionService {
       // User asked for "connection establishment process to be two directional", implying interactive.
       // So we emit a request.
       
-      print('🤝 Handshake request from $peerUsername. Waiting for approval...');
+      appLogger.i('🤝 Handshake request from $peerUsername. Waiting for approval...');
       
       // Store pending info
       _pendingRequests[peerId] = {
@@ -281,13 +281,13 @@ class ConnectionService {
       // Auto-timeout pending request after 30 seconds (receiver didn't respond)
       _pendingRequestTimers[peerId] = Timer(const Duration(seconds: 30), () {
         if (_pendingRequests.containsKey(peerId)) {
-          print('⏰ Pending request timed out for $peerUsername');
+          appLogger.i('⏰ Pending request timed out for $peerUsername');
           denyConnection(peerId);
         }
       });
       
       // Notify app to show dialog
-      print('📨 Emitting connectionRequest event for $peerUsername ($peerId)');
+      appLogger.i('📨 Emitting connectionRequest event for $peerUsername ($peerId)');
       _messageController.add(ConnectionMessage(
         peerId: peerId,
         type: ConnectionMessageType.connectionRequest,
@@ -312,7 +312,7 @@ class ConnectionService {
   Future<void> acceptConnection(String peerId) async {
     final data = _pendingRequests[peerId];
     if (data == null) {
-      print('⚠️ No pending request for $peerId');
+      appLogger.i('⚠️ No pending request for $peerId');
       return;
     }
     
@@ -324,7 +324,7 @@ class ConnectionService {
     final username = data['username'] as String;
     final publicKey = data['publicKey'] as List<int>;
     
-    print('✅ Accepting connection from $username...');
+    appLogger.i('✅ Accepting connection from $username...');
     
     try {
       // Check if socket is still usable by accessing remoteAddress
@@ -337,7 +337,7 @@ class ConnectionService {
       // Finalize
       await _finalizeConnection(socket, peerId, username, publicKey);
     } catch (e) {
-      print('⚠️ Socket closed before acceptance could complete: $e');
+      appLogger.i('⚠️ Socket closed before acceptance could complete: $e');
       _messageController.add(ConnectionMessage(
         peerId: peerId,
         type: ConnectionMessageType.handshakeFailed,
@@ -358,14 +358,14 @@ class ConnectionService {
     _pendingRequestTimers.remove(peerId);
     
     final socket = data['socket'] as Socket;
-    print('⛔ Denying connection from ${data['username']}');
+    appLogger.i('⛔ Denying connection from ${data['username']}');
     
     socket.destroy();
     _pendingRequests.remove(peerId);
   }
 
   Future<void> _finalizeConnection(Socket socket, String peerId, String peerUsername, List<int> peerPublicKey) async {
-    print('🔐 Finalizing connection with $peerUsername...');
+    appLogger.i('🔐 Finalizing connection with $peerUsername...');
     
     // Cancel any handshake timeout timer (we succeeded!)
     _handshakeTimers[peerId]?.cancel();
@@ -418,10 +418,10 @@ class ConnectionService {
         avatarColor: null,
       ));
     } catch (e) {
-      print('⚠️ Failed to persist peer: $e');
+      appLogger.i('⚠️ Failed to persist peer: $e');
     }
     
-    print('✅ Secure connection finalized with $peerUsername');
+    appLogger.i('✅ Secure connection finalized with $peerUsername');
   }
   
   /// Process encrypted message
@@ -431,7 +431,7 @@ class ConnectionService {
     
     final secretKey = _sessionKeys[senderId];
     if (secretKey == null) {
-      print('⚠️ Received encrypted message from unknown/unauthenticated peer $senderId');
+      appLogger.i('⚠️ Received encrypted message from unknown/unauthenticated peer $senderId');
       return;
     }
     
@@ -459,7 +459,7 @@ class ConnectionService {
         payload: payload,
       ));
     } catch (e) {
-      print('❌ Failed to decrypt message: $e');
+      appLogger.i('❌ Failed to decrypt message: $e');
     }
   }
   
@@ -535,12 +535,12 @@ class ConnectionService {
   }
   
   void _handleError(Socket socket, dynamic error) {
-    print('❌ Socket error: $error');
+    appLogger.i('❌ Socket error: $error');
     _cleanupSocket(socket);
   }
   
   void _handleDone(Socket socket) {
-    print('🔌 Socket closed');
+    appLogger.i('🔌 Socket closed');
     _cleanupSocket(socket);
   }
   
@@ -574,7 +574,7 @@ class ConnectionService {
         // For quick fix:
         discoveryService.updatePeerStatus(peerIdToRemove!, false);
       } catch (e) {
-        print('⚠️ Failed to update discovery service on disconnect: $e');
+        appLogger.i('⚠️ Failed to update discovery service on disconnect: $e');
       }
     }
     
@@ -610,3 +610,4 @@ final connectionServiceProvider = Provider<ConnectionService>((ref) {
   final encryption = ref.watch(encryptionServiceProvider);
   return ConnectionService(ref, encryption);
 });
+

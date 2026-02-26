@@ -8,7 +8,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:stoa/core/data/database.dart';
 import 'package:stoa/core/services/connection_service.dart';
-import 'package:stoa/core/services/storage_service.dart';
 import 'package:uuid/uuid.dart';
 
 final syncServiceProvider = Provider((ref) => SyncService(ref));

@@ -74,7 +74,7 @@ class StoaTheme {
       bodySmall: GoogleFonts.inter(
         fontSize: 12,
         fontWeight: FontWeight.normal,
-        color: textColor.withOpacity(0.7),
+        color: textColor.withValues(alpha: 0.7),
       ),
       labelLarge: GoogleFonts.inter(
         fontSize: 14,
@@ -85,7 +85,7 @@ class StoaTheme {
   }
   
   static ThemeData get dark {
-    final colorScheme = ColorScheme.dark(
+    const colorScheme = ColorScheme.dark(
       primary: primaryColor,
       secondary: secondaryColor,
       tertiary: accentColor,
@@ -183,7 +183,7 @@ class StoaTheme {
       ),
       
       // Bottom navigation
-      bottomNavigationBarTheme: BottomNavigationBarThemeData(
+      bottomNavigationBarTheme: const BottomNavigationBarThemeData(
         backgroundColor: darkSurface,
         selectedItemColor: primaryColor,
         unselectedItemColor: Colors.white54,
@@ -201,7 +201,7 @@ class StoaTheme {
   }
   
   static ThemeData get light {
-    final colorScheme = ColorScheme.light(
+    const colorScheme = ColorScheme.light(
       primary: primaryColor,
       secondary: secondaryColor,
       tertiary: accentColor,
@@ -268,3 +268,4 @@ class StoaTheme {
     );
   }
 }
+

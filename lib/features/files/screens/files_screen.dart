@@ -174,8 +174,11 @@ class _FilesScreenState extends ConsumerState<FilesScreen> with SingleTickerProv
                        if (_isSelectionMode) {
                          if (!(_isFolderNavigation(item))) {
                             setState(() {
-                              if (isSelected) _selectedIds.remove(item.id);
-                              else _selectedIds.add(item.id);
+                              if (isSelected) {
+                                _selectedIds.remove(item.id);
+                              } else {
+                                _selectedIds.add(item.id);
+                              }
                               if (_selectedIds.isEmpty) _isSelectionMode = false;
                             });
                          }
@@ -503,8 +506,11 @@ class _FilesScreenState extends ConsumerState<FilesScreen> with SingleTickerProv
            ? Checkbox(value: isSelected, onChanged: (v) {
                 // Handle via parent tap usually, but for checkbox specificity:
                setState(() {
-                  if (v == true) _selectedIds.add(item.id); 
-                  else _selectedIds.remove(item.id);
+                  if (v == true) {
+                    _selectedIds.add(item.id);
+                  } else {
+                    _selectedIds.remove(item.id);
+                  }
                   if (_selectedIds.isEmpty) _isSelectionMode = false;
                });
              })

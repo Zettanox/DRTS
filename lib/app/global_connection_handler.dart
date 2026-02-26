@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:window_manager/window_manager.dart';
 
 import '../core/services/connection_service.dart';
 import '../core/services/discovery_service.dart';
@@ -14,14 +16,17 @@ import 'router.dart';
 /// request dialogs appear even when the user is not on the Peers screen.
 class GlobalConnectionHandler extends ConsumerStatefulWidget {
   final Widget child;
-  
+
   const GlobalConnectionHandler({super.key, required this.child});
 
   @override
-  ConsumerState<GlobalConnectionHandler> createState() => _GlobalConnectionHandlerState();
+  ConsumerState<GlobalConnectionHandler> createState() =>
+      _GlobalConnectionHandlerState();
 }
 
-class _GlobalConnectionHandlerState extends ConsumerState<GlobalConnectionHandler> {
+class _GlobalConnectionHandlerState
+    extends ConsumerState<GlobalConnectionHandler>
+    with WindowListener {
   StreamSubscription<ConnectionMessage>? _connectionSubscription;
   StreamSubscription<GroupInvitation>? _groupInviteSubscription;
   StreamSubscription? _peerResolvedSubscription;
@@ -32,6 +37,28 @@ class _GlobalConnectionHandlerState extends ConsumerState<GlobalConnectionHandle
   void initState() {
     super.initState();
     debugPrint('🌐 GlobalConnectionHandler: initState');
+    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+      windowManager.addListener(this);
+    }
+  }
+
+  @override
+  void onWindowClose() async {
+    debugPrint('🛑 Shutting down. Cleaning up services...');
+
+    try {
+      // 1. Stop mDNS discovery and broadcast to prevent C++ crash
+      final discoveryStateNotifier = ref.read(discoveryStateProvider.notifier);
+      await discoveryStateNotifier.stop();
+
+      // 2. Clear resources explicitly if needed
+      // No socket explicit teardown available on connectionService short of stopping discovery
+    } catch (e) {
+      debugPrint('⚠️ Error during cleanup: $e');
+    }
+
+    // Finally close the window
+    await windowManager.destroy();
   }
 
   @override
@@ -40,7 +67,9 @@ class _GlobalConnectionHandlerState extends ConsumerState<GlobalConnectionHandle
     // Set up subscription after dependencies are available
     if (!_isInitialized) {
       _isInitialized = true;
-      debugPrint('🌐 GlobalConnectionHandler: Setting up in didChangeDependencies');
+      debugPrint(
+        '🌐 GlobalConnectionHandler: Setting up in didChangeDependencies',
+      );
       _initializeConnectionService();
       _listenToConnections();
       _listenToGroupInvitations();
@@ -52,109 +81,142 @@ class _GlobalConnectionHandlerState extends ConsumerState<GlobalConnectionHandle
     try {
       debugPrint('🌐 GlobalConnectionHandler: Initializing connection service');
       await ref.read(connectionServiceProvider).initialize();
-      
+
       // Initialize Remote Folder Service for Shared Spaces
       debugPrint('📂 GlobalConnectionHandler: Initializing Shared Spaces');
       ref.read(remoteFolderServiceProvider).initialize();
-      
     } catch (e) {
-      debugPrint('❌ GlobalConnectionHandler: Failed to initialize services: $e');
+      debugPrint(
+        '❌ GlobalConnectionHandler: Failed to initialize services: $e',
+      );
     }
   }
 
   void _listenToConnections() {
     debugPrint('🌐 GlobalConnectionHandler: Subscribing to message stream');
     _connectionSubscription?.cancel(); // Cancel any existing subscription
-    
-    _connectionSubscription = ref.read(connectionServiceProvider).messageStream.listen((message) async {
-      debugPrint('🌐 GlobalConnectionHandler: Received message type: ${message.type}');
-      
-      if (!mounted) {
-        debugPrint('🌐 GlobalConnectionHandler: Not mounted, ignoring');
-        return;
-      }
 
-      if (message.type == ConnectionMessageType.connectionRequest) {
-        // Check if this peer is in a shared group (auto-connect)
-        final isGroupMember = await ref.read(databaseProvider).isPeerInAnyGroup(message.peerId);
-        
-        if (isGroupMember) {
-          debugPrint('🌐 Auto-accepting connection from group member: ${message.peerId}');
-          ref.read(connectionServiceProvider).acceptConnection(message.peerId);
-        } else {
-          debugPrint('🌐 GlobalConnectionHandler: Showing connection request dialog');
-          _showConnectionRequestDialog(message);
-        }
-      }
-    }, onError: (e) {
-      debugPrint('🌐 GlobalConnectionHandler: Stream error: $e');
-    });
+    _connectionSubscription = ref
+        .read(connectionServiceProvider)
+        .messageStream
+        .listen(
+          (message) async {
+            debugPrint(
+              '🌐 GlobalConnectionHandler: Received message type: ${message.type}',
+            );
+
+            if (!mounted) {
+              debugPrint('🌐 GlobalConnectionHandler: Not mounted, ignoring');
+              return;
+            }
+
+            if (message.type == ConnectionMessageType.connectionRequest) {
+              // Check if this peer is in a shared group (auto-connect)
+              final isGroupMember = await ref
+                  .read(databaseProvider)
+                  .isPeerInAnyGroup(message.peerId);
+
+              if (isGroupMember) {
+                debugPrint(
+                  '🌐 Auto-accepting connection from group member: ${message.peerId}',
+                );
+                ref
+                    .read(connectionServiceProvider)
+                    .acceptConnection(message.peerId);
+              } else {
+                debugPrint(
+                  '🌐 GlobalConnectionHandler: Showing connection request dialog',
+                );
+                _showConnectionRequestDialog(message);
+              }
+            }
+          },
+          onError: (e) {
+            debugPrint('🌐 GlobalConnectionHandler: Stream error: $e');
+          },
+        );
   }
 
   void _listenToGroupInvitations() {
     debugPrint('🌐 GlobalConnectionHandler: Subscribing to group invitations');
     _groupInviteSubscription?.cancel();
-    
-    _groupInviteSubscription = ref.read(groupServiceProvider).invitationStream.listen((invitation) {
-      if (!mounted) return;
-      _showGroupInvitationDialog(invitation);
-    });
+
+    _groupInviteSubscription = ref
+        .read(groupServiceProvider)
+        .invitationStream
+        .listen((invitation) {
+          if (!mounted) return;
+          _showGroupInvitationDialog(invitation);
+        });
   }
 
   void _listenToPeerResolution() {
-    debugPrint('🌐 GlobalConnectionHandler: Subscribing to peer resolution for auto-connect');
+    debugPrint(
+      '🌐 GlobalConnectionHandler: Subscribing to peer resolution for auto-connect',
+    );
     _peerResolvedSubscription?.cancel();
-    
-    _peerResolvedSubscription = ref.read(discoveryServiceProvider).peerResolvedStream.listen((peer) async {
-      if (!mounted) return;
-      
-      // Check if this peer is a group member
-      final isGroupMember = await ref.read(databaseProvider).isPeerInAnyGroup(peer.id);
-      
-      if (isGroupMember && peer.host != 'unknown') {
-        final connectionService = ref.read(connectionServiceProvider);
-        
-        // Only initiate if not already connected
-        if (!connectionService.isConnectedTo(peer.id)) {
-          debugPrint('🔄 Auto-initiating connection to group member: ${peer.username}');
-          try {
-            await connectionService.connectTo(peer);
-          } catch (e) {
-            debugPrint('⚠️ Auto-connect failed: $e');
+
+    _peerResolvedSubscription = ref
+        .read(discoveryServiceProvider)
+        .peerResolvedStream
+        .listen((peer) async {
+          if (!mounted) return;
+
+          // Check if this peer is a group member
+          final isGroupMember = await ref
+              .read(databaseProvider)
+              .isPeerInAnyGroup(peer.id);
+
+          if (isGroupMember && peer.host != 'unknown') {
+            final connectionService = ref.read(connectionServiceProvider);
+
+            // Only initiate if not already connected
+            if (!connectionService.isConnectedTo(peer.id)) {
+              debugPrint(
+                '🔄 Auto-initiating connection to group member: ${peer.username}',
+              );
+              try {
+                await connectionService.connectTo(peer);
+              } catch (e) {
+                debugPrint('⚠️ Auto-connect failed: $e');
+              }
+            }
           }
-        }
-      }
-    });
+        });
   }
 
   void _showConnectionRequestDialog(ConnectionMessage message) {
     if (_isDialogShowing) {
-      debugPrint('🌐 GlobalConnectionHandler: Dialog already showing, skipping');
+      debugPrint(
+        '🌐 GlobalConnectionHandler: Dialog already showing, skipping',
+      );
       return;
     }
-    
+
     final username = message.payload['username'] as String?;
     final peerId = message.peerId;
 
     debugPrint('🌐 GlobalConnectionHandler: Showing dialog for $username');
-    
+
     // Get the navigator key from the router provider
     final navigatorKey = ref.read(navigatorKeyProvider);
     final navigatorContext = navigatorKey.currentContext;
-    
+
     if (navigatorContext == null) {
       debugPrint('❌ GlobalConnectionHandler: Navigator context not available');
       return;
     }
-    
+
     _isDialogShowing = true;
-    
+
     showDialog(
       context: navigatorContext,
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
         title: const Text('Connection Request'),
-        content: Text('${username ?? 'Unknown user'} wants to connect with you.'),
+        content: Text(
+          '${username ?? 'Unknown user'} wants to connect with you.',
+        ),
         actions: [
           TextButton(
             onPressed: () {
@@ -181,24 +243,28 @@ class _GlobalConnectionHandlerState extends ConsumerState<GlobalConnectionHandle
 
   void _showGroupInvitationDialog(GroupInvitation invitation) {
     if (_isDialogShowing) return;
-    
+
     final navigatorKey = ref.read(navigatorKeyProvider);
     final navigatorContext = navigatorKey.currentContext;
-    
+
     if (navigatorContext == null) return;
-    
+
     _isDialogShowing = true;
-    
+
     showDialog(
       context: navigatorContext,
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
         title: const Text('Group Invitation'),
-        content: Text('${invitation.ownerName} invites you to join "${invitation.groupName}"'),
+        content: Text(
+          '${invitation.ownerName} invites you to join "${invitation.groupName}"',
+        ),
         actions: [
           TextButton(
             onPressed: () {
-              ref.read(groupServiceProvider).rejectInvitation(invitation.groupId);
+              ref
+                  .read(groupServiceProvider)
+                  .rejectInvitation(invitation.groupId);
               Navigator.pop(ctx);
               _isDialogShowing = false;
             },
@@ -206,7 +272,9 @@ class _GlobalConnectionHandlerState extends ConsumerState<GlobalConnectionHandle
           ),
           FilledButton(
             onPressed: () {
-              ref.read(groupServiceProvider).acceptInvitation(invitation.groupId);
+              ref
+                  .read(groupServiceProvider)
+                  .acceptInvitation(invitation.groupId);
               Navigator.pop(ctx);
               _isDialogShowing = false;
             },
@@ -222,6 +290,9 @@ class _GlobalConnectionHandlerState extends ConsumerState<GlobalConnectionHandle
   @override
   void dispose() {
     debugPrint('🌐 GlobalConnectionHandler: dispose');
+    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+      windowManager.removeListener(this);
+    }
     _connectionSubscription?.cancel();
     _groupInviteSubscription?.cancel();
     _peerResolvedSubscription?.cancel();
@@ -233,4 +304,3 @@ class _GlobalConnectionHandlerState extends ConsumerState<GlobalConnectionHandle
     return widget.child;
   }
 }
-

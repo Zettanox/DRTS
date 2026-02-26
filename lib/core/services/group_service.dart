@@ -1,3 +1,4 @@
+import 'package:stoa/core/utils/logger.dart';
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -137,7 +138,7 @@ class GroupService {
       await inviteToGroup(groupId, peer);
     }
     
-    print('👥 Created group: $name with ${members.length} invited members');
+    appLogger.i('👥 Created group: $name with ${members.length} invited members');
     
     return (await _db.getGroup(groupId))!;
   }
@@ -165,7 +166,7 @@ class GroupService {
       'ownerName': _myUsername,
     });
     
-    print('📨 Sent group invite to ${peer.username} for ${group.name}');
+    appLogger.i('📨 Sent group invite to ${peer.username} for ${group.name}');
   }
   
   // ==================== INVITATION HANDLING ====================
@@ -182,7 +183,7 @@ class GroupService {
     _pendingInvitations[invitation.groupId] = invitation;
     _invitationController.add(invitation);
     
-    print('📬 Received group invite: ${invitation.groupName} from ${invitation.ownerName}');
+    appLogger.i('📬 Received group invite: ${invitation.groupName} from ${invitation.ownerName}');
   }
   
   /// Accept a group invitation
@@ -227,7 +228,7 @@ class GroupService {
       'username': _myUsername,
     });
     
-    print('✅ Accepted group invitation: ${invitation.groupName}');
+    appLogger.i('✅ Accepted group invitation: ${invitation.groupName}');
   }
   
   /// Reject a group invitation
@@ -243,7 +244,7 @@ class GroupService {
       'peerId': _myPeerId,
     });
     
-    print('❌ Rejected group invitation: ${invitation.groupName}');
+    appLogger.i('❌ Rejected group invitation: ${invitation.groupName}');
   }
   
   void _handleInviteResponse(String senderId, Map<String, dynamic> payload) async {
@@ -271,11 +272,11 @@ class GroupService {
         'username': username,
       }, excludePeerId: peerId);
       
-      print('✅ ${username} accepted group invitation');
+      appLogger.i('✅ $username accepted group invitation');
     } else {
       // Remove from pending members
       await _db.removeGroupMember(groupId, peerId);
-      print('❌ $peerId rejected group invitation');
+      appLogger.i('❌ $peerId rejected group invitation');
     }
   }
   
@@ -294,7 +295,7 @@ class GroupService {
       joinedAt: DateTime.now(),
     ));
     
-    print('👤 New member added to group: $username');
+    appLogger.i('👤 New member added to group: $username');
   }
   
   void _handleMemberRemoved(Map<String, dynamic> payload) async {
@@ -302,7 +303,7 @@ class GroupService {
     final peerId = payload['peerId'];
     
     await _db.removeGroupMember(groupId, peerId);
-    print('👤 Member removed from group: $peerId');
+    appLogger.i('👤 Member removed from group: $peerId');
   }
   
   /// Remove a member from a group (owner only)
@@ -335,7 +336,7 @@ class GroupService {
     // Remove self and local data
     await _db.deleteGroup(groupId);
     
-    print('👋 Left group: ${group.name}');
+    appLogger.i('👋 Left group: ${group.name}');
   }
   
   // ==================== MESSAGING ====================
@@ -397,13 +398,13 @@ class GroupService {
     // Delete locally
     await _db.deleteGroup(groupId);
     
-    print('🗑️ Deleted group: ${group.name}');
+    appLogger.i('🗑️ Deleted group: ${group.name}');
   }
   
   void _handleGroupDeleted(Map<String, dynamic> payload) async {
     final groupId = payload['groupId'];
     await _db.deleteGroup(groupId);
-    print('🗑️ Group was deleted by owner');
+    appLogger.i('🗑️ Group was deleted by owner');
   }
   
   // ==================== AUTO-CONNECT HELPER ====================
@@ -502,7 +503,7 @@ class GroupService {
         );
         
         // Queue the file transfer
-        print('📂 Queuing group file "$filename" for ${member.username}');
+        appLogger.i('📂 Queuing group file "$filename" for ${member.username}');
         fts.queueFile(peer, file, groupId: groupId);
       }
     }
@@ -515,3 +516,4 @@ class GroupService {
 final groupServiceProvider = Provider<GroupService>((ref) {
   return GroupService(ref);
 });
+

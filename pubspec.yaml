@@ -46,6 +46,7 @@ dependencies:
   uuid: ^4.5.1
   freezed_annotation: ^2.4.4
   json_annotation: ^4.9.0
+  logger: ^2.5.0
   
   # File picking and handling
   file_picker: ^8.0.0
@@ -58,6 +59,7 @@ dependencies:
   # path_provider is already included above
   path: ^1.9.0
   archive: ^4.0.7
+  window_manager: ^0.5.1
 
 dev_dependencies:
   flutter_test:

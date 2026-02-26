@@ -227,7 +227,7 @@ class _PeersScreenState extends ConsumerState<PeersScreen> {
         color: StoaTheme.darkSurface,
         border: Border(
           bottom: BorderSide(
-            color: Colors.white.withOpacity(0.1),
+            color: Colors.white.withValues(alpha: 0.1),
           ),
         ),
       ),
@@ -243,7 +243,7 @@ class _PeersScreenState extends ConsumerState<PeersScreen> {
               boxShadow: state.isDiscovering
                   ? [
                       BoxShadow(
-                        color: StoaTheme.success.withOpacity(0.5),
+                        color: StoaTheme.success.withValues(alpha: 0.5),
                         blurRadius: 8,
                         spreadRadius: 2,
                       ),
@@ -287,13 +287,13 @@ class _PeersScreenState extends ConsumerState<PeersScreen> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
-                color: StoaTheme.primaryColor.withOpacity(0.2),
+                color: StoaTheme.primaryColor.withValues(alpha: 0.2),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(
+                  const Icon(
                     Icons.broadcast_on_personal,
                     size: 14,
                     color: StoaTheme.primaryColor,
@@ -317,15 +317,15 @@ class _PeersScreenState extends ConsumerState<PeersScreen> {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(12),
-      color: StoaTheme.error.withOpacity(0.1),
+      color: StoaTheme.error.withValues(alpha: 0.1),
       child: Row(
         children: [
-          Icon(Icons.error_outline, color: StoaTheme.error, size: 20),
+          const Icon(Icons.error_outline, color: StoaTheme.error, size: 20),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
               error,
-              style: TextStyle(color: StoaTheme.error),
+              style: const TextStyle(color: StoaTheme.error),
             ),
           ),
           IconButton(
@@ -573,7 +573,7 @@ class _PeerOptionsSheet extends StatelessWidget {
         width: 40,
         height: 40,
         decoration: BoxDecoration(
-          color: color.withOpacity(0.1),
+          color: color.withValues(alpha: 0.1),
           borderRadius: BorderRadius.circular(10),
         ),
         child: Icon(icon, color: color),
@@ -590,3 +590,4 @@ class _PeerOptionsSheet extends StatelessWidget {
     return Color(int.parse('FF$hexCode', radix: 16));
   }
 }
+

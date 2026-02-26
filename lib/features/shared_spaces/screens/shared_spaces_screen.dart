@@ -31,7 +31,7 @@ class SharedSpacesScreen extends ConsumerWidget {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                   Icon(Icons.folder_open, size: 64, color: Colors.white24),
+                   const Icon(Icons.folder_open, size: 64, color: Colors.white24),
                    const SizedBox(height: 16),
                    Text('No shared spaces yet', style: Theme.of(context).textTheme.titleMedium),
                    const SizedBox(height: 8),
@@ -125,8 +125,8 @@ class SharedSpacesScreen extends ConsumerWidget {
                         value: 'delete',
                         child: Row(
                           children: [
-                            Icon(Icons.delete, size: 20, color: Colors.red),
-                            SizedBox(width: 8),
+                            const Icon(Icons.delete, size: 20, color: Colors.red),
+                            const SizedBox(width: 8),
                             Text(isOwner ? 'Delete Space' : 'Leave Space'),
                           ],
                         ),

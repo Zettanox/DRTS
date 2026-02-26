@@ -86,7 +86,7 @@ class _WelcomeScreenState extends ConsumerState<WelcomeScreen> {
                         borderRadius: BorderRadius.circular(24),
                         boxShadow: [
                           BoxShadow(
-                            color: StoaTheme.primaryColor.withOpacity(0.4),
+                            color: StoaTheme.primaryColor.withValues(alpha: 0.4),
                             blurRadius: 30,
                             offset: const Offset(0, 10),
                           ),
@@ -183,9 +183,9 @@ class _WelcomeScreenState extends ConsumerState<WelcomeScreen> {
                       Container(
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
-                          color: StoaTheme.error.withOpacity(0.1),
+                          color: StoaTheme.error.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: StoaTheme.error.withOpacity(0.3)),
+                          border: Border.all(color: StoaTheme.error.withValues(alpha: 0.3)),
                         ),
                         child: Row(
                           children: [
@@ -252,3 +252,4 @@ class _WelcomeScreenState extends ConsumerState<WelcomeScreen> {
     );
   }
 }
+

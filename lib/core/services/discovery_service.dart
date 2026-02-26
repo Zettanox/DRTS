@@ -1,5 +1,5 @@
+import 'package:stoa/core/utils/logger.dart';
 import 'dart:async';
-import 'dart:io';
 import 'package:bonsoir/bonsoir.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -51,11 +51,11 @@ class DiscoveryService {
   
   /// Force retry resolution for all unresolved peers
   void retryUnresolvedPeers() {
-    print('🔄 Retrying resolution for ${_unresolvedServices.length} unresolved services...');
+    appLogger.i('🔄 Retrying resolution for ${_unresolvedServices.length} unresolved services...');
     for (final entry in _unresolvedServices.entries) {
       final service = entry.value;
       if (_discovery != null) {
-        print('🔄 Retrying: ${service.name}');
+        appLogger.i('🔄 Retrying: ${service.name}');
         service.resolve(_discovery!.serviceResolver);
       }
     }
@@ -64,7 +64,7 @@ class DiscoveryService {
   /// Start broadcasting our presence on the network
   Future<void> startBroadcast(User user) async {
     if (_isBroadcasting) {
-      print('📡 Already broadcasting');
+      appLogger.i('📡 Already broadcasting');
       return;
     }
     
@@ -84,20 +84,20 @@ class DiscoveryService {
         },
       );
       
-      print('📡 Creating broadcast for ${service.name} on port ${service.port}');
+      appLogger.i('📡 Creating broadcast for ${service.name} on port ${service.port}');
       
       _broadcast = BonsoirBroadcast(service: service);
       
       await _broadcast!.ready;
-      print('📡 Broadcast ready');
+      appLogger.i('📡 Broadcast ready');
       
       await _broadcast!.start();
       
       _isBroadcasting = true;
-      print('📡 ✅ Broadcasting as ${user.username} (${service.name})');
+      appLogger.i('📡 ✅ Broadcasting as ${user.username} (${service.name})');
     } catch (e, stack) {
-      print('📡 ❌ Broadcast error: $e');
-      print(stack);
+      appLogger.i('📡 ❌ Broadcast error: $e');
+      appLogger.i(stack);
       rethrow;
     }
   }
@@ -109,27 +109,27 @@ class DiscoveryService {
     try {
       await _broadcast!.stop();
     } catch (e) {
-      print('📡 Stop broadcast error: $e');
+      appLogger.i('📡 Stop broadcast error: $e');
     }
     _broadcast = null;
     _isBroadcasting = false;
     
-    print('📡 Stopped broadcasting');
+    appLogger.i('📡 Stopped broadcasting');
   }
   
   /// Start discovering peers on the network
   Future<void> startDiscovery() async {
     if (_isDiscovering) {
-      print('🔍 Already discovering');
+      appLogger.i('🔍 Already discovering');
       return;
     }
     
     try {
-      print('🔍 Creating discovery for $_serviceType');
+      appLogger.i('🔍 Creating discovery for $_serviceType');
       _discovery = BonsoirDiscovery(type: _serviceType);
       
       await _discovery!.ready;
-      print('🔍 Discovery ready');
+      appLogger.i('🔍 Discovery ready');
       
       // Cancel any existing subscription
       _discoverySubscription?.cancel();
@@ -137,7 +137,7 @@ class DiscoveryService {
       // Listen for discovery events
       _discoverySubscription = _discovery!.eventStream!.listen(
         (event) {
-          print('🔍 Event: ${event.type} - ${event.service?.name ?? "no service"}');
+          appLogger.i('🔍 Event: ${event.type} - ${event.service?.name ?? "no service"}');
           
           switch (event.type) {
             case BonsoirDiscoveryEventType.discoveryServiceFound:
@@ -156,20 +156,20 @@ class DiscoveryService {
               }
               break;
             case BonsoirDiscoveryEventType.discoveryStarted:
-              print('🔍 Discovery started successfully');
+              appLogger.i('🔍 Discovery started successfully');
               break;
             case BonsoirDiscoveryEventType.discoveryStopped:
-              print('🔍 Discovery stopped');
+              appLogger.i('🔍 Discovery stopped');
               break;
             default:
               break;
           }
         },
         onError: (error) {
-          print('🔍 ❌ Discovery stream error: $error');
+          appLogger.i('🔍 ❌ Discovery stream error: $error');
         },
         onDone: () {
-          print('🔍 Discovery stream closed');
+          appLogger.i('🔍 Discovery stream closed');
         },
       );
       
@@ -184,10 +184,10 @@ class DiscoveryService {
         }
       });
       
-      print('🔍 ✅ Peer discovery started');
+      appLogger.i('🔍 ✅ Peer discovery started');
     } catch (e, stack) {
-      print('🔍 ❌ Discovery error: $e');
-      print(stack);
+      appLogger.i('🔍 ❌ Discovery error: $e');
+      appLogger.i(stack);
       rethrow;
     }
   }
@@ -201,20 +201,20 @@ class DiscoveryService {
       _discoverySubscription = null;
       await _discovery!.stop();
     } catch (e) {
-      print('🔍 Stop discovery error: $e');
+      appLogger.i('🔍 Stop discovery error: $e');
     }
     _discovery = null;
     _isDiscovering = false;
     
-    print('🔍 Stopped peer discovery');
+    appLogger.i('🔍 Stopped peer discovery');
   }
   
   /// Handle when a service is found (may not be fully resolved yet)
   void _handleServiceFound(BonsoirService service) {
-    print('🔍 Service found: ${service.name}');
-    print('   Type: ${service.type}');
-    print('   Port: ${service.port}');
-    print('   Attributes: ${service.attributes}');
+    appLogger.i('🔍 Service found: ${service.name}');
+    appLogger.i('   Type: ${service.type}');
+    appLogger.i('   Port: ${service.port}');
+    appLogger.i('   Attributes: ${service.attributes}');
     
     final attributes = service.attributes;
     
@@ -223,13 +223,13 @@ class DiscoveryService {
     final username = attributes['username'];
     
     if (peerId == null || username == null) {
-      print('🔍 Service missing required attributes, waiting for resolution...');
+      appLogger.i('🔍 Service missing required attributes, waiting for resolution...');
       return;
     }
     
     // Skip ourselves
     if (peerId == _currentUser?.id) {
-      print('🔍 Skipping self');
+      appLogger.i('🔍 Skipping self');
       return;
     }
     
@@ -256,7 +256,7 @@ class DiscoveryService {
       // IMPORTANT: Don't overwrite a valid host with 'unknown'
       if (host == 'unknown' && existing.host != 'unknown') {
         host = existing.host;
-        print('🔍 Preserving known host for $username: $host');
+        appLogger.i('🔍 Preserving known host for $username: $host');
       }
       
       // If we already have a valid host, just update last seen
@@ -285,34 +285,34 @@ class DiscoveryService {
     
     // If not resolved (unknown host), track for retry and force resolution now
     if (host == 'unknown' && _discovery != null) {
-      print('🔍 Attempting to resolve ${service.name}...');
+      appLogger.i('🔍 Attempting to resolve ${service.name}...');
       _unresolvedServices[peerId] = service;
       service.resolve(_discovery!.serviceResolver);
     }
 
-    print('✅ Added peer: ${peer.username} (host: $host, port: $port)');
+    appLogger.i('✅ Added peer: ${peer.username} (host: $host, port: $port)');
   }
   
   /// Handle when a service is resolved (we have full details)
   void _handleServiceResolved(ResolvedBonsoirService service) {
-    print('🔍 Resolving service: ${service.name}');
-    print('   Host: ${service.host}');
-    print('   Port: ${service.port}');
-    print('   Attributes: ${service.attributes}');
+    appLogger.i('🔍 Resolving service: ${service.name}');
+    appLogger.i('   Host: ${service.host}');
+    appLogger.i('   Port: ${service.port}');
+    appLogger.i('   Attributes: ${service.attributes}');
     
     final attributes = service.attributes;
     final peerId = attributes['id'];
     
     // Skip ourselves
     if (peerId == _currentUser?.id) {
-      print('🔍 Skipping self');
+      appLogger.i('🔍 Skipping self');
       return;
     }
     
     // Get the IP address
     String? host = service.host;
     if (host == null || host.isEmpty) {
-      print('⚠️ Service ${service.name} has no host');
+      appLogger.i('⚠️ Service ${service.name} has no host');
       return;
     }
     
@@ -323,7 +323,7 @@ class DiscoveryService {
     
     // Skip IPv6 link-local addresses (fe80::) - prefer IPv4
     if (host.startsWith('fe80:') || host.startsWith('Fe80:')) {
-      print('⚠️ Skipping link-local IPv6 address: $host');
+      appLogger.i('⚠️ Skipping link-local IPv6 address: $host');
       return;
     }
     
@@ -331,7 +331,7 @@ class DiscoveryService {
     if (host.contains(':') && _peers.containsKey(peerId)) {
       final existing = _peers[peerId]!;
       if (existing.host != 'unknown' && !existing.host.contains(':')) {
-        print('🔍 Keeping existing IPv4 address for peer: ${existing.host}');
+        appLogger.i('🔍 Keeping existing IPv4 address for peer: ${existing.host}');
         host = existing.host;
       }
     }
@@ -361,7 +361,7 @@ class DiscoveryService {
     // Remove from unresolved tracking since we now have a valid host
     _unresolvedServices.remove(peerId);
     
-    print('✅ Resolved peer: ${peer.username} at $host:${service.port}');
+    appLogger.i('✅ Resolved peer: ${peer.username} at $host:${service.port}');
     
     // Emit resolved peer event for auto-connect handling
     if (!isConnected && connectionStatus != PeerConnectionStatus.connecting) {
@@ -378,20 +378,20 @@ class DiscoveryService {
       
       // Don't remove peers that are actively connected
       if (peer.isConnected || peer.connectionStatus == PeerConnectionStatus.connected) {
-        print('🔍 Keeping connected peer: ${peer.username} (mDNS lost but still connected)');
+        appLogger.i('🔍 Keeping connected peer: ${peer.username} (mDNS lost but still connected)');
         return;
       }
       
       _peers.remove(peerId);
       _notifyPeersChanged();
-      print('❌ Lost peer: ${peer.username}');
+      appLogger.i('❌ Lost peer: ${peer.username}');
     }
   }
   
   /// Notify listeners that peers have changed
   void _notifyPeersChanged() {
     _peersController.add(peers);
-    print('📋 Total peers: ${peers.length}');
+    appLogger.i('📋 Total peers: ${peers.length}');
   }
   
   /// Manually add a peer (e.g. when connected via socket but not found via mDNS)
@@ -416,7 +416,7 @@ class DiscoveryService {
       return;
     }
     
-    print('✅ Added connected peer manually: ${peer.username}');
+    appLogger.i('✅ Added connected peer manually: ${peer.username}');
     _peers[peer.id] = peer;
     _notifyPeersChanged();
   }
@@ -510,7 +510,7 @@ class DiscoveryStateNotifier extends StateNotifier<DiscoveryState> {
         return;
       }
       
-      print('🚀 Starting discovery for user: ${user.username} (${user.id})');
+      appLogger.i('🚀 Starting discovery for user: ${user.username} (${user.id})');
       
       final discovery = _ref.read(discoveryServiceProvider);
       
@@ -541,11 +541,11 @@ class DiscoveryStateNotifier extends StateNotifier<DiscoveryState> {
         error: null,
       );
       
-      print('🚀 ✅ Discovery fully started');
+      appLogger.i('🚀 ✅ Discovery fully started');
     } catch (e, stack) {
       state = state.copyWith(error: 'Failed to start discovery: $e');
-      print('❌ Discovery error: $e');
-      print(stack);
+      appLogger.i('❌ Discovery error: $e');
+      appLogger.i(stack);
     }
   }
   
@@ -575,3 +575,4 @@ class DiscoveryStateNotifier extends StateNotifier<DiscoveryState> {
     super.dispose();
   }
 }
+

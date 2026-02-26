@@ -85,7 +85,7 @@ class _GroupCard extends ConsumerWidget {
       margin: const EdgeInsets.only(bottom: 12),
       child: ListTile(
         leading: CircleAvatar(
-          backgroundColor: StoaTheme.primaryColor.withOpacity(0.2),
+          backgroundColor: StoaTheme.primaryColor.withValues(alpha: 0.2),
           child: const Icon(Icons.group, color: Colors.white70),
         ),
         title: Text(
@@ -105,3 +105,4 @@ class _GroupCard extends ConsumerWidget {
     );
   }
 }
+

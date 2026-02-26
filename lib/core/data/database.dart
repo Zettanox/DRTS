@@ -1,3 +1,4 @@
+import 'package:stoa/core/utils/logger.dart';
 import 'dart:io';
 
 import 'package:drift/drift.dart';
@@ -283,7 +284,7 @@ class AppDatabase extends _$AppDatabase {
   
   // Update file path for a group message after download
   Future<void> updateGroupMessageFile(String groupId, String senderId, String filename, String path) async {
-    print('🔍 Attempting to update group message: groupId=$groupId, sender=$senderId, file=$filename');
+    appLogger.i('🔍 Attempting to update group message: groupId=$groupId, sender=$senderId, file=$filename');
     
     // Retry logic to handle race conditions where message insertion might lag behind file transfer
     for (int i = 0; i < 3; i++) {
@@ -298,7 +299,7 @@ class AppDatabase extends _$AppDatabase {
         final message = await query.getSingleOrNull();
         
         if (message != null) {
-          print('✅ Found message ${message.id}, updating path to $path');
+          appLogger.i('✅ Found message ${message.id}, updating path to $path');
           await (update(groupMessages)..where((t) => t.id.equals(message.id))).write(
             GroupMessagesCompanion(
                 filePath: Value(path),
@@ -308,11 +309,11 @@ class AppDatabase extends _$AppDatabase {
           return;
         }
         
-        print('⚠️ Message not found (attempt ${i + 1}/3), retrying in 500ms...');
+        appLogger.i('⚠️ Message not found (attempt ${i + 1}/3), retrying in 500ms...');
         await Future.delayed(const Duration(milliseconds: 500));
     }
     
-    print('❌ Failed to find matching group message for file update after retries.');
+    appLogger.i('❌ Failed to find matching group message for file update after retries.');
   }
 
   // ==================== SHARED SPACES QUERIES ====================
@@ -367,7 +368,7 @@ class AppDatabase extends _$AppDatabase {
      
      if (toDelete.isNotEmpty) {
        await (delete(sharedFiles)..where((t) => t.id.isIn(toDelete))).go();
-       print('🧹 Purged ${toDelete.length} ignored files from database.');
+       appLogger.i('🧹 Purged ${toDelete.length} ignored files from database.');
      }
   }
   
@@ -427,3 +428,4 @@ final databaseProvider = Provider<AppDatabase>((ref) {
   ref.onDispose(db.close);
   return db;
 });
+

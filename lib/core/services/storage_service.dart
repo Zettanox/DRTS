@@ -1,3 +1,4 @@
+import 'package:stoa/core/utils/logger.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -110,7 +111,7 @@ class StorageService {
       try {
         await OpenFilex.open(path);
       } catch (e) {
-        print('Could not open directory: $e');
+        appLogger.i('Could not open directory: $e');
       }
     }
   }
@@ -120,3 +121,4 @@ class StorageService {
 final storageServiceProvider = Provider<StorageService>((ref) {
   return StorageService();
 });
+

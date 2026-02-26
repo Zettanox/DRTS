@@ -72,13 +72,13 @@ class PeerCard extends StatelessWidget {
         return Container(
           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
           decoration: BoxDecoration(
-            color: StoaTheme.success.withOpacity(0.2),
+            color: StoaTheme.success.withValues(alpha: 0.2),
             borderRadius: BorderRadius.circular(4),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.lock, size: 10, color: StoaTheme.success),
+              const Icon(Icons.lock, size: 10, color: StoaTheme.success),
               const SizedBox(width: 4),
               Text(
                 'Connected',
@@ -95,13 +95,13 @@ class PeerCard extends StatelessWidget {
         return Container(
           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
           decoration: BoxDecoration(
-            color: StoaTheme.secondaryColor.withOpacity(0.2),
+            color: StoaTheme.secondaryColor.withValues(alpha: 0.2),
             borderRadius: BorderRadius.circular(4),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              SizedBox(
+              const SizedBox(
                 width: 10,
                 height: 10,
                 child: CircularProgressIndicator(
@@ -124,7 +124,7 @@ class PeerCard extends StatelessWidget {
         return Container(
           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
           decoration: BoxDecoration(
-            color: StoaTheme.error.withOpacity(0.2),
+            color: StoaTheme.error.withValues(alpha: 0.2),
             borderRadius: BorderRadius.circular(4),
           ),
           child: Text(
@@ -144,7 +144,7 @@ class PeerCard extends StatelessWidget {
     if (peer.connectionStatus == PeerConnectionStatus.connecting) {
       return const SizedBox.shrink();
     }
-    return Icon(
+    return const Icon(
       Icons.chevron_right,
       color: Colors.white54,
     );
@@ -161,7 +161,7 @@ class PeerCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(14),
         boxShadow: [
           BoxShadow(
-            color: color.withOpacity(0.3),
+            color: color.withValues(alpha: 0.3),
             blurRadius: 8,
             offset: const Offset(0, 4),
           ),
@@ -188,3 +188,4 @@ class PeerCard extends StatelessWidget {
     return Color(int.parse('FF$hexCode', radix: 16));
   }
 }
+

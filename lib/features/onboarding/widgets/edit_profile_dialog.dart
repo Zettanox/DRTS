@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
 import '../../../core/models/user.dart';
 import '../../../core/services/storage_service.dart';
@@ -113,7 +112,7 @@ class _EditProfileDialogState extends ConsumerState<EditProfileDialog> {
                     borderRadius: BorderRadius.circular(20),
                     boxShadow: [
                       BoxShadow(
-                        color: _parseColor(_selectedColor).withOpacity(0.4),
+                        color: _parseColor(_selectedColor).withValues(alpha: 0.4),
                         blurRadius: 20,
                         offset: const Offset(0, 8),
                       ),
@@ -251,3 +250,4 @@ class _EditProfileDialogState extends ConsumerState<EditProfileDialog> {
     return Color(int.parse('FF$hexCode', radix: 16));
   }
 }
+

@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'router.dart';
 import 'theme.dart';
 import 'global_connection_handler.dart';
@@ -11,7 +10,7 @@ class StoaApp extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final router = ref.watch(routerProvider);
-    
+
     return MaterialApp.router(
       title: 'Stoa',
       debugShowCheckedModeBanner: false,
@@ -22,9 +21,7 @@ class StoaApp extends ConsumerWidget {
       // Wrap the entire app content with GlobalConnectionHandler
       // so it has access to MaterialLocalizations for showing dialogs
       builder: (context, child) {
-        return GlobalConnectionHandler(
-          child: child ?? const SizedBox.shrink(),
-        );
+        return GlobalConnectionHandler(child: child ?? const SizedBox.shrink());
       },
     );
   }

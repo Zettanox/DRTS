@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import 'dart:io';
 
 import '../../../core/models/peer.dart';
@@ -22,9 +21,8 @@ class ChatScreen extends ConsumerStatefulWidget {
 }
 
 class _ChatScreenState extends ConsumerState<ChatScreen> {
-  final ScrollController _scrollController = ScrollController();
   final TextEditingController _messageController = TextEditingController();
-  
+
   @override
   void dispose() {
     _messageController.dispose();
@@ -33,17 +31,17 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // We need to find the peer object. 
+    // We need to find the peer object.
     // Since we navigate by ID, we look it up from discovery service
     // In a real app we'd have a unified PeerRepository
     // final discoveryService = ref.watch(discoveryServiceProvider); // Not needed if we watch state
     final discoveryState = ref.watch(discoveryStateProvider);
     final peers = discoveryState.peers;
-    
+
     // Also check active manually added peers if needed, but the stream should emit them
     // Initial peers list might be empty if we just loaded, so we might need to rely on the current value if stream hasnt emitted
-    final peerList = peers; 
-    
+    final peerList = peers;
+
     Peer? peer;
     try {
       peer = peerList.firstWhere((p) => p.id == widget.peerId);
@@ -58,11 +56,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         body: const Center(child: Text('Peer not found or disconnected')),
       );
     }
-    
+
     final fileTransferService = ref.watch(fileTransferServiceProvider);
     final transfersStream = fileTransferService.progressStream;
     final db = ref.watch(databaseProvider);
-    
+
     // Listen for incoming text messages
     return StreamBuilder<ConnectionMessage>(
       stream: ref.watch(connectionServiceProvider).messageStream,
@@ -70,27 +68,35 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         if (snapshot.hasData) {
           final msg = snapshot.data!;
           // If message is for this peer and is data (text)
-          if (msg.peerId == peer!.id && msg.type == ConnectionMessageType.data && msg.payload['type'] == 'text') {
-             // We need to add this to our ephemeral list if it's new
-             // But StreamBuilder rebuilds on every event. We should manipulate state in a listener, not builder.
-             // Ideally we wrap this in a ConsumerStatefulWidget listener or use a provider.
-             // For quick implementation:
-             // We can rely on the fact that we can't easily dedup without ID tracking.
-             // Let's use a simpler approach: Watch a provider that accumulates messages?
-             // Or just use `ref.listen` in `build`?
+          if (msg.peerId == peer!.id &&
+              msg.type == ConnectionMessageType.data &&
+              msg.payload['type'] == 'text') {
+            // We need to add this to our ephemeral list if it's new
+            // But StreamBuilder rebuilds on every event. We should manipulate state in a listener, not builder.
+            // Ideally we wrap this in a ConsumerStatefulWidget listener or use a provider.
+            // For quick implementation:
+            // We can rely on the fact that we can't easily dedup without ID tracking.
+            // Let's use a simpler approach: Watch a provider that accumulates messages?
+            // Or just use `ref.listen` in `build`?
           }
         }
-        
+
         return _buildScaffold(peer!, transfersStream, db);
-      }
+      },
     );
   }
-  
-  Widget _buildScaffold(Peer peer, Stream<Map<String, TransferProgress>> transfersStream, AppDatabase db) {
-     // Check actual connection status from service, not discovery state
-     final isActuallyConnected = ref.read(connectionServiceProvider).isConnectedTo(peer.id);
-     
-     return Scaffold(
+
+  Widget _buildScaffold(
+    Peer peer,
+    Stream<Map<String, TransferProgress>> transfersStream,
+    AppDatabase db,
+  ) {
+    // Check actual connection status from service, not discovery state
+    final isActuallyConnected = ref
+        .read(connectionServiceProvider)
+        .isConnectedTo(peer.id);
+
+    return Scaffold(
       appBar: AppBar(
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -121,15 +127,23 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                     ),
                     const Divider(),
                     ListTile(
-                      leading: const Icon(Icons.delete_outline, color: Colors.red),
-                      title: const Text('Clear Chat History', style: TextStyle(color: Colors.red)),
+                      leading: const Icon(
+                        Icons.delete_outline,
+                        color: Colors.red,
+                      ),
+                      title: const Text(
+                        'Clear Chat History',
+                        style: TextStyle(color: Colors.red),
+                      ),
                       onTap: () {
                         Navigator.pop(context); // Close sheet
                         showDialog(
                           context: context,
                           builder: (ctx) => AlertDialog(
                             title: const Text('Clear Chat?'),
-                            content: const Text('This will delete all messages in this chat. This action cannot be undone.'),
+                            content: const Text(
+                              'This will delete all messages in this chat. This action cannot be undone.',
+                            ),
                             actions: [
                               TextButton(
                                 onPressed: () => Navigator.pop(ctx),
@@ -139,13 +153,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                                 onPressed: () async {
                                   Navigator.pop(ctx);
                                   await db.clearMessagesForPeer(peer.id);
-                                  if (mounted) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(content: Text('Chat history cleared')),
-                                    );
-                                  }
+                                  if (!context.mounted) return;
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text('Chat history cleared'),
+                                    ),
+                                  );
                                 },
-                                style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: Colors.red,
+                                ),
                                 child: const Text('Clear'),
                               ),
                             ],
@@ -168,44 +185,55 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               stream: db.watchMessagesForPeer(peer.id),
               builder: (context, dbSnapshot) {
                 final dbMessages = dbSnapshot.data ?? [];
-                
+
                 return StreamBuilder<Map<String, TransferProgress>>(
                   stream: transfersStream,
                   builder: (context, transferSnapshot) {
                     final transfers = transferSnapshot.data ?? {};
-                    
+
                     final activeTransfers = transfers.values
-                        .where((t) => t.peerId == peer.id && t.status != TransferStatus.completed)
+                        .where(
+                          (t) =>
+                              t.peerId == peer.id &&
+                              t.status != TransferStatus.completed,
+                        )
                         .toList();
-                        
+
                     // Merge everything (DB only now)
                     final allItems = [
-                        ...activeTransfers.reversed, 
-                        ...dbMessages
+                      ...activeTransfers.reversed,
+                      ...dbMessages,
                     ];
-                    
+
                     // Retain simple sort order if needed, but active/ephemeral are usually newer.
                     // We might need to sort by timestamp if we want perfect ordering.
                     // dbMessages are likely sorted by time DESC.
                     // _ephemeralMessages should be prepended (newest).
-                    
+
                     if (allItems.isEmpty) {
                       return Center(
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            Icon(Icons.chat_bubble_outline, size: 64, color: Colors.grey[700]),
+                            Icon(
+                              Icons.chat_bubble_outline,
+                              size: 64,
+                              color: Colors.grey[700],
+                            ),
                             const SizedBox(height: 16),
                             const Text('No messages yet'),
                             const SizedBox(height: 8),
-                            const Text('Tap + to send a file', style: TextStyle(color: Colors.grey)),
+                            const Text(
+                              'Tap + to send a file',
+                              style: TextStyle(color: Colors.grey),
+                            ),
                           ],
                         ),
                       );
                     }
-                    
+
                     return ListView.builder(
-                      reverse: true, 
+                      reverse: true,
                       padding: const EdgeInsets.all(16),
                       itemCount: allItems.length,
                       itemBuilder: (context, index) {
@@ -228,7 +256,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       ),
     );
   }
-  
+
   // Initialize listener
   @override
   void initState() {
@@ -239,7 +267,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
   Widget _buildInputArea(Peer peer) {
     final fileTransferService = ref.watch(fileTransferServiceProvider);
-    
+
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -248,16 +276,19 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           stream: fileTransferService.queueStream,
           builder: (context, snapshot) {
             final queue = snapshot.data ?? [];
-            final pending = queue.where((q) => 
-              q.status == QueueItemStatus.pending || 
-              q.status == QueueItemStatus.inProgress
-            ).toList();
-            
+            final pending = queue
+                .where(
+                  (q) =>
+                      q.status == QueueItemStatus.pending ||
+                      q.status == QueueItemStatus.inProgress,
+                )
+                .toList();
+
             if (pending.isEmpty) return const SizedBox.shrink();
-            
+
             return Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              color: Theme.of(context).primaryColor.withOpacity(0.1),
+              color: Theme.of(context).primaryColor.withValues(alpha: 0.1),
               child: Row(
                 children: [
                   const Icon(Icons.queue, size: 20, color: Colors.white70),
@@ -265,12 +296,18 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                   Expanded(
                     child: Text(
                       '${pending.length} file(s) in queue',
-                      style: const TextStyle(fontSize: 12, color: Colors.white70),
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Colors.white70,
+                      ),
                     ),
                   ),
-                  if (pending.any((q) => q.status == QueueItemStatus.inProgress))
+                  if (pending.any(
+                    (q) => q.status == QueueItemStatus.inProgress,
+                  ))
                     const SizedBox(
-                      width: 16, height: 16,
+                      width: 16,
+                      height: 16,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     ),
                 ],
@@ -285,7 +322,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             children: [
               IconButton(
                 onPressed: () {
-                   ref.read(fileTransferServiceProvider).pickAndSendFile(peer);
+                  ref.read(fileTransferServiceProvider).pickAndSendFile(peer);
                 },
                 icon: const Icon(Icons.add_circle, size: 32),
                 color: Colors.white70,
@@ -293,7 +330,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               ),
               IconButton(
                 onPressed: () {
-                   ref.read(fileTransferServiceProvider).pickAndSendFolder(peer);
+                  ref.read(fileTransferServiceProvider).pickAndSendFolder(peer);
                 },
                 icon: const Icon(Icons.folder, size: 28),
                 color: Colors.white54,
@@ -322,24 +359,26 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       ],
     );
   }
-  
+
   void _sendMessage(Peer peer) async {
     final text = _messageController.text.trim();
     if (text.isEmpty) return;
-    
+
     // Send via connection service
     await ref.read(connectionServiceProvider).sendText(peer, text);
-    
+
     // Add to DB
     final db = ref.read(databaseProvider);
-    await db.insertMessage(MessagesCompanion.insert(
-      peerId: peer.id,
-      isMe: true,
-      content: text,
-      type: 'text',
-      status: 'sent',
-      timestamp: DateTime.now(),
-    ));
+    await db.insertMessage(
+      MessagesCompanion.insert(
+        peerId: peer.id,
+        isMe: true,
+        content: text,
+        type: 'text',
+        status: 'sent',
+        timestamp: DateTime.now(),
+      ),
+    );
 
     _messageController.clear();
   }
@@ -347,7 +386,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   Widget _buildTransferBubble(TransferProgress transfer) {
     final isMe = transfer.type == TransferType.sending;
     final color = isMe ? Theme.of(context).primaryColor : Colors.grey[800];
-    
+
     return Align(
       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
@@ -392,9 +431,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                   style: const TextStyle(fontSize: 10, color: Colors.white70),
                 ),
                 if (transfer.status == TransferStatus.failed)
-                  const Text('FAILED', style: TextStyle(fontSize: 10, color: Colors.redAccent)),
+                  const Text(
+                    'FAILED',
+                    style: TextStyle(fontSize: 10, color: Colors.redAccent),
+                  ),
                 if (transfer.status == TransferStatus.inProgress)
-                  const Text('Transferring...', style: TextStyle(fontSize: 10, fontStyle: FontStyle.italic)),
+                  const Text(
+                    'Transferring...',
+                    style: TextStyle(fontSize: 10, fontStyle: FontStyle.italic),
+                  ),
               ],
             ),
           ],
@@ -402,14 +447,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       ),
     );
   }
-  
+
   Widget _buildDbMessageBubble(Message message) {
     final isMe = message.isMe;
-    final color = isMe ? Theme.of(context).primaryColor.withOpacity(0.8) : Colors.grey[800]!.withOpacity(0.8);
-    final isText = message.type == 'text';
+    final color = isMe
+        ? Theme.of(context).primaryColor.withValues(alpha: 0.8)
+        : Colors.grey[800]!.withValues(alpha: 0.8);
     final isFile = message.type == 'file';
     final isImage = isFile && _isImageFile(message.content);
-    
+
     // For image files, show a larger preview
     if (isImage && message.filePath != null) {
       return Align(
@@ -417,7 +463,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         child: GestureDetector(
           onTap: () {
             if (message.filePath != null) {
-              ref.read(fileTransferServiceProvider).openFileByPath(message.filePath!);
+              ref
+                  .read(fileTransferServiceProvider)
+                  .openFileByPath(message.filePath!);
             }
           },
           child: Container(
@@ -437,13 +485,17 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                       File(message.filePath!),
                       fit: BoxFit.cover,
                       cacheWidth: 400,
-                      errorBuilder: (_, __, ___) => _buildFileBubbleContent(message, isMe, color),
+                      errorBuilder: (_, __, ___) =>
+                          _buildFileBubbleContent(message, isMe, color),
                     );
                   }
                   return Container(
                     color: color,
                     padding: const EdgeInsets.all(12),
-                    child: const Icon(Icons.broken_image, color: Colors.white54),
+                    child: const Icon(
+                      Icons.broken_image,
+                      color: Colors.white54,
+                    ),
                   );
                 },
               ),
@@ -452,7 +504,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         ),
       );
     }
-    
+
     return Align(
       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
@@ -467,10 +519,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       ),
     );
   }
-  
+
   Widget _buildFileBubbleContent(Message message, bool isMe, Color color) {
     final isText = message.type == 'text';
-    
+
     if (isText) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -499,11 +551,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              _getFileIcon(message),
-              color: Colors.white70, 
-              size: 20
-            ),
+            Icon(_getFileIcon(message), color: Colors.white70, size: 20),
             const SizedBox(width: 8),
             Flexible(
               child: Text(
@@ -526,17 +574,22 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               GestureDetector(
                 onTap: () {
                   if (message.filePath != null) {
-                     ref.read(fileTransferServiceProvider).openFileByPath(message.filePath!);
-                }
+                    ref
+                        .read(fileTransferServiceProvider)
+                        .openFileByPath(message.filePath!);
+                  }
                 },
-                child: const Text('OPEN', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
+                child: const Text(
+                  'OPEN',
+                  style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold),
+                ),
               ),
           ],
         ),
       ],
     );
   }
-  
+
   IconData _getFileIcon(Message message) {
     final filename = message.content;
     if (_isImageFile(filename)) return Icons.image_rounded;
@@ -544,12 +597,21 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     if (message.type == 'folder') return Icons.folder_rounded;
     return message.isMe ? Icons.upload_rounded : Icons.download_rounded;
   }
-  
+
   bool _isImageFile(String filename) {
     final ext = filename.toLowerCase().split('.').last;
-    return ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'heic', 'heif'].contains(ext);
+    return [
+      'jpg',
+      'jpeg',
+      'png',
+      'gif',
+      'webp',
+      'bmp',
+      'heic',
+      'heif',
+    ].contains(ext);
   }
-  
+
   bool _isVideoFile(String filename) {
     final ext = filename.toLowerCase().split('.').last;
     return ['mp4', 'mov', 'avi', 'mkv', 'webm', '3gp', 'flv'].contains(ext);

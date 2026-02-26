@@ -287,8 +287,8 @@ class _MessageBubble extends StatelessWidget {
         constraints: const BoxConstraints(maxWidth: 280),
         decoration: BoxDecoration(
           color: isMe 
-              ? StoaTheme.primaryColor.withOpacity(0.8) 
-              : Colors.grey[800]!.withOpacity(0.8),
+              ? StoaTheme.primaryColor.withValues(alpha: 0.8) 
+              : Colors.grey[800]!.withValues(alpha: 0.8),
           borderRadius: BorderRadius.circular(16),
         ),
         child: Column(
@@ -298,7 +298,7 @@ class _MessageBubble extends StatelessWidget {
             if (!isMe)
               Text(
                 message.senderName,
-                style: TextStyle(
+                style: const TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.bold,
                   color: StoaTheme.secondaryColor,
@@ -395,3 +395,4 @@ class _MessageBubble extends StatelessWidget {
     return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
   }
 }
+
