@@ -24,7 +24,9 @@ class RemoteFolderService {
   final Map<String, StreamController<List<RemoteFile>>> _remoteFileControllers =
       {};
   final Map<String, Completer<String>> _contentCompleters = {};
+  final Map<String, Completer<String>> _downloadCompleters = {};
   final _textEditController = StreamController<TextEditEvent>.broadcast();
+  final Map<String, StreamSubscription> _peerFileWatchers = {};
 
   RemoteFolderService(this._ref);
 
@@ -247,6 +249,28 @@ class RemoteFolderService {
     });
   }
 
+  Future<String> requestDownloadAndWait(
+    String spaceId,
+    String ownerId,
+    String relativePath,
+  ) async {
+    final key = '$spaceId:$relativePath';
+    final completer = Completer<String>();
+    _downloadCompleters[key] = completer;
+
+    _sendSpaceMessage(ownerId, 'download_req', {
+      'spaceId': spaceId,
+      'path': relativePath,
+    });
+
+    try {
+      return await completer.future.timeout(const Duration(minutes: 1));
+    } catch (e) {
+      _downloadCompleters.remove(key);
+      throw Exception('Failed to download file: $e');
+    }
+  }
+
   Future<void> _handleDownloadReq(
     String peerId,
     Map<String, dynamic> data,
@@ -297,6 +321,11 @@ class RemoteFolderService {
 
     await file.writeAsBytes(base64Decode(content));
     debugPrint('📥 Downloaded to: $savePath');
+
+    final key = '$spaceId:$relativePath';
+    if (_downloadCompleters.containsKey(key)) {
+      _downloadCompleters.remove(key)?.complete(savePath);
+    }
   }
 
   // ==================== FETCH CONTENT (for editing) ====================
@@ -764,6 +793,40 @@ class RemoteFolderService {
     });
 
     _watchers[folder.id] = sub;
+  }
+
+  // ==================== PEER FILE TRACKING ====================
+
+  Future<void> trackPeerDownloadedExternalFile({
+    required String spaceId,
+    required String ownerId,
+    required String localFilePath,
+    required String relativePath,
+  }) async {
+    if (_peerFileWatchers.containsKey(localFilePath)) return;
+
+    final file = File(localFilePath);
+    if (!await file.exists()) return;
+
+    final watcher = FileWatcher(localFilePath);
+    debugPrint('👀 Started tracking external file: $localFilePath');
+
+    final sub = watcher.events.listen((event) async {
+      if (event.type == ChangeType.MODIFY) {
+        debugPrint(
+          '📝 External file modified: $localFilePath, syncing to owner...',
+        );
+        final bytes = await File(localFilePath).readAsBytes();
+        await uploadFile(spaceId, ownerId, relativePath, bytes);
+      }
+    });
+
+    _peerFileWatchers[localFilePath] = sub;
+  }
+
+  void stopTrackingExternalFile(String localFilePath) {
+    _peerFileWatchers[localFilePath]?.cancel();
+    _peerFileWatchers.remove(localFilePath);
   }
 
   // ==================== HELPERS ====================

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:stoa/core/services/remote_folder_service.dart';
 import 'package:path/path.dart' as p;
+import 'package:flutter_markdown/flutter_markdown.dart';
 
 /// Simple text editor for editing text files in shared spaces
 /// Supports real-time sync with collaborators
@@ -209,50 +210,104 @@ class _TextEditorScreenState extends ConsumerState<TextEditorScreen> {
     }
   }
 
+  bool get _isMarkdown {
+    final ext = p.extension(widget.relativePath).toLowerCase();
+    return ext == '.md' || ext == '.markdown';
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              p.basename(widget.relativePath),
-              style: const TextStyle(fontSize: 16),
-            ),
-            Text(
-              widget.isOwner ? 'Owner (local)' : 'Syncing with owner',
-              style: const TextStyle(fontSize: 12, color: Colors.white54),
-            ),
-          ],
+    if (_isMarkdown) {
+      return DefaultTabController(
+        length: 2,
+        child: Scaffold(
+          appBar: _buildAppBar(hasTabs: true),
+          body: TabBarView(children: [_buildBody(), _buildPreview()]),
         ),
-        actions: [
-          // Sync indicator
-          if (_hasChanges)
-            const Padding(
-              padding: EdgeInsets.only(right: 8),
-              child: Center(
-                child: SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-              ),
-            ),
-          IconButton(
-            icon: _isSaving
-                ? const SizedBox(
-                    width: 24,
-                    height: 24,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.save),
-            onPressed: !_isSaving ? _saveFile : null,
-            tooltip: 'Save',
+      );
+    }
+
+    return Scaffold(appBar: _buildAppBar(hasTabs: false), body: _buildBody());
+  }
+
+  AppBar _buildAppBar({required bool hasTabs}) {
+    return AppBar(
+      title: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            p.basename(widget.relativePath),
+            style: const TextStyle(fontSize: 16),
+          ),
+          Text(
+            widget.isOwner ? 'Owner (local)' : 'Syncing with owner',
+            style: const TextStyle(fontSize: 12, color: Colors.white54),
           ),
         ],
       ),
-      body: _buildBody(),
+      actions: [
+        // Sync indicator
+        if (_hasChanges)
+          const Padding(
+            padding: EdgeInsets.only(right: 8),
+            child: Center(
+              child: SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            ),
+          ),
+        IconButton(
+          icon: _isSaving
+              ? const SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.save),
+          onPressed: !_isSaving ? _saveFile : null,
+          tooltip: 'Save',
+        ),
+      ],
+      bottom: hasTabs
+          ? const TabBar(
+              tabs: [
+                Tab(icon: Icon(Icons.edit), text: 'Edit'),
+                Tab(icon: Icon(Icons.preview), text: 'Preview'),
+              ],
+            )
+          : null,
+    );
+  }
+
+  Widget _buildPreview() {
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_error != null) {
+      return Center(
+        child: Text(
+          'Error: $_error',
+          style: const TextStyle(color: Colors.red),
+        ),
+      );
+    }
+
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, _) {
+        return Container(
+          color: Theme.of(context).scaffoldBackgroundColor,
+          child: Markdown(
+            data: _controller.text,
+            selectable: true,
+            styleSheet: MarkdownStyleSheet.fromTheme(
+              Theme.of(context),
+            ).copyWith(p: const TextStyle(fontSize: 16)),
+          ),
+        );
+      },
     );
   }
 

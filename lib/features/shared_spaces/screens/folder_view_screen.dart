@@ -228,6 +228,12 @@ class _FolderViewScreenState extends ConsumerState<FolderViewScreen> {
                       widget.folder.permission == 'read-write'
                   ? () => _openInEditor(file.relativePath)
                   : null,
+              onTrack:
+                  !isTextFile &&
+                      !file.isDirectory &&
+                      widget.folder.permission == 'read-write'
+                  ? () => _trackAndSyncFile(file.relativePath)
+                  : null,
               onDownload: !file.isDirectory
                   ? () => _downloadFile(file.relativePath)
                   : null,
@@ -272,6 +278,7 @@ class _FolderViewScreenState extends ConsumerState<FolderViewScreen> {
     required bool isDirectory,
     required VoidCallback onTap,
     VoidCallback? onEdit,
+    VoidCallback? onTrack,
     VoidCallback? onDownload,
     VoidCallback? onDelete,
   }) {
@@ -297,6 +304,12 @@ class _FolderViewScreenState extends ConsumerState<FolderViewScreen> {
                 icon: const Icon(Icons.edit, color: Colors.amber),
                 onPressed: onEdit,
                 tooltip: 'Edit',
+              ),
+            if (onTrack != null)
+              IconButton(
+                icon: const Icon(Icons.sync_alt, color: Colors.green),
+                onPressed: onTrack,
+                tooltip: 'Sync External Edits',
               ),
             if (onDownload != null)
               IconButton(
@@ -377,6 +390,47 @@ class _FolderViewScreenState extends ConsumerState<FolderViewScreen> {
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text('Downloading $relativePath...')));
+  }
+
+  Future<void> _trackAndSyncFile(String relativePath) async {
+    try {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Downloading $relativePath to track...')),
+      );
+
+      final localPath = await ref
+          .read(remoteFolderServiceProvider)
+          .requestDownloadAndWait(
+            widget.folder.id,
+            widget.folder.ownerId,
+            relativePath,
+          );
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Opening & tracking $relativePath...')),
+      );
+
+      await OpenFilex.open(localPath);
+
+      await ref
+          .read(remoteFolderServiceProvider)
+          .trackPeerDownloadedExternalFile(
+            spaceId: widget.folder.id,
+            ownerId: widget.folder.ownerId,
+            localFilePath: localPath,
+            relativePath: relativePath,
+          );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to track: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 
   void _confirmDeleteRemote(String relativePath) {

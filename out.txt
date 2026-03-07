@@ -4,12 +4,8 @@ Analyzing St0a...
    info - 'shareXFiles' is deprecated and shouldn't be used. Use SharePlus.instance.share() instead - lib\features\chat\screens\chat_screen.dart:657:23 - deprecated_member_use
    info - 'Share' is deprecated and shouldn't be used. Use SharePlus instead - lib\features\chat\screens\chat_screen.dart:660:15 - deprecated_member_use
    info - 'shareXFiles' is deprecated and shouldn't be used. Use SharePlus.instance.share() instead - lib\features\chat\screens\chat_screen.dart:660:21 - deprecated_member_use
-   info - Statements in an if should be enclosed in a block - lib\features\files\screens\files_screen.dart:342:7 - curly_braces_in_flow_control_structures
-   info - Statements in an if should be enclosed in a block - lib\features\files\screens\files_screen.dart:345:7 - curly_braces_in_flow_control_structures
-   info - Statements in an if should be enclosed in a block - lib\features\files\screens\files_screen.dart:348:7 - curly_braces_in_flow_control_structures
    info - 'Share' is deprecated and shouldn't be used. Use SharePlus instead - lib\features\groups\screens\group_chat_screen.dart:492:17 - deprecated_member_use
    info - 'shareXFiles' is deprecated and shouldn't be used. Use SharePlus.instance.share() instead - lib\features\groups\screens\group_chat_screen.dart:492:23 - deprecated_member_use
    info - 'Share' is deprecated and shouldn't be used. Use SharePlus instead - lib\features\groups\screens\group_chat_screen.dart:495:15 - deprecated_member_use
    info - 'shareXFiles' is deprecated and shouldn't be used. Use SharePlus.instance.share() instead - lib\features\groups\screens\group_chat_screen.dart:495:21 - deprecated_member_use
-   info - Statements in an if should be enclosed in a block - lib\features\shared_spaces\screens\shared_spaces_screen.dart:232:21 - curly_braces_in_flow_control_structures
 
