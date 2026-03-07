@@ -19,31 +19,32 @@ import '../data/database.dart';
 class ConnectionService {
   ServerSocket? _serverSocket;
   final Map<String, Socket> _connections = {};
-  final Set<Socket> _incomingSockets = {}; // Track sockets that initiated connection to us
+  final Set<Socket> _incomingSockets =
+      {}; // Track sockets that initiated connection to us
   final Map<String, SecretKey> _sessionKeys = {};
-  
+
   // Timer tracking for handshake timeouts
   final Map<String, Timer> _handshakeTimers = {};
   final Map<String, Timer> _pendingRequestTimers = {};
-  
+
   final EncryptionService _encryptionService;
   final Ref _ref;
-  
+
   // Stream for incoming messages
   final _messageController = StreamController<ConnectionMessage>.broadcast();
   Stream<ConnectionMessage> get messageStream => _messageController.stream;
-  
+
   // Ephemeral key pair for this session
   SimpleKeyPair? _keyPair;
   final _uuid = const Uuid();
-  
+
   ConnectionService(this._ref, this._encryptionService);
-  
+
   /// Check if we have an active connection to a peer
   bool isConnectedTo(String peerId) => _connections.containsKey(peerId);
-  
+
   bool _isInitialized = false;
-  
+
   /// Initialize server and keys (safe to call multiple times)
   // Get list of currently connected peer IDs
   List<String> get connectedPeers => _connections.keys.toList();
@@ -51,27 +52,34 @@ class ConnectionService {
   Future<void> initialize() async {
     if (_isInitialized) return; // Prevent double initialization
     _isInitialized = true;
-    
+
     _keyPair = await _encryptionService.generateKeyPair();
     await _startServer();
   }
-  
+
   /// Start TCP server to listen for incoming connections
   Future<void> _startServer() async {
     try {
-      _serverSocket = await ServerSocket.bind(InternetAddress.anyIPv4, AppConstants.transferPort);
+      _serverSocket = await ServerSocket.bind(
+        InternetAddress.anyIPv4,
+        AppConstants.transferPort,
+      );
       _serverSocket!.listen(_handleIncomingConnection);
-      appLogger.i('🚀 Connection service listening on port ${AppConstants.transferPort}');
+      appLogger.i(
+        '🚀 Connection service listening on port ${AppConstants.transferPort}',
+      );
     } catch (e) {
       appLogger.i('❌ Failed to start connection server: $e');
     }
   }
-  
+
   /// Handle incoming TCP connection
   void _handleIncomingConnection(Socket socket) {
-    appLogger.i('🔌 New incoming connection from ${socket.remoteAddress.address}');
+    appLogger.i(
+      '🔌 New incoming connection from ${socket.remoteAddress.address}',
+    );
     _incomingSockets.add(socket);
-    
+
     // We don't know who this is yet, wait for handshake
     socket.listen(
       (data) => _handleData(socket, data),
@@ -79,28 +87,36 @@ class ConnectionService {
       onDone: () => _handleDone(socket),
     );
   }
-  
+
   /// Connect to a peer
   Future<void> connectTo(Peer peer) async {
     if (_connections.containsKey(peer.id)) {
       appLogger.i('🔌 Already connected to ${peer.username}');
       return;
     }
-    
+
     // Prevent duplicate connection attempts
     if (_handshakeTimers.containsKey(peer.id)) {
-      appLogger.i('🔌 Connection attempt already in progress for ${peer.username}');
+      appLogger.i(
+        '🔌 Connection attempt already in progress for ${peer.username}',
+      );
       return;
     }
-    
+
     try {
-      appLogger.i('🔌 Connecting to ${peer.host}:${AppConstants.transferPort}...');
-      final socket = await Socket.connect(peer.host, AppConstants.transferPort, timeout: AppConstants.peerTimeout);
-      
+      appLogger.i(
+        '🔌 Connecting to ${peer.host}:${AppConstants.transferPort}...',
+      );
+      final socket = await Socket.connect(
+        peer.host,
+        AppConstants.transferPort,
+        timeout: AppConstants.peerTimeout,
+      );
+
       // Initiate handshake
       appLogger.i('🤝 Sending handshake to ${peer.username}...');
       await _sendHandshake(socket);
-      
+
       // Set a timeout for the handshake response (15 seconds)
       // This timer will be cancelled in _finalizeConnection on success
       _handshakeTimers[peer.id] = Timer(const Duration(seconds: 15), () {
@@ -108,16 +124,18 @@ class ConnectionService {
           appLogger.i('⏰ Handshake timed out for ${peer.username}');
           socket.destroy();
           _handshakeTimers.remove(peer.id);
-          
+
           // Notify UI that handshake timed out
-          _messageController.add(ConnectionMessage(
-            peerId: peer.id,
-            type: ConnectionMessageType.handshakeTimeout,
-            payload: {'username': peer.username},
-          ));
+          _messageController.add(
+            ConnectionMessage(
+              peerId: peer.id,
+              type: ConnectionMessageType.handshakeTimeout,
+              payload: {'username': peer.username},
+            ),
+          );
         }
       });
-      
+
       socket.listen(
         (data) => _handleData(socket, data),
         onError: (e) {
@@ -127,43 +145,45 @@ class ConnectionService {
         },
         onDone: () {
           // If connection closed before finalization, notify UI
-          if (!_connections.containsKey(peer.id) && _handshakeTimers.containsKey(peer.id)) {
+          if (!_connections.containsKey(peer.id) &&
+              _handshakeTimers.containsKey(peer.id)) {
             _handshakeTimers[peer.id]?.cancel();
             _handshakeTimers.remove(peer.id);
-            _messageController.add(ConnectionMessage(
-              peerId: peer.id,
-              type: ConnectionMessageType.handshakeFailed,
-              payload: {'reason': 'Connection closed by peer'},
-            ));
+            _messageController.add(
+              ConnectionMessage(
+                peerId: peer.id,
+                type: ConnectionMessageType.handshakeFailed,
+                payload: {'reason': 'Connection closed by peer'},
+              ),
+            );
           }
           _handleDone(socket);
         },
       );
-      
     } catch (e) {
       appLogger.i('❌ Failed to connect to ${peer.username}: $e');
       _handshakeTimers.remove(peer.id);
       rethrow;
     }
   }
-  
+
   /// Send handshake with our identity and public key
   Future<void> _sendHandshake(Socket socket) async {
     final user = await _ref.read(storageServiceProvider).loadUser();
     if (user == null || _keyPair == null) return;
-    
+
     final publicKey = await _encryptionService.getPublicKeyBytes(_keyPair!);
-    
+
     final handshake = {
       'type': 'handshake',
       'id': user.id,
       'username': user.username,
       'publicKey': base64Encode(publicKey),
     };
-    
+
     _sendRaw(socket, jsonEncode(handshake));
   }
-  
+
   // Buffer for incoming data
   final Map<Socket, List<int>> _buffers = {};
 
@@ -173,33 +193,33 @@ class ConnectionService {
       // Get or create buffer for this socket
       final buffer = _buffers.putIfAbsent(socket, () => []);
       buffer.addAll(data);
-      
+
       // Process all complete messages in the buffer
       while (true) {
         // We need at least 4 bytes for the length prefix
         if (buffer.length < 4) break;
-        
+
         // Read length prefix (big endian)
         final lengthBytes = Uint8List.fromList(buffer.take(4).toList());
         final length = ByteData.sublistView(lengthBytes).getUint32(0);
-        
+
         // Check if we have the full message
         if (buffer.length < 4 + length) break;
-        
+
         // Extract message payload
         final payload = Uint8List.fromList(buffer.sublist(4, 4 + length));
-        
+
         // Remove processed bytes from buffer
         buffer.removeRange(0, 4 + length);
-        
-        // Check message type: 0x02 = binary file chunk, otherwise JSON
-        if (payload.isNotEmpty && payload[0] == 0x02) {
-          await _processBinaryFileChunk(socket, payload);
+
+        // Check message type: 0x02 = binary file chunk, 0x03 = sync binary chunk, otherwise JSON
+        if (payload.isNotEmpty && (payload[0] == 0x02 || payload[0] == 0x03)) {
+          await _processBinaryFileChunk(socket, payload, type: payload[0]);
         } else {
           // Process JSON message
           final message = utf8.decode(payload);
           final json = jsonDecode(message);
-          
+
           if (json['type'] == 'handshake') {
             await _processHandshake(socket, json);
           } else if (json['type'] == 'encrypted') {
@@ -211,14 +231,18 @@ class ConnectionService {
       appLogger.i('❌ Error handling data: $e');
     }
   }
-  
+
   /// Process binary file chunk (Turbo Mode)
-  Future<void> _processBinaryFileChunk(Socket socket, Uint8List payload) async {
-    // Frame format: [1-byte type=0x02][1-byte isLast][36-byte fileId][encrypted data]
+  Future<void> _processBinaryFileChunk(
+    Socket socket,
+    Uint8List payload, {
+    required int type,
+  }) async {
+    // Frame format: [1-byte type=0x02/0x03][1-byte isLast][36-byte fileId][encrypted data]
     final isLast = payload[1] == 1;
     final fileId = utf8.decode(payload.sublist(2, 38)).trim();
     final encryptedData = payload.sublist(38);
-    
+
     // Find sender by socket
     String? senderId;
     for (final entry in _connections.entries) {
@@ -227,49 +251,62 @@ class ConnectionService {
         break;
       }
     }
-    
+
     if (senderId == null) return;
-    
+
     final secretKey = _sessionKeys[senderId];
     if (secretKey == null) return;
-    
+
     try {
       // Decrypt raw bytes
-      final decryptedBytes = await _encryptionService.decryptBytes(encryptedData, secretKey);
-      
-      // Emit as file chunk message for FileTransferService
-      _messageController.add(ConnectionMessage(
-        peerId: senderId,
-        type: ConnectionMessageType.data,
-        payload: {
-          'type': 'file_chunk_binary',
-          'fileId': fileId,
-          'data': Uint8List.fromList(decryptedBytes),
-          'isLast': isLast,
-        },
-      ));
+      final decryptedBytes = await _encryptionService.decryptBytes(
+        encryptedData,
+        secretKey,
+      );
+
+      // Emit as file chunk message for FileTransferService or SyncService
+      final messageType = type == 0x02
+          ? 'file_chunk_binary'
+          : 'sync_chunk_binary';
+      _messageController.add(
+        ConnectionMessage(
+          peerId: senderId,
+          type: ConnectionMessageType.data,
+          payload: {
+            'type': messageType,
+            'fileId': fileId,
+            'data': Uint8List.fromList(decryptedBytes),
+            'isLast': isLast,
+          },
+        ),
+      );
     } catch (e) {
       appLogger.i('❌ Failed to decrypt binary chunk: $e');
     }
   }
-  
+
   /// Process handshake from peer
-  Future<void> _processHandshake(Socket socket, Map<String, dynamic> json) async {
+  Future<void> _processHandshake(
+    Socket socket,
+    Map<String, dynamic> json,
+  ) async {
     final peerId = json['id'];
     final peerUsername = json['username'];
     final peerPublicKey = base64Decode(json['publicKey']);
-    
+
     appLogger.i('🤝 Handshake received from $peerUsername ($peerId)');
-    
+
     // 2. If we are the server (incoming socket), we need approval first
     if (_incomingSockets.contains(socket)) {
       // Check if we already have a session (reconnection) or if it's new
       // For now, always require approval for simplicity, or check DB if trusted?
       // User asked for "connection establishment process to be two directional", implying interactive.
       // So we emit a request.
-      
-      appLogger.i('🤝 Handshake request from $peerUsername. Waiting for approval...');
-      
+
+      appLogger.i(
+        '🤝 Handshake request from $peerUsername. Waiting for approval...',
+      );
+
       // Store pending info
       _pendingRequests[peerId] = {
         'socket': socket,
@@ -277,7 +314,7 @@ class ConnectionService {
         'publicKey': peerPublicKey,
         'id': peerId,
       };
-      
+
       // Auto-timeout pending request after 30 seconds (receiver didn't respond)
       _pendingRequestTimers[peerId] = Timer(const Duration(seconds: 30), () {
         if (_pendingRequests.containsKey(peerId)) {
@@ -285,237 +322,277 @@ class ConnectionService {
           denyConnection(peerId);
         }
       });
-      
+
       // Notify app to show dialog
-      appLogger.i('📨 Emitting connectionRequest event for $peerUsername ($peerId)');
-      _messageController.add(ConnectionMessage(
-        peerId: peerId,
-        type: ConnectionMessageType.connectionRequest,
-        payload: {'username': peerUsername},
-      ));
-      
+      appLogger.i(
+        '📨 Emitting connectionRequest event for $peerUsername ($peerId)',
+      );
+      _messageController.add(
+        ConnectionMessage(
+          peerId: peerId,
+          type: ConnectionMessageType.connectionRequest,
+          payload: {'username': peerUsername},
+        ),
+      );
+
       return; // Stop here. Do not auto-reply.
     }
-    
+
     // If we are here, it means WE initiated the connection and they replied (Accept),
     // OR we just accepted their request and this logic is running (wait, no).
     // If we accepted, we called _sendHandshake manually.
     // The peer sending a handshake means we are establishing the session logic.
-    
+
     // ... Proceed to Derive Secret ...
     _finalizeConnection(socket, peerId, peerUsername, peerPublicKey);
   }
-  
+
   // Pending requests: Map<PeerId, Data>
   final Map<String, Map<String, dynamic>> _pendingRequests = {};
-  
+
   Future<void> acceptConnection(String peerId) async {
     final data = _pendingRequests[peerId];
     if (data == null) {
       appLogger.i('⚠️ No pending request for $peerId');
       return;
     }
-    
+
     // Cancel the pending request timeout
     _pendingRequestTimers[peerId]?.cancel();
     _pendingRequestTimers.remove(peerId);
-    
+
     final socket = data['socket'] as Socket;
     final username = data['username'] as String;
     final publicKey = data['publicKey'] as List<int>;
-    
+
     appLogger.i('✅ Accepting connection from $username...');
-    
+
     try {
       // Check if socket is still usable by accessing remoteAddress
       // This will throw if the socket is closed
       socket.remoteAddress;
-      
+
       // Reply with our handshake
       await _sendHandshake(socket);
-      
+
       // Finalize
       await _finalizeConnection(socket, peerId, username, publicKey);
     } catch (e) {
       appLogger.i('⚠️ Socket closed before acceptance could complete: $e');
-      _messageController.add(ConnectionMessage(
-        peerId: peerId,
-        type: ConnectionMessageType.handshakeFailed,
-        payload: {'reason': 'Connection closed (peer may have timed out)'},
-      ));
+      _messageController.add(
+        ConnectionMessage(
+          peerId: peerId,
+          type: ConnectionMessageType.handshakeFailed,
+          payload: {'reason': 'Connection closed (peer may have timed out)'},
+        ),
+      );
     }
-    
+
     // Cleanup
     _pendingRequests.remove(peerId);
   }
-  
+
   Future<void> denyConnection(String peerId) async {
     final data = _pendingRequests[peerId];
     if (data == null) return;
-    
+
     // Cancel the pending request timeout
     _pendingRequestTimers[peerId]?.cancel();
     _pendingRequestTimers.remove(peerId);
-    
+
     final socket = data['socket'] as Socket;
     appLogger.i('⛔ Denying connection from ${data['username']}');
-    
+
     socket.destroy();
     _pendingRequests.remove(peerId);
   }
 
-  Future<void> _finalizeConnection(Socket socket, String peerId, String peerUsername, List<int> peerPublicKey) async {
+  Future<void> _finalizeConnection(
+    Socket socket,
+    String peerId,
+    String peerUsername,
+    List<int> peerPublicKey,
+  ) async {
     appLogger.i('🔐 Finalizing connection with $peerUsername...');
-    
+
     // Cancel any handshake timeout timer (we succeeded!)
     _handshakeTimers[peerId]?.cancel();
     _handshakeTimers.remove(peerId);
-    
+
     // Derive shared secret
     final sharedSecret = await _encryptionService.deriveSharedSecret(
       ownKeyPair: _keyPair!,
       peerPublicKeyBytes: peerPublicKey,
     );
-    
+
     _sessionKeys[peerId] = sharedSecret;
     _connections[peerId] = socket;
-    
+
     // Remove from incoming tracking to avoid treating future re-handshakes as requests (if that happens)
-    // _incomingSockets.remove(socket); 
-    
+    // _incomingSockets.remove(socket);
+
     // Notify app that we are connected
-    _messageController.add(ConnectionMessage(
-      peerId: peerId,
-      type: ConnectionMessageType.connected,
-      payload: null,
-    ));
-    
+    _messageController.add(
+      ConnectionMessage(
+        peerId: peerId,
+        type: ConnectionMessageType.connected,
+        payload: null,
+      ),
+    );
+
     // Ensure the peer is known to the discovery service so it appears in the UI
     // This handles cases where mDNS failed but connection succeeded
     final discoveryService = _ref.read(discoveryServiceProvider);
-    
+
     final peer = Peer(
       id: peerId,
       username: peerUsername,
-      host: socket.remoteAddress.address, 
-      port: AppConstants.discoveryPort, 
-      avatarColor: null, 
+      host: socket.remoteAddress.address,
+      port: AppConstants.discoveryPort,
+      avatarColor: null,
       publicKey: base64Encode(peerPublicKey),
       isConnected: true,
       lastSeen: DateTime.now(),
     );
-    
+
     discoveryService.addConnectedPeer(peer);
-    
+
     // Persist peer to database
     try {
       final db = _ref.read(databaseProvider);
-      await db.insertPeer(LocalPeer(
-        id: peerId,
-        username: peerUsername,
-        publicKey: base64Encode(peerPublicKey),
-        lastSeen: DateTime.now(),
-        avatarColor: null,
-      ));
+      await db.insertPeer(
+        LocalPeer(
+          id: peerId,
+          username: peerUsername,
+          publicKey: base64Encode(peerPublicKey),
+          lastSeen: DateTime.now(),
+          avatarColor: null,
+        ),
+      );
     } catch (e) {
       appLogger.i('⚠️ Failed to persist peer: $e');
     }
-    
+
     appLogger.i('✅ Secure connection finalized with $peerUsername');
   }
-  
+
   /// Process encrypted message
-  Future<void> _processEncryptedMessage(Socket socket, Map<String, dynamic> json) async {
+  Future<void> _processEncryptedMessage(
+    Socket socket,
+    Map<String, dynamic> json,
+  ) async {
     final senderId = json['senderId'];
     final encryptedPayload = json['payload'];
-    
+
     final secretKey = _sessionKeys[senderId];
     if (secretKey == null) {
-      appLogger.i('⚠️ Received encrypted message from unknown/unauthenticated peer $senderId');
+      appLogger.i(
+        '⚠️ Received encrypted message from unknown/unauthenticated peer $senderId',
+      );
       return;
     }
-    
+
     try {
-      final decryptedBytes = await _encryptionService.decrypt(encryptedPayload, secretKey);
+      final decryptedBytes = await _encryptionService.decrypt(
+        encryptedPayload,
+        secretKey,
+      );
       final decryptedString = utf8.decode(decryptedBytes);
       final payload = jsonDecode(decryptedString);
-      
+
       // Persist text messages (but not group messages - those are handled by GroupService)
       if (payload['type'] == 'text' && payload['groupType'] == null) {
         final db = _ref.read(databaseProvider);
-        await db.insertMessage(MessagesCompanion.insert(
-          peerId: senderId,
-          isMe: false,
-          content: payload['content'],
-          type: 'text',
-          status: 'received',
-          timestamp: DateTime.parse(payload['timestamp']),
-        ));
+        await db.insertMessage(
+          MessagesCompanion.insert(
+            peerId: senderId,
+            isMe: false,
+            content: payload['content'],
+            type: 'text',
+            status: 'received',
+            timestamp: DateTime.parse(payload['timestamp']),
+          ),
+        );
       }
-      
-      _messageController.add(ConnectionMessage(
-        peerId: senderId,
-        type: ConnectionMessageType.data,
-        payload: payload,
-      ));
+
+      _messageController.add(
+        ConnectionMessage(
+          peerId: senderId,
+          type: ConnectionMessageType.data,
+          payload: payload,
+        ),
+      );
     } catch (e) {
       appLogger.i('❌ Failed to decrypt message: $e');
     }
   }
-  
+
   /// Send encrypted data to a peer
   Future<void> send(String peerId, dynamic payload) async {
     final socket = _connections[peerId];
     final secretKey = _sessionKeys[peerId];
     final user = await _ref.read(storageServiceProvider).loadUser();
-    
+
     if (socket == null || secretKey == null || user == null) {
       throw Exception('Not connected to peer $peerId');
     }
-    
+
     final encrypted = await _encryptionService.encrypt(payload, secretKey);
-    
+
     final message = {
       'type': 'encrypted',
       'senderId': user.id,
       'payload': encrypted,
     };
-    
+
     _sendRaw(socket, jsonEncode(message));
   }
-  
+
   void _sendRaw(Socket socket, String string) {
     // Length-prefix framing: [4 bytes length][payload]
     final bytes = utf8.encode(string);
     final length = bytes.length;
-    
+
     final header = ByteData(4)..setUint32(0, length);
-    
+
     socket.add(header.buffer.asUint8List());
     socket.add(bytes);
   }
-  
+
   /// Send raw binary file chunk - Turbo Mode (no Base64, no JSON wrapping for data)
   /// Frame format: [4 bytes total len][1 byte type=0x02][36 bytes fileId][encrypted bytes]
-  Future<void> sendRawFileChunk(String peerId, String fileId, Uint8List rawBytes, {bool isLast = false}) async {
+  Future<void> sendRawFileChunk(
+    String peerId,
+    String fileId,
+    Uint8List rawBytes, {
+    bool isLast = false,
+    int type = 0x02,
+  }) async {
     final socket = _connections[peerId];
     final secretKey = _sessionKeys[peerId];
-    
+
     if (socket == null || secretKey == null) {
       throw Exception('Not connected to peer $peerId');
     }
-    
+
     // Encrypt raw bytes directly
-    final encryptedBytes = await _encryptionService.encryptBytes(rawBytes, secretKey);
-    
+    final encryptedBytes = await _encryptionService.encryptBytes(
+      rawBytes,
+      secretKey,
+    );
+
     // Frame: [4-byte length][1-byte type][1-byte isLast][36-byte fileId][encrypted data]
-    final fileIdBytes = utf8.encode(fileId.padRight(36).substring(0, 36)); // Ensure 36 bytes
+    final fileIdBytes = utf8.encode(
+      fileId.padRight(36).substring(0, 36),
+    ); // Ensure 36 bytes
     final totalLength = 1 + 1 + 36 + encryptedBytes.length;
-    
+
     final header = ByteData(4)..setUint32(0, totalLength);
-    
+
     socket.add(header.buffer.asUint8List());
-    socket.add([0x02]); // Type marker for binary file chunk
+    socket.add([
+      type,
+    ]); // Type marker for binary file chunk (0x02) or sync (0x03)
     socket.add([isLast ? 1 : 0]); // isLast flag
     socket.add(fileIdBytes);
     socket.add(encryptedBytes);
@@ -533,38 +610,40 @@ class ConnectionService {
       'timestamp': DateTime.now().toIso8601String(),
     });
   }
-  
+
   void _handleError(Socket socket, dynamic error) {
     appLogger.i('❌ Socket error: $error');
     _cleanupSocket(socket);
   }
-  
+
   void _handleDone(Socket socket) {
     appLogger.i('🔌 Socket closed');
     _cleanupSocket(socket);
   }
-  
+
   void _cleanupSocket(Socket socket) {
     String? peerIdToRemove;
     _connections.forEach((id, s) {
       if (s == socket) peerIdToRemove = id;
     });
-    
+
     if (peerIdToRemove != null) {
       _connections.remove(peerIdToRemove);
       _sessionKeys.remove(peerIdToRemove);
-      
+
       // Notify app
-      _messageController.add(ConnectionMessage(
-        peerId: peerIdToRemove!,
-        type: ConnectionMessageType.disconnected,
-        payload: null,
-      ));
-      
+      _messageController.add(
+        ConnectionMessage(
+          peerId: peerIdToRemove!,
+          type: ConnectionMessageType.disconnected,
+          payload: null,
+        ),
+      );
+
       // Update discovery service to reflect disconnection
       try {
         final discoveryService = _ref.read(discoveryServiceProvider);
-        // We can't easily get the full peer object here without looking it up, 
+        // We can't easily get the full peer object here without looking it up,
         // but addConnectedPeer will handle updates if we pass what we know.
         // Actually, better to just expose a 'setDisconnected' method or similar.
         // For now, we'll just check if it exists in discovery and update it manually
@@ -577,10 +656,10 @@ class ConnectionService {
         appLogger.i('⚠️ Failed to update discovery service on disconnect: $e');
       }
     }
-    
+
     socket.destroy();
   }
-  
+
   void dispose() {
     _serverSocket?.close();
     for (var socket in _connections.values) {
@@ -602,7 +681,7 @@ class ConnectionMessage {
   final String peerId;
   final ConnectionMessageType type;
   final dynamic payload;
-  
+
   ConnectionMessage({required this.peerId, required this.type, this.payload});
 }
 
@@ -610,4 +689,3 @@ final connectionServiceProvider = Provider<ConnectionService>((ref) {
   final encryption = ref.watch(encryptionServiceProvider);
   return ConnectionService(ref, encryption);
 });
-

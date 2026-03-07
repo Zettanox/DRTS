@@ -15,7 +15,7 @@ class TextEditorScreen extends ConsumerStatefulWidget {
   final String ownerId;
   final String relativePath;
   final String? localPath; // Only set for owner mode
-  
+
   const TextEditorScreen({
     super.key,
     required this.spaceId,
@@ -24,7 +24,7 @@ class TextEditorScreen extends ConsumerStatefulWidget {
     required this.relativePath,
     this.localPath,
   });
-  
+
   bool get isOwner => ownerId == 'me';
 
   @override
@@ -39,7 +39,7 @@ class _TextEditorScreenState extends ConsumerState<TextEditorScreen> {
   String? _error;
   StreamSubscription? _editSubscription;
   Timer? _debounceTimer;
-  
+
   @override
   void initState() {
     super.initState();
@@ -47,24 +47,22 @@ class _TextEditorScreenState extends ConsumerState<TextEditorScreen> {
     _loadContent();
     _listenForEdits();
   }
-  
+
   Future<void> _loadContent() async {
     try {
       String content;
-      
+
       if (widget.isOwner && widget.localPath != null) {
         // Owner: Read from local file
         final file = File(widget.localPath!);
         content = await file.readAsString();
       } else {
         // Peer: Fetch from owner
-        content = await ref.read(remoteFolderServiceProvider).fetchContent(
-          widget.spaceId,
-          widget.ownerId,
-          widget.relativePath,
-        );
+        content = await ref
+            .read(remoteFolderServiceProvider)
+            .fetchContent(widget.spaceId, widget.ownerId, widget.relativePath);
       }
-      
+
       if (mounted) {
         setState(() {
           _controller.text = content;
@@ -81,70 +79,82 @@ class _TextEditorScreenState extends ConsumerState<TextEditorScreen> {
       }
     }
   }
-  
+
   void _listenForEdits() {
-    _editSubscription = ref.read(remoteFolderServiceProvider).textEditStream.listen((event) {
-      // Only update if it's for our file
-      if (event.spaceId == widget.spaceId && event.relativePath == widget.relativePath) {
-        // Preserve cursor position
-        final cursorPos = _controller.selection.baseOffset;
-        
-        setState(() {
-          _controller.removeListener(_onTextChanged);
-          _controller.text = event.content;
-          
-          // Restore cursor position (clamped to valid range)
-          final newPos = cursorPos.clamp(0, event.content.length);
-          _controller.selection = TextSelection.fromPosition(TextPosition(offset: newPos));
-          _controller.addListener(_onTextChanged);
+    _editSubscription = ref
+        .read(remoteFolderServiceProvider)
+        .textEditStream
+        .listen((event) {
+          // Only update if it's for our file
+          if (event.spaceId == widget.spaceId &&
+              event.relativePath == widget.relativePath) {
+            // Preserve cursor position
+            final cursorPos = _controller.selection.baseOffset;
+
+            setState(() {
+              _controller.removeListener(_onTextChanged);
+              _controller.text = event.content;
+
+              // Restore cursor position (clamped to valid range)
+              final newPos = cursorPos.clamp(0, event.content.length);
+              _controller.selection = TextSelection.fromPosition(
+                TextPosition(offset: newPos),
+              );
+              _controller.addListener(_onTextChanged);
+            });
+          }
         });
-      }
-    });
   }
-  
+
   void _onTextChanged() {
     if (!_hasChanges) {
       setState(() => _hasChanges = true);
     }
-    
+
     // Debounce: Send updates after 500ms of no typing
     _debounceTimer?.cancel();
     _debounceTimer = Timer(const Duration(milliseconds: 500), () {
       _syncContent();
     });
   }
-  
+
   Future<void> _syncContent() async {
     final content = _controller.text;
-    
+
     if (widget.isOwner && widget.localPath != null) {
       // Owner: Save locally and broadcast to collaborators
       final file = File(widget.localPath!);
       await file.writeAsString(content);
-      
+
       // Broadcast to collaborators
-      final collaborators = await ref.read(remoteFolderServiceProvider).getCollaboratorIds(widget.spaceId);
+      final collaborators = await ref
+          .read(remoteFolderServiceProvider)
+          .getCollaboratorIds(widget.spaceId);
       for (final peerId in collaborators) {
-        ref.read(remoteFolderServiceProvider).sendTextEditDirect(
-          peerId,
-          widget.spaceId,
-          widget.relativePath,
-          content,
-        );
+        ref
+            .read(remoteFolderServiceProvider)
+            .sendTextEditDirect(
+              peerId,
+              widget.spaceId,
+              widget.relativePath,
+              content,
+            );
       }
     } else {
       // Peer: Send to owner
-      ref.read(remoteFolderServiceProvider).sendTextEdit(
-        widget.spaceId,
-        widget.ownerId,
-        widget.relativePath,
-        content,
-      );
+      ref
+          .read(remoteFolderServiceProvider)
+          .sendTextEdit(
+            widget.spaceId,
+            widget.ownerId,
+            widget.relativePath,
+            content,
+          );
     }
-    
+
     setState(() => _hasChanges = false);
   }
-  
+
   @override
   void dispose() {
     _debounceTimer?.cancel();
@@ -152,13 +162,13 @@ class _TextEditorScreenState extends ConsumerState<TextEditorScreen> {
     _controller.dispose();
     super.dispose();
   }
-  
+
   Future<void> _saveFile() async {
     setState(() => _isSaving = true);
-    
+
     try {
       final content = _controller.text;
-      
+
       if (widget.isOwner && widget.localPath != null) {
         // Owner: Just save locally
         final file = File(widget.localPath!);
@@ -166,29 +176,34 @@ class _TextEditorScreenState extends ConsumerState<TextEditorScreen> {
       } else {
         // Peer: Upload to owner
         final bytes = utf8.encode(content);
-        await ref.read(remoteFolderServiceProvider).uploadFile(
-          widget.spaceId,
-          widget.ownerId,
-          widget.relativePath,
-          bytes,
-        );
+        await ref
+            .read(remoteFolderServiceProvider)
+            .uploadFile(
+              widget.spaceId,
+              widget.ownerId,
+              widget.relativePath,
+              bytes,
+            );
       }
-      
+
       setState(() {
         _hasChanges = false;
         _isSaving = false;
       });
-      
+
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Saved!')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Saved!')));
       }
     } catch (e) {
       setState(() => _isSaving = false);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Save failed: $e'), backgroundColor: Colors.red),
+          SnackBar(
+            content: Text('Save failed: $e'),
+            backgroundColor: Colors.red,
+          ),
         );
       }
     }
@@ -201,7 +216,10 @@ class _TextEditorScreenState extends ConsumerState<TextEditorScreen> {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(p.basename(widget.relativePath), style: const TextStyle(fontSize: 16)),
+            Text(
+              p.basename(widget.relativePath),
+              style: const TextStyle(fontSize: 16),
+            ),
             Text(
               widget.isOwner ? 'Owner (local)' : 'Syncing with owner',
               style: const TextStyle(fontSize: 12, color: Colors.white54),
@@ -215,15 +233,20 @@ class _TextEditorScreenState extends ConsumerState<TextEditorScreen> {
               padding: EdgeInsets.only(right: 8),
               child: Center(
                 child: SizedBox(
-                  width: 16, height: 16,
+                  width: 16,
+                  height: 16,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 ),
               ),
             ),
           IconButton(
-            icon: _isSaving 
-              ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))
-              : const Icon(Icons.save),
+            icon: _isSaving
+                ? const SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.save),
             onPressed: !_isSaving ? _saveFile : null,
             tooltip: 'Save',
           ),
@@ -232,7 +255,7 @@ class _TextEditorScreenState extends ConsumerState<TextEditorScreen> {
       body: _buildBody(),
     );
   }
-  
+
   Widget _buildBody() {
     if (_isLoading) {
       return const Center(
@@ -246,7 +269,7 @@ class _TextEditorScreenState extends ConsumerState<TextEditorScreen> {
         ),
       );
     }
-    
+
     if (_error != null) {
       return Center(
         child: Column(
@@ -270,7 +293,7 @@ class _TextEditorScreenState extends ConsumerState<TextEditorScreen> {
         ),
       );
     }
-    
+
     return TextField(
       controller: _controller,
       maxLines: null,

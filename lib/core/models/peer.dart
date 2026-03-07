@@ -15,12 +15,13 @@ class Peer with _$Peer {
     String? avatarColor,
     @Default(false) bool isConnected,
     @Default(false) bool isVerified,
-    @Default(PeerConnectionStatus.disconnected) PeerConnectionStatus connectionStatus,
+    @Default(PeerConnectionStatus.disconnected)
+    PeerConnectionStatus connectionStatus,
     DateTime? lastSeen,
   }) = _Peer;
-  
+
   factory Peer.fromJson(Map<String, dynamic> json) => _$PeerFromJson(json);
-  
+
   /// Create from Bonsoir service attributes
   factory Peer.fromServiceAttributes({
     required String host,
@@ -39,17 +40,7 @@ class Peer with _$Peer {
   }
 }
 
-enum PeerConnectionStatus {
-  disconnected,
-  connecting,
-  connected,
-  failed,
-}
+enum PeerConnectionStatus { disconnected, connecting, connected, failed }
 
 /// Connection state for a peer
-enum PeerConnectionState {
-  disconnected,
-  connecting,
-  connected,
-  error,
-}
+enum PeerConnectionState { disconnected, connecting, connected, error }

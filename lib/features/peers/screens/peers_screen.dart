@@ -25,7 +25,7 @@ class _PeersScreenState extends ConsumerState<PeersScreen> {
     super.initState();
     // Auto-start discovery when screen opens
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      ref.read(discoveryStateProvider.notifier).start();
+      ref.read(discoveryStateControllerProvider.notifier).start();
       _listenToConnections();
     });
   }
@@ -33,51 +33,56 @@ class _PeersScreenState extends ConsumerState<PeersScreen> {
   void _listenToConnections() {
     ref.read(connectionServiceProvider).messageStream.listen((message) {
       if (!mounted) return;
-      
+
       setState(() {
         if (message.type == ConnectionMessageType.connected) {
           _connectionStatuses[message.peerId] = PeerConnectionStatus.connected;
-          
+
           // Only show snackbar if we were explicitly waiting for this peer
           if (_waitingPeerId == message.peerId) {
-             ScaffoldMessenger.of(context).showSnackBar(
-               const SnackBar(content: Text('Secure connection established! 🔒')),
-             );
-             // Dialog will be closed by the navigator pop in _connectToPeer logic if we used a completer, 
-             // but simpler: if we are waiting, we pop the dialog.
-             // Check if dialog is likely open by checking _waitingPeerId
-             if (Navigator.canPop(context)) {
-                Navigator.of(context).pop(); 
-             }
-             _waitingPeerId = null;
-             
-             // Navigate to chat
-             context.pushNamed('chat', pathParameters: {'peerId': message.peerId});
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Secure connection established! 🔒'),
+              ),
+            );
+            // Dialog will be closed by the navigator pop in _connectToPeer logic if we used a completer,
+            // but simpler: if we are waiting, we pop the dialog.
+            // Check if dialog is likely open by checking _waitingPeerId
+            if (Navigator.canPop(context)) {
+              Navigator.of(context).pop();
+            }
+            _waitingPeerId = null;
+
+            // Navigate to chat
+            context.pushNamed(
+              'chat',
+              pathParameters: {'peerId': message.peerId},
+            );
           }
         } else if (message.type == ConnectionMessageType.disconnected) {
-          _connectionStatuses[message.peerId] = PeerConnectionStatus.disconnected;
-          
+          _connectionStatuses[message.peerId] =
+              PeerConnectionStatus.disconnected;
+
           if (_waitingPeerId == message.peerId) {
-             if (Navigator.canPop(context)) {
-                Navigator.of(context).pop();
-             }
-             _waitingPeerId = null;
-             ScaffoldMessenger.of(context).showSnackBar(
-               const SnackBar(content: Text('Connection closed ❌')),
-             );
+            if (Navigator.canPop(context)) {
+              Navigator.of(context).pop();
+            }
+            _waitingPeerId = null;
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Connection closed ❌')),
+            );
           }
-        } else if (message.type == ConnectionMessageType.handshakeTimeout || 
-                   message.type == ConnectionMessageType.handshakeFailed) {
-          
+        } else if (message.type == ConnectionMessageType.handshakeTimeout ||
+            message.type == ConnectionMessageType.handshakeFailed) {
           _connectionStatuses[message.peerId] = PeerConnectionStatus.failed;
-          
+
           if (_waitingPeerId == message.peerId) {
             // Close dialog
             if (Navigator.canPop(context)) {
-               Navigator.of(context).pop();
+              Navigator.of(context).pop();
             }
             _waitingPeerId = null;
-            
+
             final reason = message.payload?['reason'] ?? 'Connection timed out';
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(content: Text('Connection failed: $reason ⚠️')),
@@ -88,10 +93,10 @@ class _PeersScreenState extends ConsumerState<PeersScreen> {
     });
   }
 
-
   Future<void> _connectToPeer(Peer peer) async {
     // If connected, navigate to chat
-    if (peer.isConnected || _connectionStatuses[peer.id] == PeerConnectionStatus.connected) {
+    if (peer.isConnected ||
+        _connectionStatuses[peer.id] == PeerConnectionStatus.connected) {
       context.pushNamed('chat', pathParameters: {'peerId': peer.id});
       return;
     }
@@ -99,7 +104,7 @@ class _PeersScreenState extends ConsumerState<PeersScreen> {
     if (_connectionStatuses[peer.id] == PeerConnectionStatus.connecting) {
       return;
     }
-  
+
     // Don't try to connect if host isn't resolved yet
     if (peer.host == 'unknown' || peer.host.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -107,33 +112,33 @@ class _PeersScreenState extends ConsumerState<PeersScreen> {
       );
       return;
     }
-  
-      // Check source of truth from ConnectionService
+
+    // Check source of truth from ConnectionService
     final connectionService = ref.read(connectionServiceProvider);
     if (connectionService.isConnectedTo(peer.id)) {
-       // We are already connected but UI was desynced. Fix it.
-       setState(() {
-         _connectionStatuses[peer.id] = PeerConnectionStatus.connected;
-       });
-       // Force update discovery service
-       ref.read(discoveryServiceProvider).updatePeerStatus(peer.id, true);
-       
-       context.pushNamed('chat', pathParameters: {'peerId': peer.id});
-       return;
+      // We are already connected but UI was desynced. Fix it.
+      setState(() {
+        _connectionStatuses[peer.id] = PeerConnectionStatus.connected;
+      });
+      // Force update discovery service
+      ref.read(discoveryServiceProvider).updatePeerStatus(peer.id, true);
+
+      context.pushNamed('chat', pathParameters: {'peerId': peer.id});
+      return;
     }
-  
+
     setState(() {
       _connectionStatuses[peer.id] = PeerConnectionStatus.connecting;
     });
 
     try {
       await connectionService.connectTo(peer);
-      
+
       if (mounted) {
-        setState(() { 
+        setState(() {
           _waitingPeerId = peer.id;
         });
-        
+
         // Show waiting dialog
         await showDialog(
           context: context,
@@ -148,12 +153,12 @@ class _PeersScreenState extends ConsumerState<PeersScreen> {
             ),
           ),
         );
-        
+
         // When dialog closes (either by pop above or manual), clear waiting state
         if (mounted && _waitingPeerId == peer.id) {
-           setState(() {
-             _waitingPeerId = null;
-           });
+          setState(() {
+            _waitingPeerId = null;
+          });
         }
       }
     } catch (e) {
@@ -162,17 +167,17 @@ class _PeersScreenState extends ConsumerState<PeersScreen> {
           _connectionStatuses[peer.id] = PeerConnectionStatus.failed;
           _waitingPeerId = null;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Connection failed: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Connection failed: $e')));
       }
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final discoveryState = ref.watch(discoveryStateProvider);
-    
+    final discoveryState = ref.watch(discoveryStateControllerProvider);
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Nearby Peers'),
@@ -180,22 +185,22 @@ class _PeersScreenState extends ConsumerState<PeersScreen> {
           // Toggle discovery button
           IconButton(
             icon: Icon(
-              discoveryState.isDiscovering 
-                  ? Icons.wifi_tethering 
+              discoveryState.isDiscovering
+                  ? Icons.wifi_tethering
                   : Icons.wifi_tethering_off,
-              color: discoveryState.isDiscovering 
-                  ? StoaTheme.success 
+              color: discoveryState.isDiscovering
+                  ? StoaTheme.success
                   : Colors.grey,
             ),
             onPressed: () {
               if (discoveryState.isDiscovering) {
-                ref.read(discoveryStateProvider.notifier).stop();
+                ref.read(discoveryStateControllerProvider.notifier).stop();
               } else {
-                ref.read(discoveryStateProvider.notifier).start();
+                ref.read(discoveryStateControllerProvider.notifier).start();
               }
             },
-            tooltip: discoveryState.isDiscovering 
-                ? 'Stop discovery' 
+            tooltip: discoveryState.isDiscovering
+                ? 'Stop discovery'
                 : 'Start discovery',
           ),
         ],
@@ -204,11 +209,11 @@ class _PeersScreenState extends ConsumerState<PeersScreen> {
         children: [
           // Status bar
           _buildStatusBar(discoveryState),
-          
+
           // Error message
           if (discoveryState.error != null)
             _buildErrorBanner(discoveryState.error!),
-          
+
           // Peers list
           Expanded(
             child: discoveryState.peers.isEmpty
@@ -219,58 +224,52 @@ class _PeersScreenState extends ConsumerState<PeersScreen> {
       ),
     );
   }
-  
+
   Widget _buildStatusBar(DiscoveryState state) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
         color: StoaTheme.darkSurface,
         border: Border(
-          bottom: BorderSide(
-            color: Colors.white.withValues(alpha: 0.1),
-          ),
+          bottom: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
         ),
       ),
       child: Row(
         children: [
           // Discovery status indicator
           Container(
-            width: 10,
-            height: 10,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: state.isDiscovering ? StoaTheme.success : Colors.grey,
-              boxShadow: state.isDiscovering
-                  ? [
-                      BoxShadow(
-                        color: StoaTheme.success.withValues(alpha: 0.5),
-                        blurRadius: 8,
-                        spreadRadius: 2,
-                      ),
-                    ]
-                  : null,
-            ),
-          )
+                width: 10,
+                height: 10,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: state.isDiscovering ? StoaTheme.success : Colors.grey,
+                  boxShadow: state.isDiscovering
+                      ? [
+                          BoxShadow(
+                            color: StoaTheme.success.withValues(alpha: 0.5),
+                            blurRadius: 8,
+                            spreadRadius: 2,
+                          ),
+                        ]
+                      : null,
+                ),
+              )
               .animate(
-                onPlay: (controller) => state.isDiscovering 
-                    ? controller.repeat(reverse: true) 
+                onPlay: (controller) => state.isDiscovering
+                    ? controller.repeat(reverse: true)
                     : controller.stop(),
               )
-              .scaleXY(
-                begin: 1.0,
-                end: 1.3,
-                duration: 1.seconds,
-              ),
-          
+              .scaleXY(begin: 1.0, end: 1.3, duration: 1.seconds),
+
           const SizedBox(width: 12),
-          
+
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  state.isDiscovering 
-                      ? 'Searching for peers...' 
+                  state.isDiscovering
+                      ? 'Searching for peers...'
                       : 'Discovery paused',
                   style: Theme.of(context).textTheme.bodyMedium,
                 ),
@@ -281,7 +280,7 @@ class _PeersScreenState extends ConsumerState<PeersScreen> {
               ],
             ),
           ),
-          
+
           // Broadcast status
           if (state.isBroadcasting)
             Container(
@@ -312,7 +311,7 @@ class _PeersScreenState extends ConsumerState<PeersScreen> {
       ),
     );
   }
-  
+
   Widget _buildErrorBanner(String error) {
     return Container(
       width: double.infinity,
@@ -323,23 +322,20 @@ class _PeersScreenState extends ConsumerState<PeersScreen> {
           const Icon(Icons.error_outline, color: StoaTheme.error, size: 20),
           const SizedBox(width: 8),
           Expanded(
-            child: Text(
-              error,
-              style: const TextStyle(color: StoaTheme.error),
-            ),
+            child: Text(error, style: const TextStyle(color: StoaTheme.error)),
           ),
           IconButton(
             icon: const Icon(Icons.refresh, size: 20),
             color: StoaTheme.error,
             onPressed: () {
-              ref.read(discoveryStateProvider.notifier).start();
+              ref.read(discoveryStateControllerProvider.notifier).start();
             },
           ),
         ],
       ),
     );
   }
-  
+
   Widget _buildEmptyState(DiscoveryState state) {
     return Center(
       child: Padding(
@@ -348,50 +344,45 @@ class _PeersScreenState extends ConsumerState<PeersScreen> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(
-              state.isDiscovering 
-                  ? Icons.radar 
-                  : Icons.wifi_off,
-              size: 80,
-              color: Colors.white24,
-            )
+                  state.isDiscovering ? Icons.radar : Icons.wifi_off,
+                  size: 80,
+                  color: Colors.white24,
+                )
                 .animate(
-                  onPlay: (controller) => state.isDiscovering 
-                      ? controller.repeat() 
+                  onPlay: (controller) => state.isDiscovering
+                      ? controller.repeat()
                       : controller.stop(),
                 )
-                .rotate(
-                  duration: 3.seconds,
-                  curve: Curves.linear,
-                ),
-            
+                .rotate(duration: 3.seconds, curve: Curves.linear),
+
             const SizedBox(height: 24),
-            
+
             Text(
-              state.isDiscovering 
-                  ? 'Looking for peers...' 
+              state.isDiscovering
+                  ? 'Looking for peers...'
                   : 'Discovery is paused',
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                color: Colors.white70,
-              ),
+              style: Theme.of(
+                context,
+              ).textTheme.titleLarge?.copyWith(color: Colors.white70),
             ),
-            
+
             const SizedBox(height: 8),
-            
+
             Text(
               state.isDiscovering
                   ? 'Make sure other Stoa users are on the same network'
                   : 'Tap the antenna icon to start searching',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: Colors.white54,
-              ),
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(color: Colors.white54),
               textAlign: TextAlign.center,
             ),
-            
+
             if (!state.isDiscovering) ...[
               const SizedBox(height: 24),
               ElevatedButton.icon(
                 onPressed: () {
-                  ref.read(discoveryStateProvider.notifier).start();
+                  ref.read(discoveryStateControllerProvider.notifier).start();
                 },
                 icon: const Icon(Icons.wifi_tethering),
                 label: const Text('Start Discovery'),
@@ -402,7 +393,7 @@ class _PeersScreenState extends ConsumerState<PeersScreen> {
       ),
     );
   }
-  
+
   Widget _buildPeersList(List<Peer> peers) {
     return ListView.builder(
       padding: const EdgeInsets.all(16),
@@ -411,183 +402,19 @@ class _PeersScreenState extends ConsumerState<PeersScreen> {
         final peer = peers[index];
         // Create a copy of the peer with updated connection status
         // Priority: Local state > Peer model state > Disconnected
-        final currentStatus = _connectionStatuses[peer.id] ?? peer.connectionStatus;
-        
+        final currentStatus =
+            _connectionStatuses[peer.id] ?? peer.connectionStatus;
+
         final peerWithStatus = peer.copyWith(
           connectionStatus: currentStatus,
           isConnected: currentStatus == PeerConnectionStatus.connected,
         );
-        
+
         return PeerCard(
           peer: peerWithStatus,
           onTap: () => _connectToPeer(peerWithStatus),
-        )
-            .animate()
-            .fadeIn(delay: (index * 100).ms)
-            .slideX(begin: 0.1, end: 0);
+        ).animate().fadeIn(delay: (index * 100).ms).slideX(begin: 0.1, end: 0);
       },
     );
   }
-  
-  void _showPeerOptions(Peer peer) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: StoaTheme.darkSurface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) => _PeerOptionsSheet(peer: peer),
-    );
-  }
 }
-
-class _PeerOptionsSheet extends StatelessWidget {
-  final Peer peer;
-  
-  const _PeerOptionsSheet({required this.peer});
-  
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // Handle
-          Container(
-            width: 40,
-            height: 4,
-            decoration: BoxDecoration(
-              color: Colors.white24,
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-          
-          const SizedBox(height: 24),
-          
-          // Peer info
-          Row(
-            children: [
-              _buildAvatar(),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      peer.username,
-                      style: Theme.of(context).textTheme.titleLarge,
-                    ),
-                    Text(
-                      '${peer.host}:${peer.port}',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          
-          const SizedBox(height: 24),
-          
-          // Actions
-          _buildAction(
-            context,
-            icon: Icons.send_rounded,
-            label: 'Send File',
-            color: StoaTheme.primaryColor,
-            onTap: () {
-              Navigator.pop(context);
-              context.pushNamed('chat', pathParameters: {'peerId': peer.id});
-            },
-          ),
-          
-          _buildAction(
-            context,
-            icon: Icons.message_outlined,
-            label: 'Send Message',
-            color: StoaTheme.secondaryColor,
-            onTap: () {
-              Navigator.pop(context);
-              // TODO: Implement messaging
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Messaging coming in Phase 5!')),
-              );
-            },
-          ),
-          
-          _buildAction(
-            context,
-            icon: Icons.folder_shared_outlined,
-            label: 'Create Shared Folder',
-            color: StoaTheme.accentColor,
-            onTap: () {
-              Navigator.pop(context);
-              // TODO: Implement shared folders
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Shared folders coming in Phase 6!')),
-              );
-            },
-          ),
-          
-          const SizedBox(height: 16),
-        ],
-      ),
-    );
-  }
-  
-  Widget _buildAvatar() {
-    final color = _parseColor(peer.avatarColor);
-    
-    return Container(
-      width: 60,
-      height: 60,
-      decoration: BoxDecoration(
-        color: color,
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Center(
-        child: Text(
-          peer.username.isNotEmpty 
-              ? peer.username[0].toUpperCase() 
-              : '?',
-          style: const TextStyle(
-            fontSize: 28,
-            fontWeight: FontWeight.bold,
-            color: Colors.white,
-          ),
-        ),
-      ),
-    );
-  }
-  
-  Widget _buildAction(
-    BuildContext context, {
-    required IconData icon,
-    required String label,
-    required Color color,
-    required VoidCallback onTap,
-  }) {
-    return ListTile(
-      leading: Container(
-        width: 40,
-        height: 40,
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.1),
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: Icon(icon, color: color),
-      ),
-      title: Text(label),
-      trailing: const Icon(Icons.chevron_right, color: Colors.white54),
-      onTap: onTap,
-    );
-  }
-  
-  Color _parseColor(String? hex) {
-    if (hex == null) return StoaTheme.primaryColor;
-    final hexCode = hex.replaceAll('#', '');
-    return Color(int.parse('FF$hexCode', radix: 16));
-  }
-}
-

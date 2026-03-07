@@ -9,9 +9,9 @@ import '../../../app/theme.dart';
 /// Dialog for editing user profile
 class EditProfileDialog extends ConsumerStatefulWidget {
   final User user;
-  
+
   const EditProfileDialog({super.key, required this.user});
-  
+
   /// Show the dialog and return the updated user (or null if cancelled)
   static Future<User?> show(BuildContext context, User user) {
     return showDialog<User>(
@@ -29,10 +29,16 @@ class _EditProfileDialogState extends ConsumerState<EditProfileDialog> {
   final _formKey = GlobalKey<FormState>();
   bool _isLoading = false;
   String? _selectedColor;
-  
+
   final List<String> _colors = [
-    '#6366F1', '#8B5CF6', '#06B6D4', '#10B981',
-    '#F59E0B', '#EF4444', '#EC4899', '#3B82F6',
+    '#6366F1',
+    '#8B5CF6',
+    '#06B6D4',
+    '#10B981',
+    '#F59E0B',
+    '#EF4444',
+    '#EC4899',
+    '#3B82F6',
   ];
 
   @override
@@ -50,9 +56,9 @@ class _EditProfileDialogState extends ConsumerState<EditProfileDialog> {
 
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
-    
+
     setState(() => _isLoading = true);
-    
+
     try {
       final updatedUser = User(
         id: widget.user.id,
@@ -61,18 +67,18 @@ class _EditProfileDialogState extends ConsumerState<EditProfileDialog> {
         publicKey: widget.user.publicKey,
         avatarColor: _selectedColor,
       );
-      
+
       final storage = ref.read(storageServiceProvider);
       await storage.saveUser(updatedUser);
-      
+
       if (mounted) {
         Navigator.of(context).pop(updatedUser);
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error saving profile: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error saving profile: $e')));
       }
     } finally {
       if (mounted) {
@@ -99,9 +105,9 @@ class _EditProfileDialogState extends ConsumerState<EditProfileDialog> {
                 style: Theme.of(context).textTheme.headlineSmall,
                 textAlign: TextAlign.center,
               ),
-              
+
               const SizedBox(height: 24),
-              
+
               // Avatar preview
               Center(
                 child: Container(
@@ -112,7 +118,9 @@ class _EditProfileDialogState extends ConsumerState<EditProfileDialog> {
                     borderRadius: BorderRadius.circular(20),
                     boxShadow: [
                       BoxShadow(
-                        color: _parseColor(_selectedColor).withValues(alpha: 0.4),
+                        color: _parseColor(
+                          _selectedColor,
+                        ).withValues(alpha: 0.4),
                         blurRadius: 20,
                         offset: const Offset(0, 8),
                       ),
@@ -120,8 +128,8 @@ class _EditProfileDialogState extends ConsumerState<EditProfileDialog> {
                   ),
                   child: Center(
                     child: Text(
-                      _usernameController.text.isNotEmpty 
-                          ? _usernameController.text[0].toUpperCase() 
+                      _usernameController.text.isNotEmpty
+                          ? _usernameController.text[0].toUpperCase()
                           : '?',
                       style: const TextStyle(
                         fontSize: 36,
@@ -132,15 +140,15 @@ class _EditProfileDialogState extends ConsumerState<EditProfileDialog> {
                   ),
                 ),
               ),
-              
+
               const SizedBox(height: 24),
-              
+
               // Color picker
               Text(
                 'Avatar Color',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: Colors.white70,
-                ),
+                style: Theme.of(
+                  context,
+                ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
               ),
               const SizedBox(height: 8),
               Wrap(
@@ -161,21 +169,25 @@ class _EditProfileDialogState extends ConsumerState<EditProfileDialog> {
                             : null,
                       ),
                       child: isSelected
-                          ? const Icon(Icons.check, color: Colors.white, size: 20)
+                          ? const Icon(
+                              Icons.check,
+                              color: Colors.white,
+                              size: 20,
+                            )
                           : null,
                     ),
                   );
                 }).toList(),
               ),
-              
+
               const SizedBox(height: 24),
-              
+
               // Username field
               Text(
                 'Display Name',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: Colors.white70,
-                ),
+                style: Theme.of(
+                  context,
+                ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
               ),
               const SizedBox(height: 8),
               TextFormField(
@@ -199,15 +211,17 @@ class _EditProfileDialogState extends ConsumerState<EditProfileDialog> {
                 },
                 onChanged: (_) => setState(() {}),
               ),
-              
+
               const SizedBox(height: 24),
-              
+
               // Buttons
               Row(
                 children: [
                   Expanded(
                     child: OutlinedButton(
-                      onPressed: _isLoading ? null : () => Navigator.pop(context),
+                      onPressed: _isLoading
+                          ? null
+                          : () => Navigator.pop(context),
                       child: const Text('Cancel'),
                     ),
                   ),
@@ -226,15 +240,15 @@ class _EditProfileDialogState extends ConsumerState<EditProfileDialog> {
                   ),
                 ],
               ),
-              
+
               const SizedBox(height: 16),
-              
+
               // Note
               Text(
                 'Note: Restart discovery for changes to be visible to others',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: Colors.white38,
-                ),
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: Colors.white38),
                 textAlign: TextAlign.center,
               ),
             ],
@@ -243,11 +257,10 @@ class _EditProfileDialogState extends ConsumerState<EditProfileDialog> {
       ),
     );
   }
-  
+
   Color _parseColor(String? hex) {
     if (hex == null) return StoaTheme.primaryColor;
     final hexCode = hex.replaceAll('#', '');
     return Color(int.parse('FF$hexCode', radix: 16));
   }
 }
-

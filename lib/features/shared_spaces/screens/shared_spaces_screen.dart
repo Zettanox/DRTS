@@ -12,42 +12,52 @@ class SharedSpacesScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final db = ref.watch(databaseProvider);
-    
+
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Shared Spaces'),
-      ),
+      appBar: AppBar(title: const Text('Shared Spaces')),
       body: StreamBuilder<List<SharedFolder>>(
         stream: db.watchAllSharedFolders(),
         builder: (context, snapshot) {
           if (!snapshot.hasData) {
-             return const Center(child: CircularProgressIndicator());
+            return const Center(child: CircularProgressIndicator());
           }
-          
+
           final folders = snapshot.data!;
-          
+
           if (folders.isEmpty) {
             return Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                   const Icon(Icons.folder_open, size: 64, color: Colors.white24),
-                   const SizedBox(height: 16),
-                   Text('No shared spaces yet', style: Theme.of(context).textTheme.titleMedium),
-                   const SizedBox(height: 8),
-                   Text('Create a space to share files with peers', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.white54)),
+                  const Icon(
+                    Icons.folder_open,
+                    size: 64,
+                    color: Colors.white24,
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'No shared spaces yet',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Create a space to share files with peers',
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodyMedium?.copyWith(color: Colors.white54),
+                  ),
                 ],
               ),
             );
           }
-          
+
           return ListView.builder(
             itemCount: folders.length,
             padding: const EdgeInsets.all(16),
             itemBuilder: (context, index) {
               final folder = folders[index];
               final isOwner = folder.ownerId == 'me';
-              
+
               return Card(
                 clipBehavior: Clip.antiAlias,
                 child: ListTile(
@@ -59,16 +69,28 @@ class SharedSpacesScreen extends ConsumerWidget {
                   title: Row(
                     children: [
                       Expanded(
-                        child: Text(folder.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                        child: Text(
+                          folder.name,
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
                       ),
                       if (isOwner)
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 2,
+                          ),
                           decoration: BoxDecoration(
                             color: StoaTheme.accentColor.withAlpha(50),
                             borderRadius: BorderRadius.circular(12),
                           ),
-                          child: const Text('Owner', style: TextStyle(fontSize: 11, color: StoaTheme.accentColor)),
+                          child: const Text(
+                            'Owner',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: StoaTheme.accentColor,
+                            ),
+                          ),
                         ),
                     ],
                   ),
@@ -76,22 +98,41 @@ class SharedSpacesScreen extends ConsumerWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       if (isOwner) ...[
-                        Text(folder.path, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12)),
+                        Text(
+                          folder.path,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 12),
+                        ),
                       ] else ...[
-                        Text('Remote • ${folder.permission}', style: const TextStyle(fontSize: 12)),
+                        Text(
+                          'Remote • ${folder.permission}',
+                          style: const TextStyle(fontSize: 12),
+                        ),
                       ],
                       const SizedBox(height: 4),
-                      SelectableText('ID: ${folder.id}', style: const TextStyle(fontSize: 11, fontFamily: 'monospace', color: Colors.white38)),
+                      SelectableText(
+                        'ID: ${folder.id}',
+                        style: const TextStyle(
+                          fontSize: 11,
+                          fontFamily: 'monospace',
+                          color: Colors.white38,
+                        ),
+                      ),
                     ],
                   ),
                   trailing: PopupMenuButton<String>(
                     onSelected: (value) async {
                       if (value == 'refresh') {
-                         // For peers, request file list from owner
-                         if (!isOwner) {
-                           ref.read(remoteFolderServiceProvider).requestFileList(folder.id, folder.ownerId);
-                           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Refreshing...')));
-                         }
+                        // For peers, request file list from owner
+                        if (!isOwner) {
+                          ref
+                              .read(remoteFolderServiceProvider)
+                              .requestFileList(folder.id, folder.ownerId);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Refreshing...')),
+                          );
+                        }
                       } else if (value == 'collaborators') {
                         _showCollaboratorsDialog(context, ref, folder);
                       } else if (value == 'delete') {
@@ -125,7 +166,11 @@ class SharedSpacesScreen extends ConsumerWidget {
                         value: 'delete',
                         child: Row(
                           children: [
-                            const Icon(Icons.delete, size: 20, color: Colors.red),
+                            const Icon(
+                              Icons.delete,
+                              size: 20,
+                              color: Colors.red,
+                            ),
                             const SizedBox(width: 8),
                             Text(isOwner ? 'Delete Space' : 'Leave Space'),
                           ],
@@ -134,9 +179,11 @@ class SharedSpacesScreen extends ConsumerWidget {
                     ],
                   ),
                   onTap: () {
-                     Navigator.of(context).push(
-                       MaterialPageRoute(builder: (_) => FolderViewScreen(folder: folder))
-                     );
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => FolderViewScreen(folder: folder),
+                      ),
+                    );
                   },
                 ),
               );
@@ -152,8 +199,12 @@ class SharedSpacesScreen extends ConsumerWidget {
       ),
     );
   }
-  
-  void _showCollaboratorsDialog(BuildContext context, WidgetRef ref, SharedFolder folder) {
+
+  void _showCollaboratorsDialog(
+    BuildContext context,
+    WidgetRef ref,
+    SharedFolder folder,
+  ) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -166,35 +217,52 @@ class SharedSpacesScreen extends ConsumerWidget {
           children: [
             const Padding(
               padding: EdgeInsets.all(16),
-              child: Text('Collaborators', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              child: Text(
+                'Collaborators',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
             ),
             Expanded(
               child: StreamBuilder<List<SpaceCollaborator>>(
-                stream: ref.read(databaseProvider).watchCollaborators(folder.id),
+                stream: ref
+                    .read(databaseProvider)
+                    .watchCollaborators(folder.id),
                 builder: (context, snapshot) {
-                  if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
-                  
+                  if (!snapshot.hasData) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+
                   final collaborators = snapshot.data!;
-                  
+
                   if (collaborators.isEmpty) {
                     return const Center(
-                      child: Text('No collaborators yet', style: TextStyle(color: Colors.white54)),
+                      child: Text(
+                        'No collaborators yet',
+                        style: TextStyle(color: Colors.white54),
+                      ),
                     );
                   }
-                  
+
                   return ListView.builder(
                     controller: controller,
                     itemCount: collaborators.length,
                     itemBuilder: (context, index) {
                       final c = collaborators[index];
                       return ListTile(
-                        leading: CircleAvatar(child: Text(c.peerName[0].toUpperCase())),
+                        leading: CircleAvatar(
+                          child: Text(c.peerName[0].toUpperCase()),
+                        ),
                         title: Text(c.peerName),
                         subtitle: Text(c.permission),
                         trailing: IconButton(
-                          icon: const Icon(Icons.remove_circle_outline, color: Colors.red),
+                          icon: const Icon(
+                            Icons.remove_circle_outline,
+                            color: Colors.red,
+                          ),
                           onPressed: () {
-                            ref.read(remoteFolderServiceProvider).removeCollaborator(folder.id, c.peerId);
+                            ref
+                                .read(remoteFolderServiceProvider)
+                                .removeCollaborator(folder.id, c.peerId);
                           },
                         ),
                       );
@@ -216,17 +284,17 @@ class SharedSpacesScreen extends ConsumerWidget {
       ),
     );
   }
-  
+
   void _showInviteDialog(BuildContext context, WidgetRef ref, String spaceId) {
     final connectedPeers = ref.read(connectionServiceProvider).connectedPeers;
-    
+
     if (connectedPeers.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('No connected peers to invite')),
       );
       return;
     }
-    
+
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -235,9 +303,11 @@ class SharedSpacesScreen extends ConsumerWidget {
           future: ref.read(databaseProvider).getAllPeers(),
           builder: (context, snapshot) {
             if (!snapshot.hasData) return const CircularProgressIndicator();
-            
-            final peers = snapshot.data!.where((p) => connectedPeers.contains(p.id)).toList();
-            
+
+            final peers = snapshot.data!
+                .where((p) => connectedPeers.contains(p.id))
+                .toList();
+
             return SizedBox(
               width: double.maxFinite,
               child: ListView.builder(
@@ -247,20 +317,26 @@ class SharedSpacesScreen extends ConsumerWidget {
                   final peer = peers[index];
                   return ListTile(
                     leading: CircleAvatar(
-                      backgroundColor: peer.avatarColor != null 
-                        ? Color(int.parse(peer.avatarColor!.replaceFirst('#', '0xFF')))
-                        : Colors.grey,
+                      backgroundColor: peer.avatarColor != null
+                          ? Color(
+                              int.parse(
+                                peer.avatarColor!.replaceFirst('#', '0xFF'),
+                              ),
+                            )
+                          : Colors.grey,
                       child: Text(peer.username[0].toUpperCase()),
                     ),
                     title: Text(peer.username),
                     onTap: () {
                       Navigator.pop(ctx);
-                      ref.read(remoteFolderServiceProvider).inviteCollaborator(
-                        spaceId, 
-                        peer.id, 
-                        peer.username,
-                        'read-write',
-                      );
+                      ref
+                          .read(remoteFolderServiceProvider)
+                          .inviteCollaborator(
+                            spaceId,
+                            peer.id,
+                            peer.username,
+                            'read-write',
+                          );
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(content: Text('Invited ${peer.username}')),
                       );
@@ -274,17 +350,27 @@ class SharedSpacesScreen extends ConsumerWidget {
       ),
     );
   }
-  
-  void _confirmDelete(BuildContext context, WidgetRef ref, SharedFolder folder, bool isOwner) async {
+
+  void _confirmDelete(
+    BuildContext context,
+    WidgetRef ref,
+    SharedFolder folder,
+    bool isOwner,
+  ) async {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(isOwner ? 'Delete Shared Space?' : 'Leave Shared Space?'),
-        content: Text(isOwner 
-          ? 'This will remove the space and notify all collaborators. Files on disk will NOT be deleted.'
-          : 'You will no longer have access to this space.'),
+        content: Text(
+          isOwner
+              ? 'This will remove the space and notify all collaborators. Files on disk will NOT be deleted.'
+              : 'You will no longer have access to this space.',
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () => Navigator.pop(ctx, true),
@@ -293,7 +379,7 @@ class SharedSpacesScreen extends ConsumerWidget {
         ],
       ),
     );
-    
+
     if (confirm == true) {
       if (isOwner) {
         await ref.read(remoteFolderServiceProvider).deleteSpace(folder.id);
@@ -302,7 +388,7 @@ class SharedSpacesScreen extends ConsumerWidget {
       }
     }
   }
-  
+
   void _showCreateDialog(BuildContext context, WidgetRef ref) {
     final controller = TextEditingController();
     showDialog(
@@ -318,16 +404,26 @@ class SharedSpacesScreen extends ConsumerWidget {
           autofocus: true,
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
           FilledButton(
             onPressed: () async {
-               if (controller.text.trim().isNotEmpty) {
-                 Navigator.pop(ctx);
-                 await ref.read(remoteFolderServiceProvider).createSharedSpace(controller.text.trim());
-                 ScaffoldMessenger.of(context).showSnackBar(
-                   const SnackBar(content: Text('Space created! Invite collaborators from the menu.')),
-                 );
-               }
+              if (controller.text.trim().isNotEmpty) {
+                Navigator.pop(ctx);
+                await ref
+                    .read(remoteFolderServiceProvider)
+                    .createSharedSpace(controller.text.trim());
+                if (!context.mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                      'Space created! Invite collaborators from the menu.',
+                    ),
+                  ),
+                );
+              }
             },
             child: const Text('Create'),
           ),

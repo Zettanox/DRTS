@@ -18,7 +18,7 @@ final navigatorKeyProvider = Provider<GlobalKey<NavigatorState>>((ref) {
 
 final routerProvider = Provider<GoRouter>((ref) {
   final navigatorKey = ref.watch(navigatorKeyProvider);
-  
+
   return GoRouter(
     navigatorKey: navigatorKey,
     initialLocation: '/',
@@ -26,25 +26,22 @@ final routerProvider = Provider<GoRouter>((ref) {
       // Check if user has completed onboarding
       final storage = ref.read(storageServiceProvider);
       final hasUser = await storage.hasUser();
-      
-      final isOnboarding = state.matchedLocation == '/' || 
-                           state.matchedLocation == '/welcome';
-      
+
+      final isOnboarding =
+          state.matchedLocation == '/' || state.matchedLocation == '/welcome';
+
       if (!hasUser && !isOnboarding) {
         return '/welcome';
       }
-      
+
       if (hasUser && isOnboarding) {
         return '/dashboard';
       }
-      
+
       return null;
     },
     routes: [
-      GoRoute(
-        path: '/',
-        redirect: (context, state) => '/welcome',
-      ),
+      GoRoute(path: '/', redirect: (context, state) => '/welcome'),
       GoRoute(
         path: '/welcome',
         name: 'welcome',
@@ -81,9 +78,8 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/chat/:peerId',
         name: 'chat',
-        builder: (context, state) => ChatScreen(
-          peerId: state.pathParameters['peerId']!,
-        ),
+        builder: (context, state) =>
+            ChatScreen(peerId: state.pathParameters['peerId']!),
       ),
       // Groups routes
       GoRoute(
@@ -99,11 +95,9 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/groups/:groupId',
         name: 'groupChat',
-        builder: (context, state) => GroupChatScreen(
-          groupId: state.pathParameters['groupId']!,
-        ),
+        builder: (context, state) =>
+            GroupChatScreen(groupId: state.pathParameters['groupId']!),
       ),
     ],
   );
 });
-

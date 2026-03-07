@@ -8,7 +8,9 @@ import '../core/services/connection_service.dart';
 import '../core/services/discovery_service.dart';
 import '../core/services/group_service.dart';
 import '../core/services/remote_folder_service.dart';
+import '../core/services/file_transfer_service.dart';
 import '../core/data/database.dart';
+import 'package:go_router/go_router.dart';
 import 'router.dart';
 
 /// Global handler for connection events that works regardless of which screen is active.
@@ -48,7 +50,9 @@ class _GlobalConnectionHandlerState
 
     try {
       // 1. Stop mDNS discovery and broadcast to prevent C++ crash
-      final discoveryStateNotifier = ref.read(discoveryStateProvider.notifier);
+      final discoveryStateNotifier = ref.read(
+        discoveryStateControllerProvider.notifier,
+      );
       await discoveryStateNotifier.stop();
 
       // 2. Clear resources explicitly if needed
@@ -85,6 +89,10 @@ class _GlobalConnectionHandlerState
       // Initialize Remote Folder Service for Shared Spaces
       debugPrint('📂 GlobalConnectionHandler: Initializing Shared Spaces');
       ref.read(remoteFolderServiceProvider).initialize();
+
+      // Eagerly initialize File Transfer Service so it listens to connection events
+      // even if the user hasn't opened the chat screen yet
+      ref.read(fileTransferServiceProvider);
     } catch (e) {
       debugPrint(
         '❌ GlobalConnectionHandler: Failed to initialize services: $e',
@@ -231,6 +239,12 @@ class _GlobalConnectionHandlerState
               ref.read(connectionServiceProvider).acceptConnection(peerId);
               Navigator.pop(ctx);
               _isDialogShowing = false;
+
+              // Eagerly jump to chat screen
+              navigatorContext.pushNamed(
+                'chat',
+                pathParameters: {'peerId': peerId},
+              );
             },
             child: const Text('Accept'),
           ),

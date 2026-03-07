@@ -9,7 +9,11 @@ import '../../../core/services/file_transfer_service.dart';
 import '../../../core/services/discovery_service.dart';
 import '../../../core/data/database.dart';
 import 'package:open_filex/open_filex.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:stoa/core/utils/logger.dart';
 import 'dart:async';
+
+import '../controllers/chat_controller.dart';
 
 class ChatScreen extends ConsumerStatefulWidget {
   final String peerId;
@@ -35,7 +39,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     // Since we navigate by ID, we look it up from discovery service
     // In a real app we'd have a unified PeerRepository
     // final discoveryService = ref.watch(discoveryServiceProvider); // Not needed if we watch state
-    final discoveryState = ref.watch(discoveryStateProvider);
+    final discoveryState = ref.watch(discoveryStateControllerProvider);
     final peers = discoveryState.peers;
 
     // Also check active manually added peers if needed, but the stream should emit them
@@ -152,7 +156,29 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                               FilledButton(
                                 onPressed: () async {
                                   Navigator.pop(ctx);
-                                  await db.clearMessagesForPeer(peer.id);
+
+                                  // Find and delete all associated files
+                                  final messages = await db.getMessagesForPeer(
+                                    peer.id,
+                                  );
+                                  for (final msg in messages) {
+                                    if (msg.filePath != null) {
+                                      try {
+                                        final file = File(msg.filePath!);
+                                        if (await file.exists()) {
+                                          await file.delete();
+                                        }
+                                      } catch (e) {
+                                        appLogger.e(
+                                          'Failed to delete file ${msg.filePath}: $e',
+                                        );
+                                      }
+                                    }
+                                  }
+
+                                  await ref
+                                      .read(chatControllerProvider.notifier)
+                                      .clearChat(peer.id);
                                   if (!context.mounted) return;
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     const SnackBar(
@@ -364,23 +390,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final text = _messageController.text.trim();
     if (text.isEmpty) return;
 
-    // Send via connection service
-    await ref.read(connectionServiceProvider).sendText(peer, text);
-
-    // Add to DB
-    final db = ref.read(databaseProvider);
-    await db.insertMessage(
-      MessagesCompanion.insert(
-        peerId: peer.id,
-        isMe: true,
-        content: text,
-        type: 'text',
-        status: 'sent',
-        timestamp: DateTime.now(),
-      ),
-    );
-
     _messageController.clear();
+
+    await ref.read(chatControllerProvider.notifier).sendMessage(peer, text);
   }
 
   Widget _buildTransferBubble(TransferProgress transfer) {
@@ -449,6 +461,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   }
 
   Widget _buildDbMessageBubble(Message message) {
+    return GestureDetector(
+      onLongPress: () => _showDeleteMessageDialog(message),
+      child: _buildMessageContent(message),
+    );
+  }
+
+  Widget _buildMessageContent(Message message) {
     final isMe = message.isMe;
     final color = isMe
         ? Theme.of(context).primaryColor.withValues(alpha: 0.8)
@@ -463,9 +482,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         child: GestureDetector(
           onTap: () {
             if (message.filePath != null) {
-              ref
-                  .read(fileTransferServiceProvider)
-                  .openFileByPath(message.filePath!);
+              _openOrShareFile(message.filePath!);
             }
           },
           child: Container(
@@ -574,9 +591,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               GestureDetector(
                 onTap: () {
                   if (message.filePath != null) {
-                    ref
-                        .read(fileTransferServiceProvider)
-                        .openFileByPath(message.filePath!);
+                    _openOrShareFile(message.filePath!);
                   }
                 },
                 child: const Text(
@@ -588,6 +603,65 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         ),
       ],
     );
+  }
+
+  void _showDeleteMessageDialog(Message message) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete Message?'),
+        content: const Text(
+          'This will delete the message and any associated files from your device.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              Navigator.pop(ctx);
+
+              // Delete actual file if exists
+              if (message.filePath != null) {
+                try {
+                  final file = File(message.filePath!);
+                  if (await file.exists()) {
+                    await file.delete();
+                    appLogger.i('🗑️ Deleted file: ${message.filePath}');
+                  }
+                } catch (e) {
+                  appLogger.e('❌ Failed to delete file: $e');
+                }
+              }
+
+              // Delete from DB
+              await ref.read(databaseProvider).deleteMessage(message.id);
+            },
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _openOrShareFile(String path) async {
+    if (Platform.isAndroid || Platform.isIOS) {
+      try {
+        final result = await OpenFilex.open(path);
+        if (result.type != ResultType.done) {
+          appLogger.w(
+            'OpenFilex failed: ${result.message}, falling back to Share',
+          );
+          await Share.shareXFiles([XFile(path)], text: 'Open or save file');
+        }
+      } catch (e) {
+        await Share.shareXFiles([XFile(path)], text: 'Open or save file');
+      }
+    } else {
+      OpenFilex.open(path);
+    }
   }
 
   IconData _getFileIcon(Message message) {

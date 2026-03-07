@@ -12,36 +12,38 @@ class GroupsScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final groupService = ref.watch(groupServiceProvider);
-    
+
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Groups'),
-      ),
+      appBar: AppBar(title: const Text('Groups')),
       body: StreamBuilder<List<Group>>(
         stream: groupService.watchAllGroups(),
         builder: (context, snapshot) {
           if (snapshot.hasError) {
             return Center(child: Text('Error: ${snapshot.error}'));
           }
-          
+
           if (!snapshot.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
-          
+
           final groups = snapshot.data!;
-          
+
           if (groups.isEmpty) {
             return Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Icon(Icons.group_outlined, size: 80, color: Colors.white24),
+                  const Icon(
+                    Icons.group_outlined,
+                    size: 80,
+                    color: Colors.white24,
+                  ),
                   const SizedBox(height: 16),
                   Text(
                     'No groups yet',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color: Colors.white54,
-                    ),
+                    style: Theme.of(
+                      context,
+                    ).textTheme.titleMedium?.copyWith(color: Colors.white54),
                   ),
                   const SizedBox(height: 8),
                   const Text(
@@ -52,7 +54,7 @@ class GroupsScreen extends ConsumerWidget {
               ),
             );
           }
-          
+
           return ListView.builder(
             padding: const EdgeInsets.all(16),
             itemCount: groups.length,
@@ -74,13 +76,13 @@ class GroupsScreen extends ConsumerWidget {
 
 class _GroupCard extends ConsumerWidget {
   final Group group;
-  
+
   const _GroupCard({required this.group});
-  
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final groupService = ref.watch(groupServiceProvider);
-    
+
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       child: ListTile(
@@ -95,7 +97,8 @@ class _GroupCard extends ConsumerWidget {
         subtitle: StreamBuilder<List<GroupMember>>(
           stream: groupService.watchGroupMembers(group.id),
           builder: (context, snapshot) {
-            final count = snapshot.data?.where((m) => m.status == 'accepted').length ?? 0;
+            final count =
+                snapshot.data?.where((m) => m.status == 'accepted').length ?? 0;
             return Text('$count member${count == 1 ? '' : 's'}');
           },
         ),
@@ -105,4 +108,3 @@ class _GroupCard extends ConsumerWidget {
     );
   }
 }
-

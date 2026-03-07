@@ -19,19 +19,19 @@ class _CreateGroupScreenState extends ConsumerState<CreateGroupScreen> {
   final Set<String> _selectedPeerIds = {};
   bool _showHistoryToNew = false;
   bool _isCreating = false;
-  
+
   @override
   void dispose() {
     _nameController.dispose();
     super.dispose();
   }
-  
+
   @override
   Widget build(BuildContext context) {
-    final discoveryState = ref.watch(discoveryStateProvider);
+    final discoveryState = ref.watch(discoveryStateControllerProvider);
     // Show all discovered peers (they may not be "online" but are visible)
     final availablePeers = discoveryState.peers;
-    
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Create Group'),
@@ -40,7 +40,8 @@ class _CreateGroupScreenState extends ConsumerState<CreateGroupScreen> {
             onPressed: _canCreate() ? _createGroup : null,
             child: _isCreating
                 ? const SizedBox(
-                    width: 20, height: 20,
+                    width: 20,
+                    height: 20,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 : const Text('Create'),
@@ -60,9 +61,9 @@ class _CreateGroupScreenState extends ConsumerState<CreateGroupScreen> {
             ),
             onChanged: (_) => setState(() {}),
           ),
-          
+
           const SizedBox(height: 24),
-          
+
           // Settings
           SwitchListTile(
             title: const Text('Show history to new members'),
@@ -70,16 +71,16 @@ class _CreateGroupScreenState extends ConsumerState<CreateGroupScreen> {
             value: _showHistoryToNew,
             onChanged: (val) => setState(() => _showHistoryToNew = val),
           ),
-          
+
           const SizedBox(height: 24),
-          
+
           // Peer selection
           Text(
             'Select Members (${_selectedPeerIds.length} selected)',
             style: Theme.of(context).textTheme.titleMedium,
           ),
           const SizedBox(height: 8),
-          
+
           if (availablePeers.isEmpty)
             const Card(
               child: Padding(
@@ -91,45 +92,49 @@ class _CreateGroupScreenState extends ConsumerState<CreateGroupScreen> {
               ),
             )
           else
-            ...availablePeers.map((peer) => _PeerCheckbox(
-              peer: peer,
-              isSelected: _selectedPeerIds.contains(peer.id),
-              onToggle: (selected) {
-                setState(() {
-                  if (selected) {
-                    _selectedPeerIds.add(peer.id);
-                  } else {
-                    _selectedPeerIds.remove(peer.id);
-                  }
-                });
-              },
-            )),
+            ...availablePeers.map(
+              (peer) => _PeerCheckbox(
+                peer: peer,
+                isSelected: _selectedPeerIds.contains(peer.id),
+                onToggle: (selected) {
+                  setState(() {
+                    if (selected) {
+                      _selectedPeerIds.add(peer.id);
+                    } else {
+                      _selectedPeerIds.remove(peer.id);
+                    }
+                  });
+                },
+              ),
+            ),
         ],
       ),
     );
   }
-  
+
   bool _canCreate() {
-    return _nameController.text.trim().isNotEmpty && 
-           _selectedPeerIds.isNotEmpty &&
-           !_isCreating;
+    return _nameController.text.trim().isNotEmpty &&
+        _selectedPeerIds.isNotEmpty &&
+        !_isCreating;
   }
-  
+
   Future<void> _createGroup() async {
     setState(() => _isCreating = true);
-    
+
     try {
-      final discoveryState = ref.read(discoveryStateProvider);
+      final discoveryState = ref.read(discoveryStateControllerProvider);
       final selectedPeers = discoveryState.peers
           .where((p) => _selectedPeerIds.contains(p.id))
           .toList();
-      
-      await ref.read(groupServiceProvider).createGroup(
-        _nameController.text.trim(),
-        selectedPeers,
-        showHistoryToNew: _showHistoryToNew,
-      );
-      
+
+      await ref
+          .read(groupServiceProvider)
+          .createGroup(
+            _nameController.text.trim(),
+            selectedPeers,
+            showHistoryToNew: _showHistoryToNew,
+          );
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Group created! Invites sent.')),
@@ -138,9 +143,9 @@ class _CreateGroupScreenState extends ConsumerState<CreateGroupScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error: $e')));
       }
     } finally {
       if (mounted) {
@@ -154,13 +159,13 @@ class _PeerCheckbox extends StatelessWidget {
   final Peer peer;
   final bool isSelected;
   final ValueChanged<bool> onToggle;
-  
+
   const _PeerCheckbox({
     required this.peer,
     required this.isSelected,
     required this.onToggle,
   });
-  
+
   static Color _parseColor(String? colorStr) {
     if (colorStr == null || colorStr.isEmpty) return StoaTheme.primaryColor;
     try {
@@ -169,7 +174,7 @@ class _PeerCheckbox extends StatelessWidget {
       return StoaTheme.primaryColor;
     }
   }
-  
+
   @override
   Widget build(BuildContext context) {
     return Card(
@@ -183,11 +188,13 @@ class _PeerCheckbox extends StatelessWidget {
           backgroundColor: _parseColor(peer.avatarColor),
           child: Text(
             peer.username[0].toUpperCase(),
-            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+            ),
           ),
         ),
       ),
     );
   }
 }
-

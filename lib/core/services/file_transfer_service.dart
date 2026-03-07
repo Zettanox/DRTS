@@ -8,7 +8,7 @@ import 'package:mime/mime.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
-import 'package:archive/archive.dart';
+import 'package:archive/archive_io.dart';
 
 import '../models/peer.dart';
 import 'connection_service.dart';
@@ -80,8 +80,9 @@ class FileTransferService {
   final _progressController =
       StreamController<Map<String, TransferProgress>>.broadcast();
 
-  // Incoming file buffers
-  final Map<String, List<int>> _incomingBuffers = {};
+  // Incoming file temp files
+  final Map<String, File> _incomingTempFiles = {};
+  final Map<String, IOSink> _incomingSinks = {};
 
   // Transfer Queue
   final List<QueueItem> _sendQueue = [];
@@ -101,14 +102,38 @@ class FileTransferService {
   /// Current queue items
   List<QueueItem> get queue => List.unmodifiable(_sendQueue);
 
+  // Sequential incoming message queue (to avoid blocking on I/O like getTemporaryDirectory)
+  final _incomingMessageQueue = <Future<void> Function()>[];
+  bool _isProcessingIncoming = false;
+
   void _listenToConnectionService() {
     final connectionService = _ref.read(connectionServiceProvider);
     connectionService.messageStream.listen((message) {
       if (message.type == ConnectionMessageType.data &&
           message.payload != null) {
-        handleMessage(message.peerId, message.payload);
+        // Enqueue to process sequentially
+        _incomingMessageQueue.add(
+          () => handleMessage(message.peerId, message.payload),
+        );
+        _processIncomingQueue();
       }
     });
+  }
+
+  Future<void> _processIncomingQueue() async {
+    if (_isProcessingIncoming) return;
+    _isProcessingIncoming = true;
+
+    while (_incomingMessageQueue.isNotEmpty) {
+      final task = _incomingMessageQueue.removeAt(0);
+      try {
+        await task();
+      } catch (e) {
+        appLogger.e('❌ Error processing incoming payload: $e');
+      }
+    }
+
+    _isProcessingIncoming = false;
   }
 
   Stream<Map<String, TransferProgress>> get progressStream =>
@@ -241,27 +266,18 @@ class FileTransferService {
 
     appLogger.d('📁 Zipping folder: $folderName...');
 
-    // Create ZIP archive
-    final archive = Archive();
-
-    await for (final entity in directory.list(recursive: true)) {
-      if (entity is File) {
-        final relativePath = entity.path.substring(directory.path.length + 1);
-        final bytes = await entity.readAsBytes();
-        archive.addFile(ArchiveFile(relativePath, bytes.length, bytes));
-      }
-    }
-
-    final zipBytes = ZipEncoder().encode(archive);
-
-    // Save ZIP to temp directory
+    // Create stream ZIP in temp directory directly
     final tempDir = await getTemporaryDirectory();
     final zipPath = '${tempDir.path}/$folderName.zip';
+
+    final encoder = ZipFileEncoder();
+    encoder.zipDirectory(directory, filename: zipPath);
+
     final zipFile = File(zipPath);
-    await zipFile.writeAsBytes(zipBytes);
+    final size = await zipFile.length();
 
     appLogger.i(
-      '✅ Created ZIP: ${zipFile.path} (${(zipBytes.length / 1024 / 1024).toStringAsFixed(1)} MB)',
+      '✅ Created ZIP: ${zipFile.path} (${(size / 1024 / 1024).toStringAsFixed(1)} MB)',
     );
 
     // Send the ZIP file (with .zip extension so receiver can open it)
@@ -325,48 +341,54 @@ class FileTransferService {
 
       // 1MB chunks for maximum throughput
       const chunkSize = 1024 * 1024;
-      final fileBytes = await file.readAsBytes();
 
-      // Pipeline writes: collect futures, don't await each one
-      final List<Future<void>> pendingWrites = [];
+      final raf = await file.open();
+      try {
+        final List<Future<void>> pendingWrites = [];
+        int offset = 0;
 
-      for (int i = 0; i < fileBytes.length; i += chunkSize) {
-        final end = (i + chunkSize > fileBytes.length)
-            ? fileBytes.length
-            : i + chunkSize;
-        final chunk = Uint8List.fromList(fileBytes.sublist(i, end));
-        final isLast = (end >= fileBytes.length);
+        while (offset < size) {
+          final remaining = size - offset;
+          final int lengthToRead = remaining > chunkSize
+              ? chunkSize
+              : remaining;
+          final chunk = await raf.read(lengthToRead);
+          final isLast = (offset + lengthToRead >= size);
 
-        // Don't await - let TCP buffer handle flow control
-        pendingWrites.add(
-          connectionService.sendRawFileChunk(
-            peer.id,
-            fileId,
-            chunk,
-            isLast: isLast,
-          ),
-        );
-
-        sentBytes += chunk.length;
-        chunkIndex++;
-
-        // Update progress every 20 chunks (less UI overhead)
-        if (chunkIndex % 20 == 0 || isLast) {
-          _updateProgress(
-            _transfers[fileId]!.copyWith(transferredBytes: sentBytes),
+          // Don't await - let TCP buffer handle flow control
+          pendingWrites.add(
+            connectionService.sendRawFileChunk(
+              peer.id,
+              fileId,
+              chunk,
+              isLast: isLast,
+            ),
           );
+
+          sentBytes += chunk.length;
+          chunkIndex++;
+          offset += chunk.length;
+
+          // Update progress every 20 chunks (less UI overhead)
+          if (chunkIndex % 20 == 0 || isLast) {
+            _updateProgress(
+              _transfers[fileId]!.copyWith(transferredBytes: sentBytes),
+            );
+          }
+
+          // Limit pipeline depth to avoid memory bloat on huge files
+          if (pendingWrites.length >= 10) {
+            await Future.wait(pendingWrites);
+            pendingWrites.clear();
+          }
         }
 
-        // Limit pipeline depth to avoid memory bloat on huge files
-        if (pendingWrites.length >= 10) {
+        // Wait for any remaining writes
+        if (pendingWrites.isNotEmpty) {
           await Future.wait(pendingWrites);
-          pendingWrites.clear();
         }
-      }
-
-      // Wait for any remaining writes
-      if (pendingWrites.isNotEmpty) {
-        await Future.wait(pendingWrites);
+      } finally {
+        await raf.close();
       }
 
       _updateProgress(
@@ -431,10 +453,10 @@ class FileTransferService {
 
     if (!_transfers.containsKey(fileId)) return;
 
-    final buffer = _incomingBuffers[fileId];
-    if (buffer == null) return;
+    final sink = _incomingSinks[fileId];
+    if (sink == null) return;
 
-    buffer.addAll(data);
+    sink.add(data);
 
     final current = _transfers[fileId]!;
     _updateProgress(
@@ -459,7 +481,10 @@ class FileTransferService {
 
     appLogger.d('📥 Receiving file offer: $filename from $senderId');
 
-    _incomingBuffers[fileId] = [];
+    final tempDir = await getTemporaryDirectory();
+    final tempFile = File('${tempDir.path}/${fileId}_temp');
+    _incomingTempFiles[fileId] = tempFile;
+    _incomingSinks[fileId] = tempFile.openWrite();
 
     _updateProgress(
       TransferProgress(
@@ -487,12 +512,12 @@ class FileTransferService {
 
     if (!_transfers.containsKey(fileId)) return;
 
-    final buffer = _incomingBuffers[fileId];
-    if (buffer == null) return; // Should not happen if offer handled
+    final sink = _incomingSinks[fileId];
+    if (sink == null) return; // Should not happen if offer handled
 
     if (data.isNotEmpty) {
       final bytes = base64Decode(data);
-      buffer.addAll(bytes);
+      sink.add(bytes);
 
       final current = _transfers[fileId]!;
       _updateProgress(
@@ -503,15 +528,16 @@ class FileTransferService {
     }
 
     if (isLast) {
+      await sink.close();
       await _saveFile(fileId);
     }
   }
 
   Future<void> _saveFile(String fileId) async {
     final transfer = _transfers[fileId];
-    final buffer = _incomingBuffers[fileId];
+    final tempFile = _incomingTempFiles[fileId];
 
-    if (transfer == null || buffer == null) return;
+    if (transfer == null || tempFile == null) return;
 
     try {
       // Use unified Stoa/Downloads path
@@ -545,26 +571,18 @@ class FileTransferService {
 
       if (isZip) {
         try {
-          final archive = ZipDecoder().decodeBytes(buffer);
+          await extractFileToDisk(tempFile.path, baseDir.path);
 
-          // Extract to folder
-          for (final file in archive) {
-            final filename = file.name;
-            if (file.isFile) {
-              final data = file.content as List<int>;
-              File('${baseDir.path}/$filename')
-                ..createSync(recursive: true)
-                ..writeAsBytesSync(data);
-            } else {
-              Directory(
-                '${baseDir.path}/$filename',
-              ).createSync(recursive: true);
-            }
-          }
-          appLogger.i('📦 Extracted ${archive.length} files to: ${baseDir.path}');
+          appLogger.i('📦 Extracted ZIP contents to: ${baseDir.path}');
 
-          if (archive.isNotEmpty && archive.first.name.endsWith('/')) {
-            displayPath = '${baseDir.path}/${archive.first.name}';
+          final folderName = transfer.filename.substring(
+            0,
+            transfer.filename.length - 4,
+          );
+          final possiblePath = '${baseDir.path}/$folderName';
+
+          if (await Directory(possiblePath).exists()) {
+            displayPath = possiblePath;
           } else {
             displayPath = baseDir.path;
           }
@@ -573,7 +591,7 @@ class FileTransferService {
           // Fallback: save as ZIP file
           savePath = '${baseDir.path}/${transfer.filename}';
           final file = File(savePath);
-          await file.writeAsBytes(buffer);
+          await tempFile.copy(file.path);
           displayPath = savePath;
         }
       } else {
@@ -590,7 +608,7 @@ class FileTransferService {
         }
 
         final file = File(savePath);
-        await file.writeAsBytes(buffer);
+        await tempFile.copy(file.path);
         displayPath = savePath;
       }
 
@@ -602,8 +620,25 @@ class FileTransferService {
         ),
       );
 
-      // Clear buffer to free memory
-      _incomingBuffers.remove(fileId);
+      // Clear buffer to free memory with retry for Windows locking
+      if (await tempFile.exists()) {
+        int retries = 5;
+        while (retries > 0) {
+          try {
+            await tempFile.delete();
+            break;
+          } catch (e) {
+            retries--;
+            if (retries == 0) {
+              appLogger.w('⚠️ Could not delete temp file after retries: $e');
+            } else {
+              await Future.delayed(const Duration(milliseconds: 100));
+            }
+          }
+        }
+      }
+      _incomingTempFiles.remove(fileId);
+      _incomingSinks.remove(fileId);
 
       appLogger.i('💾 File saved to: $displayPath');
 
@@ -687,4 +722,3 @@ extension TransferProgressCopy on TransferProgress {
 final fileTransferServiceProvider = Provider<FileTransferService>((ref) {
   return FileTransferService(ref);
 });
-

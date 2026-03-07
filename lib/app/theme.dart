@@ -3,26 +3,26 @@ import 'package:google_fonts/google_fonts.dart';
 
 class StoaTheme {
   // Brand colors
-  static const Color primaryColor = Color(0xFF6366F1);      // Indigo
-  static const Color secondaryColor = Color(0xFF8B5CF6);    // Purple
-  static const Color accentColor = Color(0xFF06B6D4);       // Cyan
-  
+  static const Color primaryColor = Color(0xFF6366F1); // Indigo
+  static const Color secondaryColor = Color(0xFF8B5CF6); // Purple
+  static const Color accentColor = Color(0xFF06B6D4); // Cyan
+
   // Dark theme colors
   static const Color darkBackground = Color(0xFF0F0F14);
   static const Color darkSurface = Color(0xFF1A1A24);
   static const Color darkSurfaceVariant = Color(0xFF252532);
-  
+
   // Light theme colors
   static const Color lightBackground = Color(0xFFF8FAFC);
   static const Color lightSurface = Color(0xFFFFFFFF);
   static const Color lightSurfaceVariant = Color(0xFFF1F5F9);
-  
+
   // Status colors
   static const Color success = Color(0xFF10B981);
   static const Color warning = Color(0xFFF59E0B);
   static const Color error = Color(0xFFEF4444);
   static const Color info = Color(0xFF3B82F6);
-  
+
   // Text styles
   static TextTheme _buildTextTheme(TextTheme base, Color textColor) {
     return GoogleFonts.interTextTheme(base).copyWith(
@@ -83,7 +83,7 @@ class StoaTheme {
       ),
     );
   }
-  
+
   static ThemeData get dark {
     const colorScheme = ColorScheme.dark(
       primary: primaryColor,
@@ -92,14 +92,14 @@ class StoaTheme {
       surface: darkSurface,
       error: error,
     );
-    
+
     return ThemeData(
       useMaterial3: true,
       brightness: Brightness.dark,
       colorScheme: colorScheme,
       scaffoldBackgroundColor: darkBackground,
       textTheme: _buildTextTheme(ThemeData.dark().textTheme, Colors.white),
-      
+
       // AppBar
       appBarTheme: AppBarTheme(
         backgroundColor: darkBackground,
@@ -111,16 +111,14 @@ class StoaTheme {
           color: Colors.white,
         ),
       ),
-      
+
       // Cards
       cardTheme: CardThemeData(
         color: darkSurface,
         elevation: 0,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       ),
-      
+
       // Buttons
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
@@ -137,7 +135,7 @@ class StoaTheme {
           ),
         ),
       ),
-      
+
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
           foregroundColor: primaryColor,
@@ -148,7 +146,7 @@ class StoaTheme {
           ),
         ),
       ),
-      
+
       // Input decoration
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
@@ -169,19 +167,19 @@ class StoaTheme {
           borderRadius: BorderRadius.circular(12),
           borderSide: const BorderSide(color: error, width: 1),
         ),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-        hintStyle: GoogleFonts.inter(
-          color: Colors.white38,
-          fontSize: 16,
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 16,
         ),
+        hintStyle: GoogleFonts.inter(color: Colors.white38, fontSize: 16),
       ),
-      
+
       // Divider
       dividerTheme: const DividerThemeData(
         color: darkSurfaceVariant,
         thickness: 1,
       ),
-      
+
       // Bottom navigation
       bottomNavigationBarTheme: const BottomNavigationBarThemeData(
         backgroundColor: darkSurface,
@@ -190,7 +188,7 @@ class StoaTheme {
         type: BottomNavigationBarType.fixed,
         elevation: 0,
       ),
-      
+
       // Floating action button
       floatingActionButtonTheme: const FloatingActionButtonThemeData(
         backgroundColor: primaryColor,
@@ -199,7 +197,7 @@ class StoaTheme {
       ),
     );
   }
-  
+
   static ThemeData get light {
     const colorScheme = ColorScheme.light(
       primary: primaryColor,
@@ -208,14 +206,14 @@ class StoaTheme {
       surface: lightSurface,
       error: error,
     );
-    
+
     return ThemeData(
       useMaterial3: true,
       brightness: Brightness.light,
       colorScheme: colorScheme,
       scaffoldBackgroundColor: lightBackground,
       textTheme: _buildTextTheme(ThemeData.light().textTheme, Colors.black87),
-      
+
       appBarTheme: AppBarTheme(
         backgroundColor: lightBackground,
         elevation: 0,
@@ -227,15 +225,13 @@ class StoaTheme {
         ),
         iconTheme: const IconThemeData(color: Colors.black87),
       ),
-      
+
       cardTheme: CardThemeData(
         color: lightSurface,
         elevation: 1,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       ),
-      
+
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
           backgroundColor: primaryColor,
@@ -247,7 +243,7 @@ class StoaTheme {
           ),
         ),
       ),
-      
+
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: lightSurfaceVariant,
@@ -263,9 +259,11 @@ class StoaTheme {
           borderRadius: BorderRadius.circular(12),
           borderSide: const BorderSide(color: primaryColor, width: 2),
         ),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 16,
+        ),
       ),
     );
   }
 }
-

@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_animate/flutter_animate.dart';
 import 'package:stoa/core/models/peer.dart';
 import 'package:stoa/app/theme.dart';
 
@@ -7,13 +6,9 @@ import 'package:stoa/app/theme.dart';
 class PeerCard extends StatelessWidget {
   final Peer peer;
   final VoidCallback? onTap;
-  
-  const PeerCard({
-    super.key,
-    required this.peer,
-    this.onTap,
-  });
-  
+
+  const PeerCard({super.key, required this.peer, this.onTap});
+
   @override
   Widget build(BuildContext context) {
     return Card(
@@ -27,9 +22,9 @@ class PeerCard extends StatelessWidget {
             children: [
               // Avatar
               _buildAvatar(),
-              
+
               const SizedBox(width: 16),
-              
+
               // Info
               Expanded(
                 child: Column(
@@ -56,7 +51,7 @@ class PeerCard extends StatelessWidget {
                   ],
                 ),
               ),
-              
+
               // Action indicator
               _buildActionIcon(),
             ],
@@ -65,7 +60,7 @@ class PeerCard extends StatelessWidget {
       ),
     );
   }
-  
+
   Widget _buildStatusBadge(BuildContext context) {
     switch (peer.connectionStatus) {
       case PeerConnectionStatus.connected:
@@ -144,15 +139,12 @@ class PeerCard extends StatelessWidget {
     if (peer.connectionStatus == PeerConnectionStatus.connecting) {
       return const SizedBox.shrink();
     }
-    return const Icon(
-      Icons.chevron_right,
-      color: Colors.white54,
-    );
+    return const Icon(Icons.chevron_right, color: Colors.white54);
   }
-  
+
   Widget _buildAvatar() {
     final color = _parseColor(peer.avatarColor);
-    
+
     return Container(
       width: 50,
       height: 50,
@@ -169,9 +161,7 @@ class PeerCard extends StatelessWidget {
       ),
       child: Center(
         child: Text(
-          peer.username.isNotEmpty 
-              ? peer.username[0].toUpperCase() 
-              : '?',
+          peer.username.isNotEmpty ? peer.username[0].toUpperCase() : '?',
           style: const TextStyle(
             fontSize: 22,
             fontWeight: FontWeight.bold,
@@ -181,11 +171,10 @@ class PeerCard extends StatelessWidget {
       ),
     );
   }
-  
+
   Color _parseColor(String? hex) {
     if (hex == null) return StoaTheme.primaryColor;
     final hexCode = hex.replaceAll('#', '');
     return Color(int.parse('FF$hexCode', radix: 16));
   }
 }
-

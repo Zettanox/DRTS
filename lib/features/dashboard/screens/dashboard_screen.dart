@@ -114,7 +114,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   }
 
   Widget _buildHomeContent() {
-    final discoveryState = ref.watch(discoveryStateProvider);
+    final discoveryState = ref.watch(discoveryStateControllerProvider);
 
     return CustomScrollView(
       slivers: [
@@ -232,9 +232,13 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                   TextButton.icon(
                     onPressed: () {
                       if (discoveryState.isDiscovering) {
-                        ref.read(discoveryStateProvider.notifier).stop();
+                        ref
+                            .read(discoveryStateControllerProvider.notifier)
+                            .stop();
                       } else {
-                        ref.read(discoveryStateProvider.notifier).start();
+                        ref
+                            .read(discoveryStateControllerProvider.notifier)
+                            .start();
                       }
                     },
                     icon: Icon(
@@ -437,14 +441,21 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
 
   IconData _getFileIcon(String name) {
     final ext = p.extension(name).toLowerCase();
-    if (['.jpg', '.jpeg', '.png', '.gif', '.webp'].contains(ext))
+    if (['.jpg', '.jpeg', '.png', '.gif', '.webp'].contains(ext)) {
       return Icons.image;
-    if (['.mp4', '.mov', '.avi', '.mkv'].contains(ext)) return Icons.video_file;
-    if (['.mp3', '.wav', '.aac', '.flac'].contains(ext))
+    }
+    if (['.mp4', '.mov', '.avi', '.mkv'].contains(ext)) {
+      return Icons.video_file;
+    }
+    if (['.mp3', '.wav', '.aac', '.flac'].contains(ext)) {
       return Icons.audio_file;
-    if (['.pdf'].contains(ext)) return Icons.picture_as_pdf;
-    if (['.txt', '.md', '.json', '.xml'].contains(ext))
+    }
+    if (['.pdf'].contains(ext)) {
+      return Icons.picture_as_pdf;
+    }
+    if (['.txt', '.md', '.json', '.xml'].contains(ext)) {
       return Icons.description;
+    }
     return Icons.insert_drive_file;
   }
 
@@ -525,7 +536,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                 });
                 // Restart discovery with new user info
                 final discoveryNotifier = ref.read(
-                  discoveryStateProvider.notifier,
+                  discoveryStateControllerProvider.notifier,
                 );
                 await discoveryNotifier.stop();
                 await discoveryNotifier.start();
