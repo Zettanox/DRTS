@@ -41,15 +41,21 @@ class _FolderViewScreenState extends ConsumerState<FolderViewScreen> {
       appBar: AppBar(
         title: Text(widget.folder.name),
         actions: [
-          if (!isOwner)
-            IconButton(
-              icon: const Icon(Icons.refresh),
-              onPressed: () {
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            tooltip: 'Refresh',
+            onPressed: () {
+              if (isOwner) {
+                // Owner: Just force rebuild to trigger _listLocalFiles() again
+                setState(() {});
+              } else {
+                // Peer: Request updated file list from owner
                 ref
                     .read(remoteFolderServiceProvider)
                     .requestFileList(widget.folder.id, widget.folder.ownerId);
-              },
-            ),
+              }
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.info_outline),
             onPressed: () {
