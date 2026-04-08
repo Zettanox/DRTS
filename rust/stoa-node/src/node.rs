@@ -44,8 +44,13 @@ impl StoaNode {
         // Load or create persistent identity
         let identity = StoaIdentity::load_or_create(data_dir)?;
 
-        info!("Initializing Stoa Iroh Endpoint with mDNS...");
-        let endpoint = Endpoint::empty_builder()
+        info!("Initializing Stoa Iroh Endpoint with N0 preset + mDNS...");
+        // N0 preset enables:
+        //   - Relay mode (for address detection + NAT traversal)
+        //   - Pkarr DNS publishing (public key → relay address)
+        //   - DNS address lookup (find peers by public key)
+        // This gives the endpoint real addresses to publish via mDNS.
+        let endpoint = Endpoint::builder(iroh::endpoint::presets::N0)
             .secret_key(identity.secret_key().clone())
             .bind()
             .await?;
