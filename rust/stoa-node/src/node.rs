@@ -2,10 +2,11 @@ use anyhow::Result;
 use bytes::Bytes;
 use iroh::address_lookup::{DiscoveryEvent, MdnsAddressLookup};
 use iroh::protocol::Router;
-use iroh::Endpoint;
+use iroh::{Endpoint, Watcher};
 use iroh_gossip::net::Gossip;
 use iroh_gossip::ALPN;
 use n0_future::StreamExt;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -45,15 +46,30 @@ impl StoaNode {
         let identity = StoaIdentity::load_or_create(data_dir)?;
 
         info!("Initializing Stoa Iroh Endpoint with N0 preset + mDNS...");
-        // N0 preset enables:
-        //   - Relay mode (for address detection + NAT traversal)
-        //   - Pkarr DNS publishing (public key → relay address)
-        //   - DNS address lookup (find peers by public key)
-        // This gives the endpoint real addresses to publish via mDNS.
+        // N0 preset enables Relay mode and DNS lookup/publishing.
+        // We bind to a fixed port (54321) to make it easier to open in firewalls.
         let endpoint = Endpoint::builder(iroh::endpoint::presets::N0)
             .secret_key(identity.secret_key().clone())
+            .bind_addr(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 54321))?
             .bind()
             .await?;
+
+        // Watch for address changes and log them.
+        // This helps verify that the node has detected its local/public IPs.
+        let lp_endpoint = endpoint.clone();
+        tokio::spawn(async move {
+            let mut watcher = lp_endpoint.watch_addr();
+            info!("Local Node ID: {}", lp_endpoint.id());
+            
+            loop {
+                let addr = watcher.get();
+                info!("Local Addresses: {:?}", addr);
+                // In n0_watcher 0.6, the method is called .updated()
+                if watcher.updated().await.is_err() {
+                    break;
+                }
+            }
+        });
 
         // Set up mDNS for LAN peer discovery
         let mdns = MdnsAddressLookup::builder()
