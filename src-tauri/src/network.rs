@@ -44,6 +44,8 @@ pub fn spawn_network(
     let mdns_config = mdns::Config {
         // Faster discovery for local dev — every 5 seconds
         query_interval: std::time::Duration::from_secs(5),
+        // Peers expire quickly when they go offline
+        ttl: std::time::Duration::from_secs(15),
         ..Default::default()
     };
 

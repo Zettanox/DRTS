@@ -1,6 +1,7 @@
 import { Component, createSignal, For, Show } from "solid-js";
-import { dms, groups, endboxes, nearbyPeers, activeLeftPane, setActiveLeftPane, lanVisible } from "../store";
-import { MessageSquare, FileText, Hash, Search, Radio, UserPlus } from "lucide-solid";
+import { dms, groups, endboxes, nearbyPeers, setNearbyPeers, activeLeftPane, setActiveLeftPane, lanVisible } from "../store";
+import { MessageSquare, FileText, Hash, Search, Radio, UserPlus, RefreshCw } from "lucide-solid";
+import { getNearbyPeers } from "../tauri-bridge";
 
 export const Sidebar: Component = () => {
   const [search, setSearch] = createSignal("");
@@ -16,6 +17,24 @@ export const Sidebar: Component = () => {
   const shortPeerId = (id: string) => {
     if (id.length <= 12) return id;
     return id.slice(0, 6) + "…" + id.slice(-4);
+  };
+
+  /** Extract readable IP from address list, fallback to truncated peer ID */
+  const peerDisplayName = (peer: { peerId: string; addresses: string[] }) => {
+    for (const addr of peer.addresses) {
+      const match = addr.match(/\/ip4\/((?:192\.168|10\.|172\.(?:1[6-9]|2\d|3[01]))\.[\d.]+)/);
+      if (match) return `Peer @ ${match[1]}`;
+    }
+    return shortPeerId(peer.peerId);
+  };
+
+  const handleRefreshNearby = async () => {
+    try {
+      const peers = await getNearbyPeers();
+      setNearbyPeers(peers.map(p => ({ peerId: p.peer_id, addresses: p.addresses })));
+    } catch (e) {
+      console.error("Refresh failed:", e);
+    }
   };
 
   return (
@@ -129,6 +148,13 @@ export const Sidebar: Component = () => {
             <Show when={!lanVisible()}>
               <span class="text-[10px] font-bold text-stone-400 normal-case tracking-normal ml-1">(hidden)</span>
             </Show>
+            <button
+              onClick={handleRefreshNearby}
+              class="ml-auto hover:bg-stone-200 dark:hover:bg-stone-800 p-1 rounded-md transition-colors text-stone-500 hover:text-stone-800 dark:hover:text-stone-200"
+              title="Refresh nearby peers"
+            >
+              <RefreshCw size={12} />
+            </button>
           </h2>
           <div class="flex flex-col gap-1.5">
             <Show when={lanVisible() && nearbyPeers.length > 0} fallback={
@@ -141,7 +167,7 @@ export const Sidebar: Component = () => {
                   <div class="flex items-center gap-3 w-full px-3 py-2.5 rounded-xl text-stone-600 dark:text-stone-400 hover:bg-stone-200/50 dark:hover:bg-stone-800/50 transition-colors">
                     <div class="w-2.5 h-2.5 rounded-full bg-emerald-400 border-2 border-stone-800 animate-pulse shrink-0"></div>
                     <div class="flex-1 min-w-0">
-                      <div class="text-sm font-bold truncate font-mono">{shortPeerId(peer.peerId)}</div>
+                      <div class="text-sm font-bold truncate">{peerDisplayName(peer)}</div>
                       <div class="text-[10px] font-medium text-stone-400">{peer.addresses.length} addr{peer.addresses.length !== 1 ? 's' : ''}</div>
                     </div>
                     <button

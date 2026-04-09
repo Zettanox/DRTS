@@ -53,11 +53,56 @@ async fn generate_identity(
     Ok(info)
 }
 
-/// Get the current identity info (if generated).
+/// Get the current identity info (if generated). Tries disk if not in memory.
 #[tauri::command]
-async fn get_identity(state: State<'_, AppState>) -> Result<Option<IdentityInfo>, String> {
-    let id = state.identity_info.lock().await;
-    Ok(id.clone())
+async fn get_identity(
+    app_handle: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Option<IdentityInfo>, String> {
+    // Check in-memory first
+    {
+        let id = state.identity_info.lock().await;
+        if id.is_some() {
+            return Ok(id.clone());
+        }
+    }
+
+    // Try loading from disk
+    let path = dirs::home_dir()
+        .ok_or("No home dir")?
+        .join(".stoa")
+        .join("identity.json");
+
+    if !path.exists() {
+        return Ok(None);
+    }
+
+    // Load identity and start network
+    let (keypair, info) = identity::load_or_create_identity()?;
+
+    {
+        let mut id = state.identity_info.lock().await;
+        *id = Some(info.clone());
+    }
+
+    // Start network if not already running
+    {
+        let existing = state.network_cmd_tx.lock().await;
+        if existing.is_none() {
+            drop(existing);
+            let (cmd_tx, peers_map) = network::spawn_network(keypair, app_handle)?;
+            {
+                let mut tx = state.network_cmd_tx.lock().await;
+                *tx = Some(cmd_tx);
+            }
+            {
+                let mut np = state.nearby_peers.lock().await;
+                *np = Some(peers_map);
+            }
+        }
+    }
+
+    Ok(Some(info))
 }
 
 /// Export the keypair as a base64 string for cross-platform portability.
