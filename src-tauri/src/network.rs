@@ -42,10 +42,10 @@ pub fn spawn_network(
     let peer_id = PeerId::from(keypair.public());
 
     let mdns_config = mdns::Config {
-        // Query every 3 seconds for fast discovery
-        query_interval: std::time::Duration::from_secs(3),
-        // Peers expire quickly when they stop responding
-        ttl: std::time::Duration::from_secs(8),
+        // Query every 2 seconds for near-instant discovery
+        query_interval: std::time::Duration::from_secs(2),
+        // Peers expire in 4 seconds when they stop responding
+        ttl: std::time::Duration::from_secs(4),
         ..Default::default()
     };
 
