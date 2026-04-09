@@ -4,7 +4,7 @@ mod network;
 use identity::IdentityInfo;
 use network::{NearbyPeer, NearbyPeersMap, NetworkCommand};
 use std::sync::Arc;
-use tauri::State;
+use tauri::{Manager, State};
 use tokio::sync::{mpsc, Mutex};
 
 /// Shared application state managed by Tauri.
@@ -150,6 +150,28 @@ async fn get_visibility(state: State<'_, AppState>) -> Result<bool, String> {
     Ok(*v)
 }
 
+/// Clear stale nearby peers and return fresh snapshot.
+#[tauri::command]
+async fn refresh_nearby_peers(state: State<'_, AppState>) -> Result<Vec<NearbyPeer>, String> {
+    let np_guard = state.nearby_peers.lock().await;
+    if let Some(peers_map) = np_guard.as_ref() {
+        let mut peers = peers_map.lock().await;
+        peers.clear();
+        Ok(vec![])
+    } else {
+        Ok(vec![])
+    }
+}
+
+/// Show the main window (called by frontend when ready).
+#[tauri::command]
+async fn show_window(app_handle: tauri::AppHandle) -> Result<(), String> {
+    if let Some(window) = app_handle.get_webview_window("main") {
+        window.show().map_err(|e| format!("Failed to show window: {e}"))?;
+    }
+    Ok(())
+}
+
 // ─── App Entry ────────────────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -169,6 +191,8 @@ pub fn run() {
             toggle_visibility,
             get_visibility,
             get_nearby_peers,
+            refresh_nearby_peers,
+            show_window,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

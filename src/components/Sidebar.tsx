@@ -1,7 +1,7 @@
 import { Component, createSignal, For, Show } from "solid-js";
 import { dms, groups, endboxes, nearbyPeers, setNearbyPeers, activeLeftPane, setActiveLeftPane, lanVisible } from "../store";
 import { MessageSquare, FileText, Hash, Search, Radio, UserPlus, RefreshCw } from "lucide-solid";
-import { getNearbyPeers } from "../tauri-bridge";
+import { refreshNearbyPeers } from "../tauri-bridge";
 
 export const Sidebar: Component = () => {
   const [search, setSearch] = createSignal("");
@@ -30,8 +30,7 @@ export const Sidebar: Component = () => {
 
   const handleRefreshNearby = async () => {
     try {
-      const peers = await getNearbyPeers();
-      setNearbyPeers(peers.map(p => ({ peerId: p.peer_id, addresses: p.addresses })));
+      await refreshNearbyPeers();
     } catch (e) {
       console.error("Refresh failed:", e);
     }

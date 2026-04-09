@@ -67,6 +67,18 @@ export async function getNearbyPeers(): Promise<NearbyPeer[]> {
   return invoke<NearbyPeer[]>("get_nearby_peers");
 }
 
+/** Clear stale peers from the backend map and reset the frontend list.
+ *  mDNS will re-discover live peers within ~5 seconds. */
+export async function refreshNearbyPeers(): Promise<void> {
+  await invoke("refresh_nearby_peers");
+  setNearbyPeers([]);
+}
+
+/** Show the main window (called once frontend is ready). */
+export async function showWindow(): Promise<void> {
+  await invoke("show_window");
+}
+
 // ─── Event Listeners ──────────────────────────────────────────────────────────
 
 /** Subscribe to real-time peer discovery/expiry events from the Rust backend. */

@@ -4,7 +4,7 @@ import { AuthView } from './views/AuthView';
 import { Layout } from './views/Layout';
 import { WorkspaceView } from './views/WorkspaceView';
 import { SettingsView } from './views/SettingsView';
-import { getIdentity, setupNetworkListeners } from './tauri-bridge';
+import { getIdentity, setupNetworkListeners, showWindow } from './tauri-bridge';
 import { identity } from './store';
 import { Zap } from 'lucide-solid';
 
@@ -24,6 +24,8 @@ const SplashGate: Component = () => {
       console.error("Auto-login check failed:", e);
     } finally {
       setChecking(false);
+      // Show the window now that the UI is ready
+      showWindow().catch(() => {});
     }
   });
 
