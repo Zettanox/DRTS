@@ -1,0 +1,122 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --color-primary-50: #fdf6f0;
+  --color-primary-100: #faeadc;
+  --color-primary-400: #f48c66;
+  --color-primary-500: #eb6534;
+  --color-primary-600: #d64a1a;
+  --color-primary-900: #782a10;
+  --color-accent-400: #c98c73;
+  --color-accent-500: #a35d40;
+  --color-accent-600: #853e22;
+}
+
+@layer base {
+  body {
+    @apply bg-primary-50 text-stone-900 dark:bg-[#1f1917] dark:text-stone-100 transition-colors duration-300 antialiased;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+}
+
+@layer utilities {
+  .chamfer-all, .chamfer-tl-br, .chamfer-tr-bl, .flat-panel, .flat-panel-all, .flat-button, .flat-button-secondary {
+    position: relative;
+    background-color: transparent !important;
+    border: none !important;
+    z-index: 1;
+    --chamfer-outer: 12px;
+    --chamfer-inner: 10px;
+    --border-color: #292524;
+    --bg-color: #fff;
+    --drop-color: rgba(41,37,36,1);
+    --shadow-x: 4px;
+    --shadow-y: 4px;
+  }
+  .dark .chamfer-all, .dark .chamfer-tl-br, .dark .chamfer-tr-bl, .dark .flat-panel, .dark .flat-panel-all, .dark .flat-button, .dark .flat-button-secondary {
+    --border-color: #57534e;
+    --bg-color: #2c2421;
+    --drop-color: rgba(0,0,0,0.5);
+  }
+
+  .chamfer-shadow, .flat-panel, .flat-panel-all, .flat-button, .flat-button-secondary {
+    transition: transform 0.1s;
+  }
+  .chamfer-shadow::before, .flat-panel::before, .flat-panel-all::before, .flat-button::before, .flat-button-secondary::before {
+    filter: drop-shadow(var(--shadow-x) var(--shadow-y) 0px var(--drop-color));
+    transition: filter 0.1s;
+  }
+  
+  .chamfer-active:active, .flat-button:active, .flat-button-secondary:active {
+    --shadow-x: 0px;
+    --shadow-y: 0px;
+    transform: translate(4px, 4px);
+  }
+
+  .chamfer-all::before, .flat-panel-all::before {
+    content: ''; position: absolute; inset: 0; z-index: -2;
+    background-color: var(--border-color);
+    clip-path: polygon(var(--chamfer-outer) 0, calc(100% - var(--chamfer-outer)) 0, 100% var(--chamfer-outer), 100% calc(100% - var(--chamfer-outer)), calc(100% - var(--chamfer-outer)) 100%, var(--chamfer-outer) 100%, 0 calc(100% - var(--chamfer-outer)), 0 var(--chamfer-outer));
+  }
+  .chamfer-all::after, .flat-panel-all::after {
+    content: ''; position: absolute; inset: 2px; z-index: -1;
+    background-color: var(--bg-color);
+    transition: background-color 0.1s;
+    clip-path: polygon(var(--chamfer-inner) 0, calc(100% - var(--chamfer-inner)) 0, 100% var(--chamfer-inner), 100% calc(100% - var(--chamfer-inner)), calc(100% - var(--chamfer-inner)) 100%, var(--chamfer-inner) 100%, 0 calc(100% - var(--chamfer-inner)), 0 var(--chamfer-inner));
+  }
+
+  .chamfer-tl-br::before, .flat-panel::before {
+    content: ''; position: absolute; inset: 0; z-index: -2;
+    background-color: var(--border-color);
+    clip-path: polygon(var(--chamfer-outer) 0, 100% 0, 100% calc(100% - var(--chamfer-outer)), calc(100% - var(--chamfer-outer)) 100%, 0 100%, 0 var(--chamfer-outer));
+  }
+  .chamfer-tl-br::after, .flat-panel::after {
+    content: ''; position: absolute; inset: 2px; z-index: -1;
+    background-color: var(--bg-color);
+    transition: background-color 0.1s;
+    clip-path: polygon(var(--chamfer-inner) 0, 100% 0, 100% calc(100% - var(--chamfer-inner)), calc(100% - var(--chamfer-inner)) 100%, 0 100%, 0 var(--chamfer-inner));
+  }
+
+  .chamfer-tr-bl::before, .flat-button::before, .flat-button-secondary::before {
+    content: ''; position: absolute; inset: 0; z-index: -2;
+    background-color: var(--border-color);
+    clip-path: polygon(0 0, calc(100% - var(--chamfer-outer)) 0, 100% var(--chamfer-outer), 100% 100%, var(--chamfer-outer) 100%, 0 calc(100% - var(--chamfer-outer)));
+  }
+  .chamfer-tr-bl::after, .flat-button::after, .flat-button-secondary::after {
+    content: ''; position: absolute; inset: 2px; z-index: -1;
+    background-color: var(--bg-color);
+    transition: background-color 0.1s;
+    clip-path: polygon(0 0, calc(100% - var(--chamfer-inner)) 0, 100% var(--chamfer-inner), 100% 100%, var(--chamfer-inner) 100%, 0 calc(100% - var(--chamfer-inner)));
+  }
+
+  .flat-button {
+    color: white;
+    font-weight: 900;
+    --chamfer-outer: 10px;
+    --chamfer-inner: 8px;
+    --bg-color: var(--color-primary-500);
+  }
+  .flat-button:hover {
+    --bg-color: var(--color-primary-400);
+  }
+
+  .flat-button-secondary {
+    font-weight: 900;
+    color: #292524;
+    --chamfer-outer: 10px;
+    --chamfer-inner: 8px;
+    --bg-color: #e7e5e4;
+  }
+  .flat-button-secondary:hover {
+    --bg-color: #d6d3d1;
+  }
+  .dark .flat-button-secondary {
+    color: #e7e5e4;
+    --bg-color: #44403c;
+  }
+  .dark .flat-button-secondary:hover {
+    --bg-color: #57534e;
+  }
+}
