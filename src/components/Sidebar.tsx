@@ -1,7 +1,6 @@
 import { Component, createSignal, For, Show } from "solid-js";
-import { dms, groups, endboxes, nearbyPeers, setNearbyPeers, activeLeftPane, setActiveLeftPane, lanVisible } from "../store";
-import { MessageSquare, FileText, Hash, Search, Radio, UserPlus, RefreshCw } from "lucide-solid";
-import { refreshNearbyPeers } from "../tauri-bridge";
+import { dms, groups, endboxes, nearbyPeers, activeLeftPane, setActiveLeftPane, lanVisible } from "../store";
+import { MessageSquare, FileText, Hash, Search, Radio, UserPlus } from "lucide-solid";
 
 export const Sidebar: Component = () => {
   const [search, setSearch] = createSignal("");
@@ -28,13 +27,7 @@ export const Sidebar: Component = () => {
     return shortPeerId(peer.peerId);
   };
 
-  const handleRefreshNearby = async () => {
-    try {
-      await refreshNearbyPeers();
-    } catch (e) {
-      console.error("Refresh failed:", e);
-    }
-  };
+
 
   return (
     <aside class={`w-full md:w-80 border-r-2 border-stone-800 dark:border-stone-700 bg-primary-50 dark:bg-[#1a1513] flex-col h-full overflow-y-auto ${activeLeftPane() ? 'hidden md:flex' : 'flex'}`}>
@@ -147,13 +140,6 @@ export const Sidebar: Component = () => {
             <Show when={!lanVisible()}>
               <span class="text-[10px] font-bold text-stone-400 normal-case tracking-normal ml-1">(hidden)</span>
             </Show>
-            <button
-              onClick={handleRefreshNearby}
-              class="ml-auto hover:bg-stone-200 dark:hover:bg-stone-800 p-1 rounded-md transition-colors text-stone-500 hover:text-stone-800 dark:hover:text-stone-200"
-              title="Refresh nearby peers"
-            >
-              <RefreshCw size={12} />
-            </button>
           </h2>
           <div class="flex flex-col gap-1.5">
             <Show when={lanVisible() && nearbyPeers.length > 0} fallback={

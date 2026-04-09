@@ -42,10 +42,10 @@ pub fn spawn_network(
     let peer_id = PeerId::from(keypair.public());
 
     let mdns_config = mdns::Config {
-        // Faster discovery for local dev — every 5 seconds
-        query_interval: std::time::Duration::from_secs(5),
-        // Peers expire quickly when they go offline
-        ttl: std::time::Duration::from_secs(15),
+        // Query every 3 seconds for fast discovery
+        query_interval: std::time::Duration::from_secs(3),
+        // Peers expire quickly when they stop responding
+        ttl: std::time::Duration::from_secs(8),
         ..Default::default()
     };
 
@@ -80,15 +80,12 @@ pub fn spawn_network(
     let peers_clone = nearby_peers.clone();
 
     tokio::spawn(async move {
-        let mut mdns_active = true;
+        let mut frontend_visible = true;
 
         loop {
             tokio::select! {
-                // Process swarm events
+                // Process swarm events — ALWAYS, regardless of visibility flag
                 event = swarm.select_next_some() => {
-                    if !mdns_active {
-                        continue;
-                    }
                     match event {
                         SwarmEvent::Behaviour(StoapBehaviourEvent::Mdns(
                             mdns::Event::Discovered(list),
@@ -108,7 +105,10 @@ pub fn spawn_network(
                                 let peer_info = entry.clone();
                                 drop(peers);
 
-                                let _ = app_handle.emit("peer-discovered", &peer_info);
+                                // Only notify frontend if visible
+                                if frontend_visible {
+                                    let _ = app_handle.emit("peer-discovered", &peer_info);
+                                }
                             }
                         }
                         SwarmEvent::Behaviour(StoapBehaviourEvent::Mdns(
@@ -120,7 +120,10 @@ pub fn spawn_network(
                                 peers.remove(&pid);
                                 drop(peers);
 
-                                let _ = app_handle.emit("peer-expired", &pid);
+                                // Only notify frontend if visible
+                                if frontend_visible {
+                                    let _ = app_handle.emit("peer-expired", &pid);
+                                }
                             }
                         }
                         SwarmEvent::NewListenAddr { address, .. } => {
@@ -134,12 +137,18 @@ pub fn spawn_network(
                 cmd = cmd_rx.recv() => {
                     match cmd {
                         Some(NetworkCommand::SetVisibility(visible)) => {
-                            mdns_active = visible;
-                            if !visible {
-                                // Clear all discovered peers when going invisible
-                                let mut peers = peers_clone.lock().await;
+                            frontend_visible = visible;
+                            if visible {
+                                // Re-emit all currently known peers to the frontend
+                                let peers = peers_clone.lock().await;
+                                for peer_info in peers.values() {
+                                    let _ = app_handle.emit("peer-discovered", peer_info);
+                                }
+                                drop(peers);
+                            } else {
+                                // Tell frontend to clear all peers
+                                let peers = peers_clone.lock().await;
                                 let peer_ids: Vec<String> = peers.keys().cloned().collect();
-                                peers.clear();
                                 drop(peers);
                                 for pid in peer_ids {
                                     let _ = app_handle.emit("peer-expired", &pid);
