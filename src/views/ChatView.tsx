@@ -1,0 +1,179 @@
+import { Component, createSignal, createMemo, For } from "solid-js";
+import { dms, groups, identity, setDMs, setGroups, Message, activeRightPane, setActiveRightPane } from "../store";
+import { Send, Paperclip, Users, Shield, X, MapPin, Columns } from "lucide-solid";
+
+export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (props) => {
+  const [inputText, setInputText] = createSignal("");
+  const [forceNetwork, setForceNetwork] = createSignal<"Auto" | "LAN" | "Internet">("Auto");
+  const [detailsOpen, setDetailsOpen] = createSignal(false);
+  
+  const currentChat = createMemo(() => dms.find(c => c.id === props.id) || groups.find(c => c.id === props.id));
+  const isGroup = createMemo(() => !!groups.find(c => c.id === props.id));
+
+  const sendMessage = (e: Event) => {
+    e.preventDefault();
+    if (!inputText().trim() || !currentChat() || !identity()) return;
+
+    const newMsg: Message = {
+      id: Math.random().toString(),
+      senderId: "me",
+      content: inputText(),
+      timestamp: Date.now(),
+    };
+
+    if (isGroup()) {
+      setGroups(c => c.id === currentChat()?.id, "messages", msgs => [...msgs, newMsg]);
+    } else {
+      setDMs(c => c.id === currentChat()?.id, "messages", msgs => [...msgs, newMsg]);
+    }
+    setInputText("");
+  };
+
+  const isMe = (senderId: string) => senderId === "me" || senderId === identity()?.publicKey;
+
+  return (
+    <div class="h-full flex flex-col relative w-full overflow-hidden bg-transparent">
+      {/* Header */}
+      <div class="h-16 flex items-center justify-between px-4 md:px-6 bg-primary-50 dark:bg-[#1a1513] border-b-2 border-stone-800 dark:border-stone-700 z-10 shrink-0">
+        <button 
+          class="flex items-center gap-3 hover:bg-stone-200 dark:hover:bg-stone-800 p-2 -ml-2 rounded-lg transition-colors cursor-pointer text-left focus:outline-none"
+          onClick={() => setDetailsOpen(true)}
+        >
+          <div class="flex items-center justify-center text-stone-700 dark:text-stone-300">
+            {isGroup() ? <Users size={22} /> : <div class="w-3 h-3 rounded-full bg-emerald-500 border border-stone-800 shadow-[0_0_8px_rgba(16,185,129,0.8)]"></div>}
+          </div>
+          <div>
+            <h2 class="font-black text-lg md:text-xl text-stone-900 dark:text-stone-100 leading-tight">
+              {currentChat()?.name || "Unknown"}
+            </h2>
+            <p class="text-xs md:text-sm font-bold text-stone-500 dark:text-stone-400">
+              {isGroup() ? `${currentChat()?.participants.length} peers` : "Click for profile details"}
+            </p>
+          </div>
+        </button>
+
+        <div class={`flex items-center gap-3 ${props.pane === 'right' ? 'mr-10' : ''}`}>
+          {props.pane === "left" && !activeRightPane() && (
+            <button 
+              class="flat-button-secondary py-1.5 px-3 text-xs md:text-sm flex items-center gap-2 mr-2"
+              onClick={(e) => { e.stopPropagation(); setActiveRightPane({ type: isGroup() ? 'group' : 'dm', id: props.id }); }}
+            >
+              <Columns size={16} /> Split
+            </button>
+          )}
+          <span class="text-xs font-black text-stone-400 dark:text-stone-500 uppercase tracking-wider hidden lg:inline">Route:</span>
+          <div class="hidden lg:flex bg-stone-200 dark:bg-[#2c2421] rounded-md border-2 border-stone-800 dark:border-stone-700 p-0.5">
+            {(["Auto", "LAN", "Internet"] as const).map(mode => (
+              <button
+                class={`px-3 py-1 text-sm font-bold rounded-md transition-all ${
+                  forceNetwork() === mode
+                    ? "bg-white dark:bg-[#4a3a33] text-primary-600 dark:text-primary-400 border border-stone-800 shadow-[1px_1px_0px_0px_rgba(41,37,36,1)] dark:shadow-none"
+                    : "text-stone-600 dark:text-stone-400 border border-transparent hover:text-stone-900"
+                }`}
+                onClick={() => setForceNetwork(mode)}
+              >
+                {mode}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div class="flex-1 flex overflow-hidden w-full relative">
+        {/* Main Chat Pane */}
+        <div class="flex-1 flex flex-col min-w-0 h-full">
+          {/* Messages */}
+          <div class="flex-1 overflow-y-auto p-4 md:p-6 space-y-5 bg-[#fffdfa] dark:bg-[#241d1a]">
+            <div class="flex items-center justify-center my-6">
+              <div class="px-4 py-2 rounded-md bg-emerald-100 dark:bg-emerald-900/40 border-2 border-emerald-800 flex items-center gap-2 text-xs font-black text-emerald-900 dark:text-emerald-400 shadow-[2px_2px_0px_0px_rgba(6,78,59,0.5)]">
+                <Shield size={14} />
+                Encrypted Verified Session
+              </div>
+            </div>
+
+            <For each={currentChat()?.messages}>
+              {(message) => (
+                <div class={`flex w-full ${isMe(message.senderId) ? "justify-end" : "justify-start"}`}>
+                  <div class={`max-w-[85%] md:max-w-[70%] px-5 py-3 relative group font-bold ${
+                    isMe(message.senderId)
+                      ? "chamfer-tr-bl chamfer-shadow text-stone-100"
+                      : "chamfer-tl-br chamfer-shadow text-stone-800 dark:text-stone-200"
+                  }`} style={{ "--bg-color": isMe(message.senderId) ? "var(--color-primary-500)" : "" }}>
+                    {!isMe(message.senderId) && isGroup() && (
+                      <div class="text-xs font-black mb-1 text-accent-600 dark:text-accent-400">
+                        {message.senderId}
+                      </div>
+                    )}
+                    <div class="text-[15px] leading-relaxed break-words">{message.content}</div>
+                    <div class={`text-xs mt-1.5 font-bold text-right ${isMe(message.senderId) ? "text-primary-100" : "text-stone-400 dark:text-stone-500"}`}>
+                      {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </For>
+          </div>
+
+          {/* Input */}
+          <div class="p-3 md:p-4 bg-primary-50 dark:bg-[#1f1917] border-t-2 border-stone-800 dark:border-stone-700 shrink-0">
+            <form onSubmit={sendMessage} class="flex items-center gap-2 md:gap-3 flat-panel-all p-1.5 pl-3 w-full" style="--chamfer-outer: 8px; --chamfer-inner: 6px;">
+              <button type="button" class="p-1 md:p-2 text-stone-500 hover:text-stone-800 dark:hover:text-stone-200 transition-colors">
+                <Paperclip size={20} />
+              </button>
+              <input
+                type="text"
+                class="flex-1 bg-transparent border-none focus:outline-none focus:ring-0 text-sm md:text-base font-bold px-1 md:px-2 text-stone-800 dark:text-stone-100 placeholder-stone-400 w-full"
+                placeholder="Write a message..."
+                value={inputText()}
+                onInput={(e) => setInputText(e.currentTarget.value)}
+              />
+              <button
+                type="submit"
+                disabled={!inputText().trim()}
+                class="p-2 md:p-3 chamfer-all chamfer-shadow chamfer-active flex items-center justify-center text-white disabled:opacity-50 disabled:cursor-not-allowed" 
+                style="--bg-color: var(--color-primary-500); --chamfer-outer: 8px; --chamfer-inner: 6px; --shadow-x: 2px; --shadow-y: 2px;"
+              >
+                <Send size={18} />
+              </button>
+            </form>
+          </div>
+        </div>
+
+        {/* Profile Details Drawer */}
+        {detailsOpen() && (
+          <div class="w-full md:w-72 lg:w-80 border-l-2 border-stone-800 dark:border-stone-700 bg-primary-50 dark:bg-[#1a1513] shrink-0 absolute md:static inset-0 z-20 flex flex-col h-full animate-in slide-in-from-right-4 duration-200">
+            <div class="h-16 flex items-center justify-between px-4 border-b-2 border-stone-800 dark:border-stone-700 bg-white dark:bg-[#2c2421]">
+              <h3 class="font-black text-stone-800 dark:text-stone-100">Details</h3>
+              <button onClick={() => setDetailsOpen(false)} class="p-2 text-stone-500 hover:text-stone-800 dark:hover:text-stone-100 hover:bg-stone-200 dark:hover:bg-stone-800 rounded-lg transition-colors">
+                <X size={20} />
+              </button>
+            </div>
+            <div class="p-6 flex flex-col items-center gap-4 border-b-2 border-stone-800 dark:border-stone-700 bg-primary-50 dark:bg-[#1a1513]">
+              <div class="w-20 h-20 rounded-full border-4 border-stone-800 dark:border-stone-600 bg-stone-200 dark:bg-stone-800 flex items-center justify-center text-stone-500 shadow-[4px_4px_0px_0px_rgba(41,37,36,1)] dark:shadow-none">
+                {isGroup() ? <Users size={40} /> : <div class="text-4xl font-black">{currentChat()?.name.charAt(0)}</div>}
+              </div>
+              <h2 class="text-2xl font-black text-stone-900 dark:text-stone-100 text-center">{currentChat()?.name}</h2>
+              {!isGroup() && (
+                <div class="flex items-center gap-2 text-stone-500 dark:text-stone-400 font-bold text-sm">
+                  <MapPin size={16} /> LAN Available
+                </div>
+              )}
+            </div>
+            <div class="p-4 flex-1 overflow-y-auto">
+              <div class="flat-panel p-4 mb-4 flex flex-col gap-3">
+                 <div class="font-black text-xs uppercase text-stone-500 tracking-wider">Contact Since</div>
+                 <div class="font-bold text-stone-800 dark:text-stone-200">Oct 12, 2025</div>
+              </div>
+              <div class="flat-panel p-4 flex flex-col gap-3">
+                 <div class="font-black text-xs uppercase text-stone-500 tracking-wider">Shared Endboxes & Files</div>
+                 <div class="font-bold text-stone-800 dark:text-stone-200">2 Shared Spaces</div>
+                 <div class="font-bold text-stone-800 dark:text-stone-200">14 Files Exchanged</div>
+              </div>
+            </div>
+          </div>
+        )}
+
+      </div>
+    </div>
+  );
+};
