@@ -2,6 +2,7 @@ mod identity;
 mod network;
 
 use identity::IdentityInfo;
+use libp2p::identity::Keypair;
 use network::{NearbyPeer, NearbyPeersMap, NetworkCommand};
 use std::sync::Arc;
 use tauri::{Manager, State};
@@ -10,9 +11,45 @@ use tokio::sync::{mpsc, Mutex};
 /// Shared application state managed by Tauri.
 pub struct AppState {
     pub identity_info: Arc<Mutex<Option<IdentityInfo>>>,
+    pub keypair: Arc<Mutex<Option<Keypair>>>,
     pub network_cmd_tx: Arc<Mutex<Option<mpsc::Sender<NetworkCommand>>>>,
     pub nearby_peers: Arc<Mutex<Option<NearbyPeersMap>>>,
     pub lan_visible: Arc<Mutex<bool>>,
+}
+
+/// Helper: start the network and store handles in state.
+async fn start_network(
+    keypair: &Keypair,
+    app_handle: &tauri::AppHandle,
+    state: &AppState,
+) -> Result<(), String> {
+    let (cmd_tx, peers_map) = network::spawn_network(keypair.clone(), app_handle.clone())?;
+    {
+        let mut tx = state.network_cmd_tx.lock().await;
+        *tx = Some(cmd_tx);
+    }
+    {
+        let mut np = state.nearby_peers.lock().await;
+        *np = Some(peers_map);
+    }
+    Ok(())
+}
+
+/// Helper: stop the network task and clear state.
+async fn stop_network(state: &AppState) {
+    // Send shutdown command
+    let tx = {
+        let mut tx_guard = state.network_cmd_tx.lock().await;
+        tx_guard.take()
+    };
+    if let Some(tx) = tx {
+        let _ = tx.send(NetworkCommand::Shutdown).await;
+    }
+    // Clear peers map
+    {
+        let mut np = state.nearby_peers.lock().await;
+        *np = None;
+    }
 }
 
 // ─── Tauri Commands ───────────────────────────────────────────────────────────
@@ -25,10 +62,14 @@ async fn generate_identity(
 ) -> Result<IdentityInfo, String> {
     let (keypair, info) = identity::load_or_create_identity()?;
 
-    // Store identity info
+    // Store identity info and keypair
     {
         let mut id = state.identity_info.lock().await;
         *id = Some(info.clone());
+    }
+    {
+        let mut kp = state.keypair.lock().await;
+        *kp = Some(keypair.clone());
     }
 
     // Start network if not already running
@@ -39,17 +80,7 @@ async fn generate_identity(
         }
     }
 
-    let (cmd_tx, peers_map) = network::spawn_network(keypair, app_handle)?;
-
-    {
-        let mut tx = state.network_cmd_tx.lock().await;
-        *tx = Some(cmd_tx);
-    }
-    {
-        let mut np = state.nearby_peers.lock().await;
-        *np = Some(peers_map);
-    }
-
+    start_network(&keypair, &app_handle, &state).await?;
     Ok(info)
 }
 
@@ -84,21 +115,17 @@ async fn get_identity(
         let mut id = state.identity_info.lock().await;
         *id = Some(info.clone());
     }
+    {
+        let mut kp = state.keypair.lock().await;
+        *kp = Some(keypair.clone());
+    }
 
     // Start network if not already running
     {
         let existing = state.network_cmd_tx.lock().await;
         if existing.is_none() {
             drop(existing);
-            let (cmd_tx, peers_map) = network::spawn_network(keypair, app_handle)?;
-            {
-                let mut tx = state.network_cmd_tx.lock().await;
-                *tx = Some(cmd_tx);
-            }
-            {
-                let mut np = state.nearby_peers.lock().await;
-                *np = Some(peers_map);
-            }
+            start_network(&keypair, &app_handle, &state).await?;
         }
     }
 
@@ -111,10 +138,13 @@ async fn export_keypair() -> Result<String, String> {
     identity::export_keypair_base64()
 }
 
-/// Toggle LAN visibility (mDNS on/off).
+/// Toggle LAN visibility by killing or respawning the mDNS network task.
+/// OFF = kill the network (stops broadcasting, peers expire via TTL on other devices)
+/// ON  = respawn the network (starts broadcasting, discovered instantly by others)
 #[tauri::command]
 async fn toggle_visibility(
     visible: bool,
+    app_handle: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     {
@@ -122,12 +152,22 @@ async fn toggle_visibility(
         *v = visible;
     }
 
-    let tx_guard = state.network_cmd_tx.lock().await;
-    if let Some(tx) = tx_guard.as_ref() {
-        tx.send(NetworkCommand::SetVisibility(visible))
-            .await
-            .map_err(|e| format!("Failed to send visibility command: {e}"))?;
+    if visible {
+        // Respawn the network
+        let keypair = {
+            let kp = state.keypair.lock().await;
+            kp.clone().ok_or("No keypair available")?
+        };
+        // Stop any existing network first
+        stop_network(&state).await;
+        start_network(&keypair, &app_handle, &state).await?;
+        println!("[Stoa Network] Visibility ON — network respawned");
+    } else {
+        // Kill the network entirely
+        stop_network(&state).await;
+        println!("[Stoa Network] Visibility OFF — network stopped");
     }
+
     Ok(())
 }
 
@@ -150,19 +190,6 @@ async fn get_visibility(state: State<'_, AppState>) -> Result<bool, String> {
     Ok(*v)
 }
 
-/// Clear stale nearby peers and return fresh snapshot.
-#[tauri::command]
-async fn refresh_nearby_peers(state: State<'_, AppState>) -> Result<Vec<NearbyPeer>, String> {
-    let np_guard = state.nearby_peers.lock().await;
-    if let Some(peers_map) = np_guard.as_ref() {
-        let mut peers = peers_map.lock().await;
-        peers.clear();
-        Ok(vec![])
-    } else {
-        Ok(vec![])
-    }
-}
-
 /// Show the main window (called by frontend when ready).
 #[tauri::command]
 async fn show_window(app_handle: tauri::AppHandle) -> Result<(), String> {
@@ -180,6 +207,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .manage(AppState {
             identity_info: Arc::new(Mutex::new(None)),
+            keypair: Arc::new(Mutex::new(None)),
             network_cmd_tx: Arc::new(Mutex::new(None)),
             nearby_peers: Arc::new(Mutex::new(None)),
             lan_visible: Arc::new(Mutex::new(true)),
@@ -191,7 +219,6 @@ pub fn run() {
             toggle_visibility,
             get_visibility,
             get_nearby_peers,
-            refresh_nearby_peers,
             show_window,
         ])
         .run(tauri::generate_context!())

@@ -51,8 +51,12 @@ export async function exportKeypair(): Promise<string> {
   return invoke<string>("export_keypair");
 }
 
-/** Toggle mDNS visibility on/off. */
+/** Toggle mDNS visibility on/off. Kills/respawns the network task. */
 export async function toggleVisibility(visible: boolean): Promise<void> {
+  if (!visible) {
+    // Clear frontend peers immediately
+    setNearbyPeers([]);
+  }
   await invoke("toggle_visibility", { visible });
   setLanVisible(visible);
 }
@@ -65,13 +69,6 @@ export async function getVisibility(): Promise<boolean> {
 /** Fetch snapshots of all currently discovered nearby peers. */
 export async function getNearbyPeers(): Promise<NearbyPeer[]> {
   return invoke<NearbyPeer[]>("get_nearby_peers");
-}
-
-/** Clear stale peers from the backend map and reset the frontend list.
- *  mDNS will re-discover live peers within ~5 seconds. */
-export async function refreshNearbyPeers(): Promise<void> {
-  await invoke("refresh_nearby_peers");
-  setNearbyPeers([]);
 }
 
 /** Show the main window (called once frontend is ready). */
