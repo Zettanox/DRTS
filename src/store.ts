@@ -40,73 +40,67 @@ export interface Endbox {
   createdAt: number;
 }
 
-// Signals
-export const [identity, setIdentity] = createSignal<{ publicKey: string; name: string } | null>(null);
+export interface NearbyPeerEntry {
+  peerId: string;
+  addresses: string[];
+}
+
+// ─── Signals ──────────────────────────────────────────────────────────────────
+
+export const [identity, setIdentity] = createSignal<{
+  peerId: string;
+  publicKey: string;
+  name: string;
+} | null>(null);
+
 export const [theme, setTheme] = createSignal<"dark" | "light">("dark");
 export const [globalNetwork, setGlobalNetwork] = createSignal<"Auto" | "LAN-Only" | "Online-Only">("Auto");
+export const [lanVisible, setLanVisible] = createSignal(true);
 
 // Desktop Split Pane Logic
-export type PaneState = { type: "dm" | "group" | "endbox", id: string } | null;
+export type PaneState = { type: "dm" | "group" | "endbox"; id: string } | null;
 export const [activeLeftPane, setActiveLeftPane] = createSignal<PaneState>(null);
 export const [activeRightPane, setActiveRightPane] = createSignal<PaneState>(null);
 
-// Stores
-export const [peers, setPeers] = createStore<Peer[]>([
-  { id: "peer1", name: "Alice (Local)", status: "LAN" },
-  { id: "peer2", name: "Bob (Remote)", status: "Internet" },
-  { id: "peer3", name: "Charlie", status: "Offline" },
-]);
+// ─── Stores ───────────────────────────────────────────────────────────────────
 
-export const [dms, setDMs] = createStore<Chat[]>([
-  {
-    id: "dm1",
-    name: "Alice (Local)",
-    participants: ["peer1"],
-    messages: [
-      { id: "m1", senderId: "peer1", content: "Hey! Are you on the local network?", timestamp: Date.now() - 100000 },
-      { id: "m2", senderId: "me", content: "Yes! Connecting via LAN now. It's super fast.", timestamp: Date.now() - 50000 }
-    ],
-  }
-]);
+export const [peers, setPeers] = createStore<Peer[]>([]);
 
-export const [groups, setGroups] = createStore<Chat[]>([
-  {
-    id: "group1",
-    name: "Stoa Dev Group",
-    participants: ["peer1", "peer2"],
-    messages: [
-      { id: "m3", senderId: "peer2", content: "Sending the latest build now.", timestamp: Date.now() - 10000 },
-    ],
-  }
-]);
+export const [nearbyPeers, setNearbyPeers] = createStore<NearbyPeerEntry[]>([]);
+
+export const [dms, setDMs] = createStore<Chat[]>([]);
+
+export const [groups, setGroups] = createStore<Chat[]>([]);
 
 export const [endboxes, setEndboxes] = createStore<Endbox[]>([
   {
     id: "end1",
     name: "Stoa Assets Base",
-    collaborators: ["peer1"],
+    collaborators: [],
     host: "me",
     createdAt: Date.now() - 86400000,
     files: [
       { id: "f1", name: "logo.png", sizeBytes: 102400, lastModified: Date.now() - 3600000 },
-      { id: "f2", name: "pitch_deck.pdf", sizeBytes: 5242880, lastModified: Date.now() - 7200000 }
-    ]
+      { id: "f2", name: "pitch_deck.pdf", sizeBytes: 5242880, lastModified: Date.now() - 7200000 },
+    ],
   },
   {
     id: "end2",
     name: "Rust Configs",
-    collaborators: ["peer1", "peer2"],
-    host: "peer2",
+    collaborators: [],
+    host: "me",
     createdAt: Date.now() - 172800000,
     files: [
       { id: "f3", name: "libp2p_params.toml", sizeBytes: 2048, lastModified: Date.now() - 1800000 },
-      { id: "f4", name: "keys.json", sizeBytes: 512, lastModified: Date.now() - 1900000 }
-    ]
-  }
+      { id: "f4", name: "keys.json", sizeBytes: 512, lastModified: Date.now() - 1900000 },
+    ],
+  },
 ]);
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
 export function toggleTheme() {
-  setTheme(t => t === "dark" ? "light" : "dark");
+  setTheme((t) => (t === "dark" ? "light" : "dark"));
   if (theme() === "dark") {
     document.documentElement.classList.add("dark");
   } else {
