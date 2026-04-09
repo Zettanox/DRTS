@@ -1,6 +1,7 @@
 import { Component, createSignal, For, Show } from "solid-js";
-import { dms, groups, endboxes, nearbyPeers, activeLeftPane, setActiveLeftPane, lanVisible } from "../store";
+import { dms, groups, endboxes, nearbyPeers, contacts, activeLeftPane, setActiveLeftPane, lanVisible } from "../store";
 import { MessageSquare, FileText, Hash, Search, Radio, UserPlus } from "lucide-solid";
+import { sendContactRequest } from "../tauri-bridge";
 
 export const Sidebar: Component = () => {
   const [search, setSearch] = createSignal("");
@@ -27,7 +28,24 @@ export const Sidebar: Component = () => {
     return shortPeerId(peer.peerId);
   };
 
+  /** Check if a nearby peer is already a contact */
+  const isContact = (peerId: string) => {
+    return contacts.some((c) => c.peerId === peerId);
+  };
 
+  const handleAddContact = async (peerId: string) => {
+    try {
+      await sendContactRequest(peerId);
+    } catch (e) {
+      console.error("Failed to send contact request:", e);
+    }
+  };
+
+  /** Find contact info for a DM */
+  const contactForDM = (dmId: string) => {
+    const peerId = dmId.replace("dm_", "");
+    return contacts.find((c) => c.peerId === peerId);
+  };
 
   return (
     <aside class={`w-full md:w-80 border-r-2 border-stone-800 dark:border-stone-700 bg-primary-50 dark:bg-[#1a1513] flex-col h-full overflow-y-auto ${activeLeftPane() ? 'hidden md:flex' : 'flex'}`}>
@@ -45,31 +63,34 @@ export const Sidebar: Component = () => {
           />
         </div>
 
-        {/* DMs Section */}
+        {/* DMs Section — from real contacts */}
         <div>
           <h2 class="text-xs font-black text-stone-500 dark:text-stone-500 uppercase tracking-widest mb-3 px-2">
             Direct Messages
           </h2>
           <div class="flex flex-col gap-1.5">
             <Show when={dms.length > 0} fallback={
-              <p class="text-xs font-bold text-stone-400 dark:text-stone-600 px-2 italic">No conversations yet</p>
+              <p class="text-xs font-bold text-stone-400 dark:text-stone-600 px-2 italic">No contacts yet — add someone from Nearby</p>
             }>
-              <For each={dms.slice(0, 5)}>
-                {(dm) => (
-                  <button
-                    onClick={() => navigate('dm', dm.id)}
-                    class={`flex items-center gap-3 w-full text-left px-3 py-2.5 font-bold transition-colors rounded-xl ${
-                      isActive('dm', dm.id)
-                        ? "chamfer-tl-br chamfer-shadow text-stone-900 dark:text-stone-100"
-                        : "text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-100 hover:bg-stone-200/50 dark:hover:bg-stone-800/50"
-                    }`}
-                    style={isActive('dm', dm.id) ? { "--chamfer-outer": "8px", "--chamfer-inner": "6px", "--shadow-x": "2px", "--shadow-y": "2px" } : {}}
-                  >
-                    <MessageSquare size={16} />
-                    <div class="flex-1 truncate text-sm">{dm.name}</div>
-                    <div class="w-2.5 h-2.5 rounded-full border-2 border-stone-800 bg-emerald-500"></div>
-                  </button>
-                )}
+              <For each={dms}>
+                {(dm) => {
+                  const contact = () => contactForDM(dm.id);
+                  return (
+                    <button
+                      onClick={() => navigate('dm', dm.id)}
+                      class={`flex items-center gap-3 w-full text-left px-3 py-2.5 font-bold transition-colors rounded-xl ${
+                        isActive('dm', dm.id)
+                          ? "chamfer-tl-br chamfer-shadow text-stone-900 dark:text-stone-100"
+                          : "text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-100 hover:bg-stone-200/50 dark:hover:bg-stone-800/50"
+                      }`}
+                      style={isActive('dm', dm.id) ? { "--chamfer-outer": "8px", "--chamfer-inner": "6px", "--shadow-x": "2px", "--shadow-y": "2px" } : {}}
+                    >
+                      <MessageSquare size={16} />
+                      <div class="flex-1 truncate text-sm">{dm.name}</div>
+                      <div class={`w-2.5 h-2.5 rounded-full border-2 border-stone-800 ${contact()?.online ? 'bg-emerald-500' : 'bg-stone-400'}`}></div>
+                    </button>
+                  );
+                }}
               </For>
             </Show>
           </div>
@@ -147,7 +168,7 @@ export const Sidebar: Component = () => {
                 {lanVisible() ? "Scanning local network…" : "Visibility is off"}
               </p>
             }>
-              <For each={nearbyPeers.slice(0, 5)}>
+              <For each={nearbyPeers.slice(0, 8)}>
                 {(peer) => (
                   <div class="flex items-center gap-3 w-full px-3 py-2.5 rounded-xl text-stone-600 dark:text-stone-400 hover:bg-stone-200/50 dark:hover:bg-stone-800/50 transition-colors">
                     <div class="w-2.5 h-2.5 rounded-full bg-emerald-400 border-2 border-stone-800 animate-pulse shrink-0"></div>
@@ -155,12 +176,18 @@ export const Sidebar: Component = () => {
                       <div class="text-sm font-bold truncate">{peerDisplayName(peer)}</div>
                       <div class="text-[10px] font-medium text-stone-400">{peer.addresses.length} addr{peer.addresses.length !== 1 ? 's' : ''}</div>
                     </div>
-                    <button
-                      class="p-1.5 text-stone-500 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-stone-200 dark:hover:bg-stone-800 rounded-lg transition-colors shrink-0"
-                      title="Add as contact"
-                    >
-                      <UserPlus size={14} />
-                    </button>
+                    <Show when={!isContact(peer.peerId)}>
+                      <button
+                        class="p-1.5 text-stone-500 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-stone-200 dark:hover:bg-stone-800 rounded-lg transition-colors shrink-0"
+                        title="Add as contact"
+                        onClick={() => handleAddContact(peer.peerId)}
+                      >
+                        <UserPlus size={14} />
+                      </button>
+                    </Show>
+                    <Show when={isContact(peer.peerId)}>
+                      <span class="text-[10px] font-bold text-emerald-500 uppercase">Contact</span>
+                    </Show>
                   </div>
                 )}
               </For>

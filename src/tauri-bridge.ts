@@ -5,6 +5,14 @@ import {
   setNearbyPeers,
   nearbyPeers,
   setLanVisible,
+  setContacts,
+  contacts,
+  setPendingRequests,
+  pendingRequests,
+  setChatMessages,
+  chatMessages,
+  syncDMsFromContacts,
+  Message,
 } from "./store";
 
 // ─── Types matching Rust structs ──────────────────────────────────────────────
@@ -20,9 +28,23 @@ export interface NearbyPeer {
   addresses: string[];
 }
 
-// ─── Tauri Command Wrappers ───────────────────────────────────────────────────
+export interface RustContact {
+  peer_id: string;
+  petname: string;
+  added_at: number;
+  trust_level: string;
+}
 
-/** Generate (or load) Ed25519 identity and start the LAN network node. */
+export interface RustStoredMessage {
+  id: string;
+  sender_id: string;
+  content: string;
+  timestamp: number;
+  delivered: boolean;
+}
+
+// ─── Identity Commands ────────────────────────────────────────────────────────
+
 export async function generateIdentity(): Promise<IdentityInfo> {
   const info = await invoke<IdentityInfo>("generate_identity");
   setIdentity({
@@ -33,7 +55,6 @@ export async function generateIdentity(): Promise<IdentityInfo> {
   return info;
 }
 
-/** Get current identity if already loaded. */
 export async function getIdentity(): Promise<IdentityInfo | null> {
   const info = await invoke<IdentityInfo | null>("get_identity");
   if (info) {
@@ -46,52 +67,137 @@ export async function getIdentity(): Promise<IdentityInfo | null> {
   return info;
 }
 
-/** Export keypair as base64 for cross-platform import. */
 export async function exportKeypair(): Promise<string> {
   return invoke<string>("export_keypair");
 }
 
-/** Toggle mDNS visibility on/off. Kills/respawns the network task. */
+// ─── Visibility Commands ──────────────────────────────────────────────────────
+
 export async function toggleVisibility(visible: boolean): Promise<void> {
   if (!visible) {
-    // Clear frontend peers immediately
     setNearbyPeers([]);
   }
   await invoke("toggle_visibility", { visible });
   setLanVisible(visible);
 }
 
-/** Fetch the current visibility state. */
 export async function getVisibility(): Promise<boolean> {
   return invoke<boolean>("get_visibility");
 }
 
-/** Fetch snapshots of all currently discovered nearby peers. */
 export async function getNearbyPeers(): Promise<NearbyPeer[]> {
   return invoke<NearbyPeer[]>("get_nearby_peers");
 }
 
-/** Show the main window (called once frontend is ready). */
 export async function showWindow(): Promise<void> {
   await invoke("show_window");
 }
 
+// ─── Contact Commands ─────────────────────────────────────────────────────────
+
+export async function getContacts(): Promise<void> {
+  const cts = await invoke<RustContact[]>("get_contacts");
+  setContacts(
+    cts.map((c) => ({
+      peerId: c.peer_id,
+      petname: c.petname,
+      addedAt: c.added_at,
+      trustLevel: c.trust_level,
+      online: false,
+    }))
+  );
+  syncDMsFromContacts();
+}
+
+export async function sendContactRequest(peerId: string): Promise<void> {
+  await invoke("send_contact_request", { peerId });
+}
+
+export async function respondContactRequest(
+  peerId: string,
+  accept: boolean
+): Promise<void> {
+  await invoke("respond_contact_request", { peerId, accept });
+  // Remove from pending
+  setPendingRequests((prev) => prev.filter((r) => r.fromPeerId !== peerId));
+}
+
+export async function addContactFromRequest(
+  peerId: string,
+  petname: string
+): Promise<void> {
+  await invoke("add_contact_from_request", { peerId, petname });
+  await getContacts(); // Refresh contacts
+}
+
+export async function renameContact(
+  peerId: string,
+  newName: string
+): Promise<void> {
+  await invoke("rename_contact", { peerId, newName });
+  await getContacts();
+}
+
+export async function removeContact(peerId: string): Promise<void> {
+  await invoke("remove_contact_cmd", { peerId });
+  await getContacts();
+}
+
+// ─── Messaging Commands ──────────────────────────────────────────────────────
+
+export async function sendMessage(
+  peerId: string,
+  content: string
+): Promise<string> {
+  const messageId = await invoke<string>("send_message", { peerId, content });
+
+  // Add to local store immediately (optimistic)
+  const msg: Message = {
+    id: messageId,
+    senderId: "me",
+    content,
+    timestamp: Date.now() / 1000,
+    delivered: false,
+  };
+
+  setChatMessages((prev) => ({
+    ...prev,
+    [peerId]: [...(prev[peerId] || []), msg],
+  }));
+
+  return messageId;
+}
+
+export async function getChatHistory(peerId: string): Promise<void> {
+  const msgs = await invoke<RustStoredMessage[]>("get_chat_history", {
+    peerId,
+  });
+  setChatMessages((prev) => ({
+    ...prev,
+    [peerId]: msgs.map((m) => ({
+      id: m.id,
+      senderId: m.sender_id,
+      content: m.content,
+      timestamp: m.timestamp,
+      delivered: m.delivered,
+    })),
+  }));
+}
+
 // ─── Event Listeners ──────────────────────────────────────────────────────────
 
-/** Subscribe to real-time peer discovery/expiry events from the Rust backend. */
 export async function setupNetworkListeners(): Promise<void> {
+  // Peer discovery
   await listen<NearbyPeer>("peer-discovered", (event) => {
     const incoming = event.payload;
     const existing = nearbyPeers.find((p) => p.peerId === incoming.peer_id);
     if (existing) {
-      // Update addresses for existing peer
       setNearbyPeers(
         (p) => p.peerId === incoming.peer_id,
         "addresses",
         incoming.addresses
       );
     } else {
-      // Add new peer
       setNearbyPeers((prev) => [
         ...prev,
         { peerId: incoming.peer_id, addresses: incoming.addresses },
@@ -103,4 +209,85 @@ export async function setupNetworkListeners(): Promise<void> {
     const expiredId = event.payload;
     setNearbyPeers((prev) => prev.filter((p) => p.peerId !== expiredId));
   });
+
+  // Contact online/offline
+  await listen<string>("contact-online", (event) => {
+    const pid = event.payload;
+    setContacts((c) => c.peerId === pid, "online", true);
+  });
+
+  await listen<string>("contact-offline", (event) => {
+    const pid = event.payload;
+    setContacts((c) => c.peerId === pid, "online", false);
+  });
+
+  // Contact requests
+  await listen<{ from_peer_id: string; from_name: string }>(
+    "contact-request",
+    (event) => {
+      const { from_peer_id, from_name } = event.payload;
+      // Avoid duplicates
+      const exists = pendingRequests.find(
+        (r) => r.fromPeerId === from_peer_id
+      );
+      if (!exists) {
+        setPendingRequests((prev) => [
+          ...prev,
+          { fromPeerId: from_peer_id, fromName: from_name },
+        ]);
+      }
+    }
+  );
+
+  await listen<{ peer_id: string; name: string }>(
+    "contact-accepted",
+    async (event) => {
+      const { peer_id, name } = event.payload;
+      // Add to contacts with the peer's actual name
+      await addContactFromRequest(peer_id, name);
+    }
+  );
+
+  // Chat messages
+  await listen<{
+    id: string;
+    sender_id: string;
+    sender_name: string;
+    content: string;
+    timestamp: number;
+  }>("chat-message", (event) => {
+    const { id, sender_id, content, timestamp } = event.payload;
+    const msg: Message = {
+      id,
+      senderId: sender_id,
+      content,
+      timestamp,
+      delivered: true,
+    };
+
+    setChatMessages((prev) => ({
+      ...prev,
+      [sender_id]: [...(prev[sender_id] || []), msg],
+    }));
+  });
+
+  // Message delivery acks
+  await listen<{ peer_id: string; message_id: string }>(
+    "message-ack",
+    (event) => {
+      const { peer_id, message_id } = event.payload;
+      const msgs = chatMessages[peer_id];
+      if (msgs) {
+        setChatMessages(
+          peer_id,
+          (m: Message) => m.id === message_id,
+          "delivered",
+          true
+        );
+      }
+    }
+  );
+
+  // Load contacts after listeners are set up
+  await getContacts();
 }

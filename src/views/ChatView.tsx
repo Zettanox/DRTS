@@ -1,35 +1,77 @@
-import { Component, createSignal, createMemo, For } from "solid-js";
-import { dms, groups, identity, setDMs, setGroups, Message, activeRightPane, setActiveRightPane } from "../store";
-import { Send, Paperclip, Users, Shield, X, MapPin, Columns } from "lucide-solid";
+import { Component, createSignal, createMemo, createEffect, For, onMount } from "solid-js";
+import { dms, groups, contacts, identity, chatMessages, activeRightPane, setActiveRightPane, Message } from "../store";
+import { sendMessage as bridgeSendMessage, getChatHistory } from "../tauri-bridge";
+import { Send, Paperclip, Users, Shield, X, MapPin, Columns, Check, CheckCheck, Clock } from "lucide-solid";
 
 export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (props) => {
   const [inputText, setInputText] = createSignal("");
   const [forceNetwork, setForceNetwork] = createSignal<"Auto" | "LAN" | "Internet">("Auto");
   const [detailsOpen, setDetailsOpen] = createSignal(false);
+  let messagesEndRef: HTMLDivElement | undefined;
   
   const currentChat = createMemo(() => dms.find(c => c.id === props.id) || groups.find(c => c.id === props.id));
   const isGroup = createMemo(() => !!groups.find(c => c.id === props.id));
 
-  const sendMessage = (e: Event) => {
-    e.preventDefault();
-    if (!inputText().trim() || !currentChat() || !identity()) return;
+  // Extract peer ID from DM id (dm_<peerId>)
+  const peerId = createMemo(() => {
+    if (isGroup()) return null;
+    return props.id.replace("dm_", "");
+  });
 
-    const newMsg: Message = {
-      id: Math.random().toString(),
-      senderId: "me",
-      content: inputText(),
-      timestamp: Date.now(),
-    };
+  // Get contact info
+  const contact = createMemo(() => {
+    const pid = peerId();
+    if (!pid) return null;
+    return contacts.find(c => c.peerId === pid);
+  });
 
-    if (isGroup()) {
-      setGroups(c => c.id === currentChat()?.id, "messages", msgs => [...msgs, newMsg]);
-    } else {
-      setDMs(c => c.id === currentChat()?.id, "messages", msgs => [...msgs, newMsg]);
+  // Get messages for this chat
+  const messages = createMemo(() => {
+    const pid = peerId();
+    if (!pid) return [];
+    return chatMessages[pid] || [];
+  });
+
+  // Load chat history on mount
+  onMount(async () => {
+    const pid = peerId();
+    if (pid) {
+      await getChatHistory(pid);
     }
+  });
+
+  // Auto-scroll to bottom on new messages
+  createEffect(() => {
+    const _ = messages().length;
+    setTimeout(() => {
+      messagesEndRef?.scrollIntoView({ behavior: "smooth" });
+    }, 50);
+  });
+
+  const handleSend = async (e: Event) => {
+    e.preventDefault();
+    if (!inputText().trim() || !peerId()) return;
+
+    const pid = peerId()!;
+    await bridgeSendMessage(pid, inputText());
     setInputText("");
   };
 
-  const isMe = (senderId: string) => senderId === "me" || senderId === identity()?.publicKey;
+  const isMe = (senderId: string) => senderId === "me";
+
+  const deliveryIcon = (msg: Message) => {
+    if (!isMe(msg.senderId)) return null;
+    if (msg.delivered) {
+      return <CheckCheck size={14} class="text-emerald-400" />;
+    }
+    return <Check size={14} class="text-primary-200" />;
+  };
+
+  const formatTime = (timestamp: number) => {
+    // Timestamps from Rust are in seconds, JS uses milliseconds
+    const ms = timestamp < 1e12 ? timestamp * 1000 : timestamp;
+    return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
 
   return (
     <div class="h-full flex flex-col relative w-full overflow-hidden bg-transparent">
@@ -40,14 +82,14 @@ export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (prop
           onClick={() => setDetailsOpen(true)}
         >
           <div class="flex items-center justify-center text-stone-700 dark:text-stone-300">
-            {isGroup() ? <Users size={22} /> : <div class="w-3 h-3 rounded-full bg-emerald-500 border border-stone-800 shadow-[0_0_8px_rgba(16,185,129,0.8)]"></div>}
+            {isGroup() ? <Users size={22} /> : <div class={`w-3 h-3 rounded-full border border-stone-800 ${contact()?.online ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]' : 'bg-stone-400'}`}></div>}
           </div>
           <div>
             <h2 class="font-black text-lg md:text-xl text-stone-900 dark:text-stone-100 leading-tight">
               {currentChat()?.name || "Unknown"}
             </h2>
             <p class="text-xs md:text-sm font-bold text-stone-500 dark:text-stone-400">
-              {isGroup() ? `${currentChat()?.participants.length} peers` : "Click for profile details"}
+              {isGroup() ? `${currentChat()?.participants.length} peers` : (contact()?.online ? "Online — LAN" : "Offline")}
             </p>
           </div>
         </button>
@@ -87,11 +129,11 @@ export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (prop
             <div class="flex items-center justify-center my-6">
               <div class="px-4 py-2 rounded-md bg-emerald-100 dark:bg-emerald-900/40 border-2 border-emerald-800 flex items-center gap-2 text-xs font-black text-emerald-900 dark:text-emerald-400 shadow-[2px_2px_0px_0px_rgba(6,78,59,0.5)]">
                 <Shield size={14} />
-                Encrypted Verified Session
+                End-to-End Encrypted (LAN Direct)
               </div>
             </div>
 
-            <For each={currentChat()?.messages}>
+            <For each={messages()}>
               {(message) => (
                 <div class={`flex w-full ${isMe(message.senderId) ? "justify-end" : "justify-start"}`}>
                   <div class={`max-w-[85%] md:max-w-[70%] px-5 py-3 relative group font-bold ${
@@ -105,18 +147,20 @@ export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (prop
                       </div>
                     )}
                     <div class="text-[15px] leading-relaxed break-words">{message.content}</div>
-                    <div class={`text-xs mt-1.5 font-bold text-right ${isMe(message.senderId) ? "text-primary-100" : "text-stone-400 dark:text-stone-500"}`}>
-                      {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    <div class={`text-xs mt-1.5 font-bold flex items-center justify-end gap-1.5 ${isMe(message.senderId) ? "text-primary-100" : "text-stone-400 dark:text-stone-500"}`}>
+                      {formatTime(message.timestamp)}
+                      {deliveryIcon(message)}
                     </div>
                   </div>
                 </div>
               )}
             </For>
+            <div ref={messagesEndRef} />
           </div>
 
           {/* Input */}
           <div class="p-3 md:p-4 bg-primary-50 dark:bg-[#1f1917] border-t-2 border-stone-800 dark:border-stone-700 shrink-0">
-            <form onSubmit={sendMessage} class="flex items-center gap-2 md:gap-3 flat-panel-all p-1.5 pl-3 w-full" style="--chamfer-outer: 8px; --chamfer-inner: 6px;">
+            <form onSubmit={handleSend} class="flex items-center gap-2 md:gap-3 flat-panel-all p-1.5 pl-3 w-full" style="--chamfer-outer: 8px; --chamfer-inner: 6px;">
               <button type="button" class="p-1 md:p-2 text-stone-500 hover:text-stone-800 dark:hover:text-stone-200 transition-colors">
                 <Paperclip size={20} />
               </button>
@@ -155,19 +199,26 @@ export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (prop
               <h2 class="text-2xl font-black text-stone-900 dark:text-stone-100 text-center">{currentChat()?.name}</h2>
               {!isGroup() && (
                 <div class="flex items-center gap-2 text-stone-500 dark:text-stone-400 font-bold text-sm">
-                  <MapPin size={16} /> LAN Available
+                  <MapPin size={16} /> {contact()?.online ? "Online — LAN Direct" : "Offline"}
                 </div>
               )}
             </div>
             <div class="p-4 flex-1 overflow-y-auto">
               <div class="flat-panel p-4 mb-4 flex flex-col gap-3">
-                 <div class="font-black text-xs uppercase text-stone-500 tracking-wider">Contact Since</div>
-                 <div class="font-bold text-stone-800 dark:text-stone-200">Oct 12, 2025</div>
+                 <div class="font-black text-xs uppercase text-stone-500 tracking-wider">Peer ID</div>
+                 <div class="font-mono text-xs text-stone-600 dark:text-stone-400 break-all">{peerId()}</div>
               </div>
+              {contact() && (
+                <div class="flat-panel p-4 mb-4 flex flex-col gap-3">
+                  <div class="font-black text-xs uppercase text-stone-500 tracking-wider">Contact Since</div>
+                  <div class="font-bold text-stone-800 dark:text-stone-200">
+                    {new Date((contact()?.addedAt || 0) * 1000).toLocaleDateString()}
+                  </div>
+                </div>
+              )}
               <div class="flat-panel p-4 flex flex-col gap-3">
-                 <div class="font-black text-xs uppercase text-stone-500 tracking-wider">Shared Endboxes & Files</div>
-                 <div class="font-bold text-stone-800 dark:text-stone-200">2 Shared Spaces</div>
-                 <div class="font-bold text-stone-800 dark:text-stone-200">14 Files Exchanged</div>
+                 <div class="font-black text-xs uppercase text-stone-500 tracking-wider">Trust Level</div>
+                 <div class="font-bold text-stone-800 dark:text-stone-200">{contact()?.trustLevel || "Direct"}</div>
               </div>
             </div>
           </div>

@@ -14,7 +14,7 @@ export interface Message {
   senderId: string;
   content: string;
   timestamp: number;
-  isFile?: boolean;
+  delivered: boolean;
 }
 
 export interface Chat {
@@ -45,6 +45,19 @@ export interface NearbyPeerEntry {
   addresses: string[];
 }
 
+export interface ContactEntry {
+  peerId: string;
+  petname: string;
+  addedAt: number;
+  trustLevel: string;
+  online: boolean;
+}
+
+export interface ContactRequestEntry {
+  fromPeerId: string;
+  fromName: string;
+}
+
 // ─── Signals ──────────────────────────────────────────────────────────────────
 
 export const [identity, setIdentity] = createSignal<{
@@ -67,6 +80,10 @@ export const [activeRightPane, setActiveRightPane] = createSignal<PaneState>(nul
 export const [peers, setPeers] = createStore<Peer[]>([]);
 
 export const [nearbyPeers, setNearbyPeers] = createStore<NearbyPeerEntry[]>([]);
+
+export const [contacts, setContacts] = createStore<ContactEntry[]>([]);
+
+export const [pendingRequests, setPendingRequests] = createStore<ContactRequestEntry[]>([]);
 
 export const [dms, setDMs] = createStore<Chat[]>([]);
 
@@ -97,6 +114,9 @@ export const [endboxes, setEndboxes] = createStore<Endbox[]>([
   },
 ]);
 
+// Chat messages keyed by peer ID
+export const [chatMessages, setChatMessages] = createStore<Record<string, Message[]>>({});
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 export function toggleTheme() {
@@ -106,4 +126,16 @@ export function toggleTheme() {
   } else {
     document.documentElement.classList.remove("dark");
   }
+}
+
+/** Build DM entries from contacts list */
+export function syncDMsFromContacts() {
+  const currentContacts = contacts;
+  const dmList: Chat[] = currentContacts.map((c) => ({
+    id: `dm_${c.peerId}`,
+    name: c.petname,
+    participants: [c.peerId],
+    messages: [],
+  }));
+  setDMs(dmList);
 }
