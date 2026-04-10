@@ -102,7 +102,9 @@ pub fn spawn_network(
             .boxed(),
         behaviour,
         peer_id,
-        libp2p::swarm::Config::with_tokio_executor(),
+        libp2p::swarm::Config::with_tokio_executor()
+            // Keep idle connections alive for 5 minutes
+            .with_idle_connection_timeout(std::time::Duration::from_secs(300)),
     );
 
     // Listen on all interfaces, OS-assigned port
@@ -437,17 +439,19 @@ async fn resolve_peer(
     swarm: &mut Swarm<StoaBehaviour>,
 ) -> Option<PeerId> {
     let target = PeerId::from_str(peer_id_str).ok()?;
-    
-    // Try to dial if not already connected
-    let peers = peers_map.lock().await;
-    if let Some(peer_info) = peers.get(peer_id_str) {
-        for addr_str in &peer_info.addresses {
-            if let Ok(addr) = addr_str.parse::<Multiaddr>() {
-                let _ = swarm.dial(addr);
+
+    // Only dial if not already connected
+    if !swarm.is_connected(&target) {
+        let peers = peers_map.lock().await;
+        if let Some(peer_info) = peers.get(peer_id_str) {
+            for addr_str in &peer_info.addresses {
+                if let Ok(addr) = addr_str.parse::<Multiaddr>() {
+                    let _ = swarm.dial(addr);
+                }
             }
         }
+        drop(peers);
     }
-    drop(peers);
-    
+
     Some(target)
 }
