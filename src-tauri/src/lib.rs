@@ -12,12 +12,14 @@ use network::{ContactsList, NearbyPeer, NearbyPeersMap, NetworkCommand};
 use std::sync::Arc;
 use tauri::{Manager, State};
 use tokio::sync::{mpsc, Mutex};
+use tokio::task::JoinHandle;
 
 /// Shared application state managed by Tauri.
 pub struct AppState {
     pub identity_info: Arc<Mutex<Option<IdentityInfo>>>,
     pub keypair: Arc<Mutex<Option<Keypair>>>,
     pub network_cmd_tx: Arc<Mutex<Option<mpsc::Sender<NetworkCommand>>>>,
+    pub network_handle: Arc<Mutex<Option<JoinHandle<()>>>>,
     pub nearby_peers: Arc<Mutex<Option<NearbyPeersMap>>>,
     pub contacts: ContactsList,
     pub lan_visible: Arc<Mutex<bool>>,
@@ -29,7 +31,7 @@ async fn start_network(
     app_handle: &tauri::AppHandle,
     state: &AppState,
 ) -> Result<(), String> {
-    let (cmd_tx, peers_map) =
+    let (cmd_tx, peers_map, handle) =
         network::spawn_network(keypair.clone(), app_handle.clone(), state.contacts.clone())?;
     {
         let mut tx = state.network_cmd_tx.lock().await;
@@ -39,11 +41,16 @@ async fn start_network(
         let mut np = state.nearby_peers.lock().await;
         *np = Some(peers_map);
     }
+    {
+        let mut h = state.network_handle.lock().await;
+        *h = Some(handle);
+    }
     Ok(())
 }
 
-/// Helper: stop the network task and clear state.
+/// Helper: stop the network task and wait for clean shutdown.
 async fn stop_network(state: &AppState) {
+    // Send shutdown command
     let tx = {
         let mut tx_guard = state.network_cmd_tx.lock().await;
         tx_guard.take()
@@ -51,6 +58,20 @@ async fn stop_network(state: &AppState) {
     if let Some(tx) = tx {
         let _ = tx.send(NetworkCommand::Shutdown).await;
     }
+
+    // Wait for the task to finish (prevents use-after-free on swarm drop)
+    let handle = {
+        let mut h = state.network_handle.lock().await;
+        h.take()
+    };
+    if let Some(handle) = handle {
+        // Give it 2 seconds max to shut down gracefully
+        let _ = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            handle,
+        ).await;
+    }
+
     {
         let mut np = state.nearby_peers.lock().await;
         *np = None;
@@ -314,6 +335,7 @@ pub fn run() {
             identity_info: Arc::new(Mutex::new(None)),
             keypair: Arc::new(Mutex::new(None)),
             network_cmd_tx: Arc::new(Mutex::new(None)),
+            network_handle: Arc::new(Mutex::new(None)),
             nearby_peers: Arc::new(Mutex::new(None)),
             contacts: Arc::new(Mutex::new(initial_contacts)),
             lan_visible: Arc::new(Mutex::new(true)),

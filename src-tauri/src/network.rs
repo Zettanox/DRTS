@@ -12,6 +12,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::{mpsc, Mutex};
+use tokio::task::JoinHandle;
 
 /// Info about a discovered LAN peer. Sent to the frontend.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -65,12 +66,14 @@ pub fn spawn_network(
     keypair: Keypair,
     app_handle: AppHandle,
     contacts: ContactsList,
-) -> Result<(mpsc::Sender<NetworkCommand>, NearbyPeersMap), String> {
+) -> Result<(mpsc::Sender<NetworkCommand>, NearbyPeersMap, JoinHandle<()>), String> {
     let peer_id = PeerId::from(keypair.public());
 
     let mdns_config = mdns::Config {
-        query_interval: std::time::Duration::from_secs(2),
-        ttl: std::time::Duration::from_secs(4),
+        // Query every 3 seconds — fast enough for discovery
+        query_interval: std::time::Duration::from_secs(3),
+        // 10 second TTL — prevents blinking from missed mDNS packets
+        ttl: std::time::Duration::from_secs(10),
         ..Default::default()
     };
 
@@ -111,7 +114,7 @@ pub fn spawn_network(
     let nearby_peers: NearbyPeersMap = Arc::new(Mutex::new(HashMap::new()));
     let peers_clone = nearby_peers.clone();
 
-    tokio::spawn(async move {
+    let handle = tokio::spawn(async move {
         loop {
             tokio::select! {
                 event = swarm.select_next_some() => {
@@ -278,7 +281,7 @@ pub fn spawn_network(
         }
     });
 
-    Ok((cmd_tx, nearby_peers))
+    Ok((cmd_tx, nearby_peers, handle))
 }
 
 /// Handle an incoming request from a remote peer.
