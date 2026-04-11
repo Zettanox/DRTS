@@ -1,4 +1,4 @@
-use crate::contacts::Contact;
+use crate::contacts::{self, Contact};
 use crate::messages::{self, StoredMessage};
 use crate::protocol::{StoaRequest, StoaResponse};
 use futures::StreamExt;
@@ -19,6 +19,8 @@ use tokio::task::JoinHandle;
 pub struct NearbyPeer {
     pub peer_id: String,
     pub addresses: Vec<String>,
+    /// Display name broadcast by the peer (via NameAnnounce)
+    pub name: Option<String>,
 }
 
 /// Commands the frontend can send to the network task.
@@ -55,16 +57,15 @@ struct StoaBehaviour {
 }
 
 /// A message waiting for a connection to be established.
-#[derive(Debug)]
 struct PendingMessage {
     peer_id: PeerId,
     request: StoaRequest,
-    /// Original peer_id string for persistence
-    peer_id_str: String,
-    /// Message ID for tracking (if chat message)
-    message_id: Option<String>,
-    /// Content for persistence (if chat message)
-    content: Option<String>,
+}
+
+/// Check if an address is routable (not loopback or link-local).
+fn is_routable(addr_str: &str) -> bool {
+    // Filter out loopback (127.x.x.x) and link-local (169.254.x.x)
+    !addr_str.contains("/ip4/127.") && !addr_str.contains("/ip4/169.254.")
 }
 
 /// Spawn the libp2p swarm on a background Tokio task.
@@ -77,9 +78,7 @@ pub fn spawn_network(
     let peer_id = PeerId::from(keypair.public());
 
     let mdns_config = mdns::Config {
-        // Query every 3 seconds — fast enough for discovery
         query_interval: std::time::Duration::from_secs(3),
-        // 10 second TTL — prevents blinking from missed mDNS packets
         ttl: std::time::Duration::from_secs(10),
         ..Default::default()
     };
@@ -110,11 +109,11 @@ pub fn spawn_network(
         behaviour,
         peer_id,
         libp2p::swarm::Config::with_tokio_executor()
-            // Keep idle connections alive for 5 minutes
-            .with_idle_connection_timeout(std::time::Duration::from_secs(300)),
+            // Connections close after 30s idle — saves resources.
+            // The pending queue + dial-on-send handles reconnection.
+            .with_idle_connection_timeout(std::time::Duration::from_secs(30)),
     );
 
-    // Listen on all interfaces, OS-assigned port
     swarm
         .listen_on("/ip4/0.0.0.0/tcp/0".parse().unwrap())
         .map_err(|e| format!("Failed to listen: {e}"))?;
@@ -124,7 +123,6 @@ pub fn spawn_network(
     let peers_clone = nearby_peers.clone();
 
     let handle = tokio::spawn(async move {
-        // Pending messages waiting for connection establishment
         let mut pending_messages: Vec<PendingMessage> = vec![];
 
         loop {
@@ -139,11 +137,16 @@ pub fn spawn_network(
                                 let pid = discovered_peer.to_string();
                                 let addr_str = addr.to_string();
 
-                                // Track peer
+                                // Only store routable addresses
+                                if !is_routable(&addr_str) {
+                                    continue;
+                                }
+
                                 let mut peers = peers_clone.lock().await;
                                 let entry = peers.entry(pid.clone()).or_insert_with(|| NearbyPeer {
                                     peer_id: pid.clone(),
                                     addresses: vec![],
+                                    name: None,
                                 });
                                 if !entry.addresses.contains(&addr_str) {
                                     entry.addresses.push(addr_str);
@@ -153,7 +156,7 @@ pub fn spawn_network(
 
                                 let _ = app_handle.emit("peer-discovered", &peer_info);
 
-                                // Auto-dial known contacts (connection events handle online status)
+                                // Auto-dial known contacts
                                 let cts = contacts.lock().await;
                                 let is_contact = cts.iter().any(|c| c.peer_id == pid);
                                 drop(cts);
@@ -174,7 +177,7 @@ pub fn spawn_network(
                             }
                         }
 
-                        // ── Connection Events ───────────────────────────────
+                        // ── Connection Lifecycle ────────────────────────────
                         SwarmEvent::ConnectionEstablished { peer_id: connected_peer, .. } => {
                             let pid = connected_peer.to_string();
                             println!("[Stoa Network] Connection established with {pid}");
@@ -186,6 +189,12 @@ pub fn spawn_network(
                             if is_contact {
                                 let _ = app_handle.emit("contact-online", &pid);
                             }
+
+                            // Send our name to the peer
+                            swarm.behaviour_mut().messaging.send_request(
+                                &connected_peer,
+                                StoaRequest::NameAnnounce { name: our_name.clone() },
+                            );
 
                             // Flush pending messages for this peer
                             let mut remaining = vec![];
@@ -212,6 +221,10 @@ pub fn spawn_network(
                             }
                         }
 
+                        SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
+                            println!("[Stoa Network] Dial failed to {peer_id:?}: {error}");
+                        }
+
                         // ── Incoming Messages ───────────────────────────────
                         SwarmEvent::Behaviour(StoaBehaviourEvent::Messaging(
                             request_response::Event::Message { peer, message, .. },
@@ -227,6 +240,8 @@ pub fn spawn_network(
                                         channel,
                                         &mut swarm,
                                         &our_name,
+                                        &peers_clone,
+                                        &contacts,
                                     )
                                     .await;
                                 }
@@ -244,6 +259,19 @@ pub fn spawn_network(
                                     .await;
                                 }
                             }
+                        }
+
+                        // ── Send Failures ───────────────────────────────────
+                        SwarmEvent::Behaviour(StoaBehaviourEvent::Messaging(
+                            request_response::Event::OutboundFailure { peer, error, .. },
+                        )) => {
+                            println!("[Stoa Network] OutboundFailure to {peer}: {error}");
+                        }
+
+                        SwarmEvent::Behaviour(StoaBehaviourEvent::Messaging(
+                            request_response::Event::InboundFailure { peer, error, .. },
+                        )) => {
+                            println!("[Stoa Network] InboundFailure from {peer}: {error}");
                         }
 
                         SwarmEvent::NewListenAddr { address, .. } => {
@@ -271,14 +299,10 @@ pub fn spawn_network(
                                     swarm.behaviour_mut().messaging.send_request(&target, req);
                                     println!("[Stoa Network] Sent contact request to {peer_id}");
                                 } else {
-                                    // Dial and queue
                                     dial_peer(&peers_clone, &peer_id, &mut swarm).await;
                                     pending_messages.push(PendingMessage {
                                         peer_id: target,
                                         request: req,
-                                        peer_id_str: peer_id.clone(),
-                                        message_id: None,
-                                        content: None,
                                     });
                                     println!("[Stoa Network] Queued contact request for {peer_id} (connecting...)");
                                 }
@@ -296,39 +320,27 @@ pub fn spawn_network(
                                 id: message_id.clone(),
                                 content: content.clone(),
                                 timestamp,
-                                sender_name: sender_name.clone(),
+                                sender_name,
                             };
+
+                            // Persist outgoing message regardless of connection state
+                            let msg = StoredMessage {
+                                id: message_id.clone(),
+                                sender_id: "me".into(),
+                                content: content.clone(),
+                                timestamp,
+                                delivered: false,
+                            };
+                            let _ = messages::save_message(&peer_id, &msg);
 
                             if let Ok(target) = PeerId::from_str(&peer_id) {
                                 if swarm.is_connected(&target) {
                                     swarm.behaviour_mut().messaging.send_request(&target, req);
-                                    // Persist outgoing message
-                                    let msg = StoredMessage {
-                                        id: message_id,
-                                        sender_id: "me".into(),
-                                        content,
-                                        timestamp,
-                                        delivered: false,
-                                    };
-                                    let _ = messages::save_message(&peer_id, &msg);
                                 } else {
-                                    // Persist and queue
-                                    let msg = StoredMessage {
-                                        id: message_id.clone(),
-                                        sender_id: "me".into(),
-                                        content: content.clone(),
-                                        timestamp,
-                                        delivered: false,
-                                    };
-                                    let _ = messages::save_message(&peer_id, &msg);
-
                                     dial_peer(&peers_clone, &peer_id, &mut swarm).await;
                                     pending_messages.push(PendingMessage {
                                         peer_id: target,
                                         request: req,
-                                        peer_id_str: peer_id.clone(),
-                                        message_id: Some(message_id),
-                                        content: Some(content),
                                     });
                                     println!("[Stoa Network] Queued message for {peer_id} (connecting...)");
                                 }
@@ -356,8 +368,35 @@ async fn handle_incoming_request(
     channel: request_response::ResponseChannel<StoaResponse>,
     swarm: &mut Swarm<StoaBehaviour>,
     our_name: &str,
+    peers_map: &NearbyPeersMap,
+    contacts_list: &ContactsList,
 ) {
     match request {
+        StoaRequest::NameAnnounce { name } => {
+            let pid = peer.to_string();
+            println!("[Stoa Network] Name announce from {pid}: {name}");
+
+            // Update the nearby peers map with the broadcast name
+            let mut peers = peers_map.lock().await;
+            if let Some(peer_info) = peers.get_mut(&pid) {
+                peer_info.name = Some(name.clone());
+                let updated = peer_info.clone();
+                drop(peers);
+                let _ = app_handle.emit("peer-discovered", &updated);
+            } else {
+                drop(peers);
+            }
+
+            // Update contact broadcast name if they're a contact
+            let mut cts = contacts_list.lock().await;
+            let _ = contacts::update_broadcast_name(&mut cts, &pid, name);
+            drop(cts);
+
+            let _ = swarm
+                .behaviour_mut()
+                .messaging
+                .send_response(channel, StoaResponse::NameAck);
+        }
         StoaRequest::ContactRequest {
             from_peer_id,
             from_name,
@@ -396,7 +435,6 @@ async fn handle_incoming_request(
             let sender_id = peer.to_string();
             println!("[Stoa Network] Message from {sender_name}: {content}");
 
-            // Persist incoming message
             let msg = StoredMessage {
                 id: id.clone(),
                 sender_id: sender_id.clone(),
@@ -406,7 +444,6 @@ async fn handle_incoming_request(
             };
             let _ = messages::save_message(&sender_id, &msg);
 
-            // Notify frontend
             #[derive(Serialize, Clone)]
             struct ChatMessageEvent {
                 id: String,
@@ -427,7 +464,6 @@ async fn handle_incoming_request(
                 },
             );
 
-            // Send ack
             let response = StoaResponse::MessageAck { id };
             let _ = swarm
                 .behaviour_mut()
@@ -470,7 +506,6 @@ async fn handle_incoming_response(
         }
         StoaResponse::MessageAck { id } => {
             let pid = peer.to_string();
-            // Mark message as delivered
             let _ = messages::mark_delivered(&pid, &id);
 
             #[derive(Serialize, Clone)]
@@ -487,10 +522,13 @@ async fn handle_incoming_response(
                 },
             );
         }
+        StoaResponse::NameAck => {
+            // Name announce acknowledged, nothing to do
+        }
     }
 }
 
-/// Dial a peer using its known addresses from the nearby peers map.
+/// Dial a peer using only routable addresses from the nearby peers map.
 async fn dial_peer(
     peers_map: &NearbyPeersMap,
     peer_id_str: &str,
@@ -499,8 +537,11 @@ async fn dial_peer(
     let peers = peers_map.lock().await;
     if let Some(peer_info) = peers.get(peer_id_str) {
         for addr_str in &peer_info.addresses {
-            if let Ok(addr) = addr_str.parse::<Multiaddr>() {
-                let _ = swarm.dial(addr);
+            // Only dial routable addresses (skip 127.x.x.x, 169.254.x.x)
+            if is_routable(addr_str) {
+                if let Ok(addr) = addr_str.parse::<Multiaddr>() {
+                    let _ = swarm.dial(addr);
+                }
             }
         }
     }

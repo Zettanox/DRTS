@@ -43,11 +43,13 @@ export interface Endbox {
 export interface NearbyPeerEntry {
   peerId: string;
   addresses: string[];
+  name?: string;
 }
 
 export interface ContactEntry {
   peerId: string;
   petname: string;
+  broadcastName: string;
   addedAt: number;
   trustLevel: string;
   online: boolean;

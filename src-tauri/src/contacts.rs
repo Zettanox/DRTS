@@ -6,6 +6,9 @@ use std::path::PathBuf;
 pub struct Contact {
     pub peer_id: String,
     pub petname: String,
+    /// The name this peer broadcasts (what they call themselves)
+    #[serde(default)]
+    pub broadcast_name: String,
     pub added_at: i64,
     pub trust_level: TrustLevel,
 }
@@ -46,17 +49,28 @@ pub fn save_contacts(contacts: &[Contact]) -> Result<(), String> {
 }
 
 /// Add a new contact. Returns Err if already exists.
-pub fn add_contact(contacts: &mut Vec<Contact>, peer_id: String, petname: String) -> Result<(), String> {
+pub fn add_contact(contacts: &mut Vec<Contact>, peer_id: String, petname: String, broadcast_name: String) -> Result<(), String> {
     if contacts.iter().any(|c| c.peer_id == peer_id) {
         return Err("Contact already exists".into());
     }
     contacts.push(Contact {
         peer_id,
         petname,
+        broadcast_name,
         added_at: chrono::Utc::now().timestamp(),
         trust_level: TrustLevel::Direct,
     });
     save_contacts(contacts)
+}
+
+/// Update the broadcast name for a contact.
+pub fn update_broadcast_name(contacts: &mut Vec<Contact>, peer_id: &str, broadcast_name: String) -> Result<(), String> {
+    if let Some(contact) = contacts.iter_mut().find(|c| c.peer_id == peer_id) {
+        contact.broadcast_name = broadcast_name;
+        save_contacts(contacts)
+    } else {
+        Ok(()) // Not a contact, ignore
+    }
 }
 
 /// Remove a contact by peer_id.

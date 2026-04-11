@@ -26,11 +26,13 @@ export interface IdentityInfo {
 export interface NearbyPeer {
   peer_id: string;
   addresses: string[];
+  name?: string;
 }
 
 export interface RustContact {
   peer_id: string;
   petname: string;
+  broadcast_name: string;
   added_at: number;
   trust_level: string;
 }
@@ -101,6 +103,7 @@ export async function getContacts(): Promise<void> {
     cts.map((c) => ({
       peerId: c.peer_id,
       petname: c.petname,
+      broadcastName: c.broadcast_name || c.petname,
       addedAt: c.added_at,
       trustLevel: c.trust_level,
       online: false,
@@ -204,13 +207,15 @@ export async function setupNetworkListeners(): Promise<void> {
     if (existing) {
       setNearbyPeers(
         (p) => p.peerId === incoming.peer_id,
-        "addresses",
-        incoming.addresses
+        {
+          addresses: incoming.addresses,
+          name: incoming.name ?? existing.name,
+        }
       );
     } else {
       setNearbyPeers((prev) => [
         ...prev,
-        { peerId: incoming.peer_id, addresses: incoming.addresses },
+        { peerId: incoming.peer_id, addresses: incoming.addresses, name: incoming.name },
       ]);
     }
   });

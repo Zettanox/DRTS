@@ -209,12 +209,18 @@ export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (prop
                  <div class="font-mono text-xs text-stone-600 dark:text-stone-400 break-all">{peerId()}</div>
               </div>
               {contact() && (
-                <div class="flat-panel p-4 mb-4 flex flex-col gap-3">
-                  <div class="font-black text-xs uppercase text-stone-500 tracking-wider">Contact Since</div>
-                  <div class="font-bold text-stone-800 dark:text-stone-200">
-                    {new Date((contact()?.addedAt || 0) * 1000).toLocaleDateString()}
+                <>
+                  <div class="flat-panel p-4 mb-4 flex flex-col gap-3">
+                    <div class="font-black text-xs uppercase text-stone-500 tracking-wider">Broadcasts As</div>
+                    <div class="font-bold text-stone-800 dark:text-stone-200">{contact()?.broadcastName || contact()?.petname}</div>
                   </div>
-                </div>
+                  <div class="flat-panel p-4 mb-4 flex flex-col gap-3">
+                    <div class="font-black text-xs uppercase text-stone-500 tracking-wider">Contact Since</div>
+                    <div class="font-bold text-stone-800 dark:text-stone-200">
+                      {new Date((contact()?.addedAt || 0) * 1000).toLocaleDateString()}
+                    </div>
+                  </div>
+                </>
               )}
               <div class="flat-panel p-4 flex flex-col gap-3">
                  <div class="font-black text-xs uppercase text-stone-500 tracking-wider">Trust Level</div>

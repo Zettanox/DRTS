@@ -257,7 +257,8 @@ async fn respond_contact_request(
 ) -> Result<(), String> {
     if accept {
         let mut cts = state.contacts.lock().await;
-        contacts::add_contact(&mut cts, peer_id, petname)?;
+        // petname = local name, broadcast_name = what they call themselves (same initially)
+        contacts::add_contact(&mut cts, peer_id, petname.clone(), petname)?;
     }
     Ok(())
 }
@@ -269,7 +270,7 @@ async fn add_contact_from_request(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let mut cts = state.contacts.lock().await;
-    contacts::add_contact(&mut cts, peer_id, petname)
+    contacts::add_contact(&mut cts, peer_id, petname.clone(), petname)
 }
 
 #[tauri::command]
