@@ -26,13 +26,11 @@ export interface IdentityInfo {
 export interface NearbyPeer {
   peer_id: string;
   addresses: string[];
-  name?: string;
 }
 
 export interface RustContact {
   peer_id: string;
   petname: string;
-  broadcast_name: string;
   added_at: number;
   trust_level: string;
 }
@@ -103,7 +101,6 @@ export async function getContacts(): Promise<void> {
     cts.map((c) => ({
       peerId: c.peer_id,
       petname: c.petname,
-      broadcastName: c.broadcast_name || c.petname,
       addedAt: c.added_at,
       trustLevel: c.trust_level,
       online: false,
@@ -203,17 +200,17 @@ export async function setupNetworkListeners(): Promise<void> {
   // Peer discovery
   await listen<NearbyPeer>("peer-discovered", (event) => {
     const incoming = event.payload;
-    const existingIdx = nearbyPeers.findIndex((p) => p.peerId === incoming.peer_id);
-    if (existingIdx >= 0) {
-      // Update existing entry — use index-based updates for SolidJS stores
-      setNearbyPeers(existingIdx, "addresses", incoming.addresses);
-      if (incoming.name) {
-        setNearbyPeers(existingIdx, "name", incoming.name);
-      }
+    const existing = nearbyPeers.find((p) => p.peerId === incoming.peer_id);
+    if (existing) {
+      setNearbyPeers(
+        (p) => p.peerId === incoming.peer_id,
+        "addresses",
+        incoming.addresses
+      );
     } else {
       setNearbyPeers((prev) => [
         ...prev,
-        { peerId: incoming.peer_id, addresses: incoming.addresses, name: incoming.name },
+        { peerId: incoming.peer_id, addresses: incoming.addresses },
       ]);
     }
   });

@@ -54,14 +54,13 @@ async fn start_network(
 
 /// Helper: stop the network task and wait for clean shutdown.
 async fn stop_network(state: &AppState) {
-    // Send shutdown command and then drop the sender
+    // Send shutdown command
     let tx = {
         let mut tx_guard = state.network_cmd_tx.lock().await;
         tx_guard.take()
     };
     if let Some(tx) = tx {
         let _ = tx.send(NetworkCommand::Shutdown).await;
-        // tx is dropped here — unblocks the event loop's cmd_rx.recv()
     }
 
     // Wait for the task to finish (prevents use-after-free on swarm drop)
@@ -70,8 +69,9 @@ async fn stop_network(state: &AppState) {
         h.take()
     };
     if let Some(handle) = handle {
+        // Give it 2 seconds max to shut down gracefully
         let _ = tokio::time::timeout(
-            std::time::Duration::from_secs(5),
+            std::time::Duration::from_secs(2),
             handle,
         ).await;
     }
@@ -80,9 +80,6 @@ async fn stop_network(state: &AppState) {
         let mut np = state.nearby_peers.lock().await;
         *np = None;
     }
-
-    // Small settling delay to let OS release sockets
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 }
 
 // ─── Identity Commands ────────────────────────────────────────────────────────
@@ -260,8 +257,7 @@ async fn respond_contact_request(
 ) -> Result<(), String> {
     if accept {
         let mut cts = state.contacts.lock().await;
-        // petname = local name, broadcast_name = what they call themselves (same initially)
-        contacts::add_contact(&mut cts, peer_id, petname.clone(), petname)?;
+        contacts::add_contact(&mut cts, peer_id, petname)?;
     }
     Ok(())
 }
@@ -273,7 +269,7 @@ async fn add_contact_from_request(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let mut cts = state.contacts.lock().await;
-    contacts::add_contact(&mut cts, peer_id, petname.clone(), petname)
+    contacts::add_contact(&mut cts, peer_id, petname)
 }
 
 #[tauri::command]

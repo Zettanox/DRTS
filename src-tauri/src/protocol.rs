@@ -16,10 +16,6 @@ pub enum StoaRequest {
         timestamp: i64,
         sender_name: String,
     },
-    /// Announce our display name to a peer.
-    NameAnnounce {
-        name: String,
-    },
 }
 
 /// All response types for the `/stoa/msg/1.0.0` protocol.
@@ -32,6 +28,4 @@ pub enum StoaResponse {
     ContactRejected,
     /// Acknowledgement that a chat message was received.
     MessageAck { id: String },
-    /// Name announce acknowledged.
-    NameAck,
 }
