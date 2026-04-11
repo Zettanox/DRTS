@@ -31,8 +31,12 @@ async fn start_network(
     app_handle: &tauri::AppHandle,
     state: &AppState,
 ) -> Result<(), String> {
+    let our_name = {
+        let info = state.identity_info.lock().await;
+        info.as_ref().map(|i| i.name.clone()).unwrap_or_else(|| "User".to_string())
+    };
     let (cmd_tx, peers_map, handle) =
-        network::spawn_network(keypair.clone(), app_handle.clone(), state.contacts.clone())?;
+        network::spawn_network(keypair.clone(), app_handle.clone(), state.contacts.clone(), our_name)?;
     {
         let mut tx = state.network_cmd_tx.lock().await;
         *tx = Some(cmd_tx);
@@ -248,14 +252,12 @@ async fn send_contact_request(
 async fn respond_contact_request(
     peer_id: String,
     accept: bool,
+    petname: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     if accept {
-        // Add to contacts
         let mut cts = state.contacts.lock().await;
-        // The petname is set from the requester's name — passed via the contact-request event
-        // For now use "Peer" as placeholder; the frontend will call rename_contact with the actual name
-        contacts::add_contact(&mut cts, peer_id.clone(), "Peer".into())?;
+        contacts::add_contact(&mut cts, peer_id, petname)?;
     }
     Ok(())
 }
@@ -322,11 +324,23 @@ async fn get_chat_history(peer_id: String) -> Result<Vec<StoredMessage>, String>
     messages::get_chat_history(&peer_id)
 }
 
+#[tauri::command]
+async fn set_username(
+    new_name: String,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let info = identity::update_identity_name(&new_name)?;
+    {
+        let mut id = state.identity_info.lock().await;
+        *id = Some(info.clone());
+    }
+    Ok(info.name)
+}
+
 // ─── App Entry ────────────────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Load contacts from disk at startup
     let initial_contacts = contacts::load_contacts().unwrap_or_default();
 
     tauri::Builder::default()
@@ -356,6 +370,7 @@ pub fn run() {
             remove_contact_cmd,
             send_message,
             get_chat_history,
+            set_username,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -103,3 +103,29 @@ pub fn export_keypair_base64() -> Result<String, String> {
     use base64::Engine;
     Ok(base64::engine::general_purpose::STANDARD.encode(&stored.keypair_bytes))
 }
+
+/// Update the display name in the identity file without changing the keypair.
+pub fn update_identity_name(new_name: &str) -> Result<IdentityInfo, String> {
+    let path = identity_path();
+    let json = fs::read_to_string(&path)
+        .map_err(|e| format!("No identity found: {e}"))?;
+    let mut stored: StoredIdentity = serde_json::from_str(&json)
+        .map_err(|e| format!("Failed to parse identity: {e}"))?;
+
+    stored.name = new_name.to_string();
+
+    let json = serde_json::to_string_pretty(&stored)
+        .map_err(|e| format!("Failed to serialize identity: {e}"))?;
+    fs::write(&path, json)
+        .map_err(|e| format!("Failed to write identity file: {e}"))?;
+
+    let keypair = Keypair::from_protobuf_encoding(&stored.keypair_bytes)
+        .map_err(|e| format!("Failed to decode keypair: {e}"))?;
+    let peer_id = PeerId::from(keypair.public());
+
+    Ok(IdentityInfo {
+        peer_id: peer_id.to_string(),
+        public_key_hex: hex::encode(keypair.public().encode_protobuf()),
+        name: stored.name,
+    })
+}

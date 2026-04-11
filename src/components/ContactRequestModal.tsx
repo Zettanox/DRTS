@@ -5,12 +5,12 @@ import { UserPlus, X, ShieldCheck } from "lucide-solid";
 
 export const ContactRequestModal: Component = () => {
   const handleAccept = async (fromPeerId: string, fromName: string) => {
-    await respondContactRequest(fromPeerId, true);
-    await addContactFromRequest(fromPeerId, fromName);
+    // respondContactRequest now handles adding to contacts with petname
+    await respondContactRequest(fromPeerId, true, fromName);
   };
 
   const handleReject = async (fromPeerId: string) => {
-    await respondContactRequest(fromPeerId, false);
+    await respondContactRequest(fromPeerId, false, "");
   };
 
   return (

@@ -115,11 +115,14 @@ export async function sendContactRequest(peerId: string): Promise<void> {
 
 export async function respondContactRequest(
   peerId: string,
-  accept: boolean
+  accept: boolean,
+  petname: string
 ): Promise<void> {
-  await invoke("respond_contact_request", { peerId, accept });
-  // Remove from pending
+  await invoke("respond_contact_request", { peerId, accept, petname });
   setPendingRequests((prev) => prev.filter((r) => r.fromPeerId !== peerId));
+  if (accept) {
+    await getContacts();
+  }
 }
 
 export async function addContactFromRequest(
@@ -182,6 +185,13 @@ export async function getChatHistory(peerId: string): Promise<void> {
       delivered: m.delivered,
     })),
   }));
+}
+
+/** Update the user's display name. */
+export async function setUsername(newName: string): Promise<string> {
+  const name = await invoke<string>("set_username", { newName });
+  setIdentity((prev) => prev ? { ...prev, name } : null);
+  return name;
 }
 
 // ─── Event Listeners ──────────────────────────────────────────────────────────
