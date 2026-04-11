@@ -179,6 +179,10 @@ pub fn spawn_network(
                         )) => {
                             for (expired_peer, _addr) in list {
                                 let pid = expired_peer.to_string();
+                                // Don't remove peers that are still connected
+                                if swarm.is_connected(&expired_peer) {
+                                    continue;
+                                }
                                 let mut peers = peers_clone.lock().await;
                                 peers.remove(&pid);
                                 drop(peers);
@@ -227,17 +231,6 @@ pub fn spawn_network(
                             drop(cts);
                             if is_contact {
                                 let _ = app_handle.emit("contact-offline", &pid);
-
-                                // Auto-reconnect: if peer is still nearby, re-dial after 2s
-                                // This handles asymmetric firewalls (e.g. nftables blocking inbound)
-                                let peers = peers_clone.lock().await;
-                                let still_nearby = peers.contains_key(&pid);
-                                drop(peers);
-                                if still_nearby {
-                                    println!("[{} Stoa] Will auto-reconnect to contact {pid} in 2s", ts());
-                                    // Add addresses & dial
-                                    dial_peer(&peers_clone, &pid, &mut swarm).await;
-                                }
                             }
                         }
 
