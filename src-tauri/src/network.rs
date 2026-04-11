@@ -156,11 +156,12 @@ pub fn spawn_network(
 
                                 let _ = app_handle.emit("peer-discovered", &peer_info);
 
-                                // Auto-dial known contacts
+                                // Auto-dial known contacts — only if OUR peer_id is "lower"
+                                // to avoid simultaneous Noise handshake collisions
                                 let cts = contacts.lock().await;
                                 let is_contact = cts.iter().any(|c| c.peer_id == pid);
                                 drop(cts);
-                                if is_contact && !swarm.is_connected(&discovered_peer) {
+                                if is_contact && !swarm.is_connected(&discovered_peer) && peer_id < discovered_peer {
                                     let _ = swarm.dial(addr);
                                 }
                             }
@@ -223,6 +224,17 @@ pub fn spawn_network(
 
                         SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
                             println!("[Stoa Network] Dial failed to {peer_id:?}: {error}");
+                            // Remove stale address from nearby map if handshake failed
+                            if let Some(pid) = peer_id {
+                                let pid_str = pid.to_string();
+                                let error_str = format!("{error}");
+                                // Extract the failed address from the error message and remove it
+                                let mut peers = peers_clone.lock().await;
+                                if let Some(peer_info) = peers.get_mut(&pid_str) {
+                                    peer_info.addresses.retain(|addr| !error_str.contains(addr));
+                                }
+                                drop(peers);
+                            }
                         }
 
                         // ── Incoming Messages ───────────────────────────────
