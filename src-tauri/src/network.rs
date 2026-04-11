@@ -68,6 +68,11 @@ fn is_routable(addr_str: &str) -> bool {
     !addr_str.contains("/ip4/127.") && !addr_str.contains("/ip4/169.254.")
 }
 
+/// Get a formatted timestamp for log lines.
+fn ts() -> String {
+    chrono::Local::now().format("%H:%M:%S%.3f").to_string()
+}
+
 /// Spawn the libp2p swarm on a background Tokio task.
 pub fn spawn_network(
     keypair: Keypair,
@@ -184,7 +189,7 @@ pub fn spawn_network(
                         // ── Connection Lifecycle ────────────────────────────
                         SwarmEvent::ConnectionEstablished { peer_id: connected_peer, .. } => {
                             let pid = connected_peer.to_string();
-                            println!("[Stoa Network] Connection established with {pid}");
+                            println!("[{} Stoa] Connection established with {pid}", ts());
 
                             // Notify frontend if this is a contact
                             let cts = contacts.lock().await;
@@ -205,7 +210,7 @@ pub fn spawn_network(
                             for pm in pending_messages.drain(..) {
                                 if pm.peer_id == connected_peer {
                                     swarm.behaviour_mut().messaging.send_request(&pm.peer_id, pm.request);
-                                    println!("[Stoa Network] Flushed queued message to {pid}");
+                                    println!("[{} Stoa] Flushed queued message to {pid}", ts());
                                 } else {
                                     remaining.push(pm);
                                 }
@@ -215,18 +220,29 @@ pub fn spawn_network(
 
                         SwarmEvent::ConnectionClosed { peer_id: disconnected_peer, .. } => {
                             let pid = disconnected_peer.to_string();
-                            println!("[Stoa Network] Connection closed with {pid}");
+                            println!("[{} Stoa] Connection closed with {pid}", ts());
 
                             let cts = contacts.lock().await;
                             let is_contact = cts.iter().any(|c| c.peer_id == pid);
                             drop(cts);
                             if is_contact {
                                 let _ = app_handle.emit("contact-offline", &pid);
+
+                                // Auto-reconnect: if peer is still nearby, re-dial after 2s
+                                // This handles asymmetric firewalls (e.g. nftables blocking inbound)
+                                let peers = peers_clone.lock().await;
+                                let still_nearby = peers.contains_key(&pid);
+                                drop(peers);
+                                if still_nearby {
+                                    println!("[{} Stoa] Will auto-reconnect to contact {pid} in 2s", ts());
+                                    // Add addresses & dial
+                                    dial_peer(&peers_clone, &pid, &mut swarm).await;
+                                }
                             }
                         }
 
                         SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
-                            println!("[Stoa Network] Dial failed to {peer_id:?}: {error}");
+                            println!("[{} Stoa] Dial failed to {peer_id:?}: {error}", ts());
                             // Remove stale address from nearby map if handshake failed
                             if let Some(pid) = peer_id {
                                 let pid_str = pid.to_string();
@@ -280,17 +296,17 @@ pub fn spawn_network(
                         SwarmEvent::Behaviour(StoaBehaviourEvent::Messaging(
                             request_response::Event::OutboundFailure { peer, error, .. },
                         )) => {
-                            println!("[Stoa Network] OutboundFailure to {peer}: {error}");
+                            println!("[{} Stoa] OutboundFailure to {peer}: {error}", ts());
                         }
 
                         SwarmEvent::Behaviour(StoaBehaviourEvent::Messaging(
                             request_response::Event::InboundFailure { peer, error, .. },
                         )) => {
-                            println!("[Stoa Network] InboundFailure from {peer}: {error}");
+                            println!("[{} Stoa] InboundFailure from {peer}: {error}", ts());
                         }
 
                         SwarmEvent::NewListenAddr { address, .. } => {
-                            println!("[Stoa Network] Listening on {address}");
+                            println!("[{} Stoa] Listening on {address}", ts());
                         }
                         _ => {}
                     }
@@ -312,14 +328,14 @@ pub fn spawn_network(
                             if let Ok(target) = PeerId::from_str(&peer_id) {
                                 if swarm.is_connected(&target) {
                                     swarm.behaviour_mut().messaging.send_request(&target, req);
-                                    println!("[Stoa Network] Sent contact request to {peer_id}");
+                                    println!("[{} Stoa] Sent contact request to {peer_id}", ts());
                                 } else {
                                     dial_peer(&peers_clone, &peer_id, &mut swarm).await;
                                     pending_messages.push(PendingMessage {
                                         peer_id: target,
                                         request: req,
                                     });
-                                    println!("[Stoa Network] Queued contact request for {peer_id} (connecting...)");
+                                    println!("[{} Stoa] Queued contact request for {peer_id} (connecting...)", ts());
                                 }
                             }
                         }
@@ -362,13 +378,13 @@ pub fn spawn_network(
                                         peer_id: target,
                                         request: req,
                                     });
-                                    println!("[Stoa Network] Queued message for {peer_id} (connecting...)");
+                                    println!("[{} Stoa] Queued message for {peer_id} (connecting...)", ts());
                                 }
                             }
                         }
 
                         Some(NetworkCommand::Shutdown) | None => {
-                            println!("[Stoa Network] Shutting down network task.");
+                            println!("[{} Stoa] Shutting down network task.", ts());
                             break;
                         }
                     }
@@ -394,7 +410,7 @@ async fn handle_incoming_request(
     match request {
         StoaRequest::NameAnnounce { name } => {
             let pid = peer.to_string();
-            println!("[Stoa Network] Name announce from {pid}: {name}");
+            println!("[{} Stoa] Name announce from {pid}: {name}", ts());
 
             // Update the nearby peers map with the broadcast name
             let mut peers = peers_map.lock().await;
@@ -421,7 +437,7 @@ async fn handle_incoming_request(
             from_peer_id,
             from_name,
         } => {
-            println!("[Stoa Network] Contact request from {from_name} ({from_peer_id})");
+            println!("[{} Stoa] Contact request from {from_name} ({from_peer_id})", ts());
 
             #[derive(Serialize, Clone)]
             struct ContactRequestEvent {
@@ -453,7 +469,7 @@ async fn handle_incoming_request(
             sender_name,
         } => {
             let sender_id = peer.to_string();
-            println!("[Stoa Network] Message from {sender_name}: {content}");
+            println!("[{} Stoa] Message from {sender_name}: {content}", ts());
 
             let msg = StoredMessage {
                 id: id.clone(),
@@ -503,7 +519,7 @@ async fn handle_incoming_response(
     match response {
         StoaResponse::ContactAccepted { name } => {
             let pid = peer.to_string();
-            println!("[Stoa Network] Contact accepted by {name} ({pid})");
+            println!("[{} Stoa] Contact accepted by {name} ({pid})", ts());
 
             #[derive(Serialize, Clone)]
             struct ContactAcceptedEvent {
@@ -521,7 +537,7 @@ async fn handle_incoming_response(
         }
         StoaResponse::ContactRejected => {
             let pid = peer.to_string();
-            println!("[Stoa Network] Contact rejected by {pid}");
+            println!("[{} Stoa] Contact rejected by {pid}", ts());
             let _ = app_handle.emit("contact-rejected", &pid);
         }
         StoaResponse::MessageAck { id } => {

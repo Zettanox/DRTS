@@ -203,15 +203,13 @@ export async function setupNetworkListeners(): Promise<void> {
   // Peer discovery
   await listen<NearbyPeer>("peer-discovered", (event) => {
     const incoming = event.payload;
-    const existing = nearbyPeers.find((p) => p.peerId === incoming.peer_id);
-    if (existing) {
-      setNearbyPeers(
-        (p) => p.peerId === incoming.peer_id,
-        {
-          addresses: incoming.addresses,
-          name: incoming.name ?? existing.name,
-        }
-      );
+    const existingIdx = nearbyPeers.findIndex((p) => p.peerId === incoming.peer_id);
+    if (existingIdx >= 0) {
+      // Update existing entry — use index-based updates for SolidJS stores
+      setNearbyPeers(existingIdx, "addresses", incoming.addresses);
+      if (incoming.name) {
+        setNearbyPeers(existingIdx, "name", incoming.name);
+      }
     } else {
       setNearbyPeers((prev) => [
         ...prev,
