@@ -156,13 +156,16 @@ pub fn spawn_network(
 
                                 let _ = app_handle.emit("peer-discovered", &peer_info);
 
-                                // Auto-dial known contacts — only if OUR peer_id is "lower"
-                                // to avoid simultaneous Noise handshake collisions
+                                // Auto-dial known contacts — both sides dial,
+                                // libp2p handles dedup internally
                                 let cts = contacts.lock().await;
                                 let is_contact = cts.iter().any(|c| c.peer_id == pid);
                                 drop(cts);
-                                if is_contact && !swarm.is_connected(&discovered_peer) && peer_id < discovered_peer {
-                                    let _ = swarm.dial(addr);
+                                if is_contact && !swarm.is_connected(&discovered_peer) {
+                                    // Add address to the swarm's address book
+                                    swarm.add_peer_address(discovered_peer, addr.clone());
+                                    // Dial by PeerId — libp2p deduplicates concurrent dials
+                                    let _ = swarm.dial(discovered_peer);
                                 }
                             }
                         }
@@ -349,7 +352,12 @@ pub fn spawn_network(
                                 if swarm.is_connected(&target) {
                                     swarm.behaviour_mut().messaging.send_request(&target, req);
                                 } else {
-                                    dial_peer(&peers_clone, &peer_id, &mut swarm).await;
+                                    // Only dial if we don't already have pending messages for this peer
+                                    // (avoids duplicate dial attempts → os error 10048 on Windows)
+                                    let already_dialing = pending_messages.iter().any(|pm| pm.peer_id == target);
+                                    if !already_dialing {
+                                        dial_peer(&peers_clone, &peer_id, &mut swarm).await;
+                                    }
                                     pending_messages.push(PendingMessage {
                                         peer_id: target,
                                         request: req,
@@ -541,21 +549,26 @@ async fn handle_incoming_response(
 }
 
 /// Dial a peer using only routable addresses from the nearby peers map.
+/// Adds addresses to the swarm's address book and dials by PeerId,
+/// letting libp2p handle dedup and connection management.
 async fn dial_peer(
     peers_map: &NearbyPeersMap,
     peer_id_str: &str,
     swarm: &mut Swarm<StoaBehaviour>,
 ) {
-    let peers = peers_map.lock().await;
-    if let Some(peer_info) = peers.get(peer_id_str) {
-        for addr_str in &peer_info.addresses {
-            // Only dial routable addresses (skip 127.x.x.x, 169.254.x.x)
-            if is_routable(addr_str) {
-                if let Ok(addr) = addr_str.parse::<Multiaddr>() {
-                    let _ = swarm.dial(addr);
+    if let Ok(target) = PeerId::from_str(peer_id_str) {
+        let peers = peers_map.lock().await;
+        if let Some(peer_info) = peers.get(peer_id_str) {
+            for addr_str in &peer_info.addresses {
+                if is_routable(addr_str) {
+                    if let Ok(addr) = addr_str.parse::<Multiaddr>() {
+                        swarm.add_peer_address(target, addr);
+                    }
                 }
             }
         }
+        drop(peers);
+        // Dial by PeerId — libp2p picks the best address and deduplicates
+        let _ = swarm.dial(target);
     }
-    drop(peers);
 }
