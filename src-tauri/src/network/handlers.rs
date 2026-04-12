@@ -238,14 +238,19 @@ pub async fn handle_incoming_response(
             let pid = peer.to_string();
             println!("[Stoa Network] Peer {pid} identified as '{name}'");
 
-            // Update nearby peers map with display name
+            // Update or create nearby peer entry with display name
             let mut peers = peers_map.lock().await;
-            if let Some(peer_info) = peers.get_mut(&pid) {
-                peer_info.display_name = Some(name);
-                let updated = peer_info.clone();
-                drop(peers);
-                let _ = app_handle.emit("peer-discovered", &updated);
-            }
+            let entry = peers
+                .entry(pid.clone())
+                .or_insert_with(|| super::types::NearbyPeer {
+                    peer_id: pid.clone(),
+                    addresses: vec![],
+                    display_name: None,
+                });
+            entry.display_name = Some(name);
+            let updated = entry.clone();
+            drop(peers);
+            let _ = app_handle.emit("peer-discovered", &updated);
         }
         StoaResponse::ContactAccepted { name } => {
             let pid = peer.to_string();

@@ -191,6 +191,33 @@ pub fn spawn_network(
                             lan_visible = visible;
                             if visible {
                                 println!("[Stoa Network] Visibility ON — mDNS active");
+
+                                // Repopulate nearby peers from currently connected peers
+                                // (mDNS won't re-fire for peers it already knows about internally)
+                                let connected: Vec<PeerId> = swarm.connected_peers().cloned().collect();
+                                for cp in &connected {
+                                    let pid = cp.to_string();
+                                    let mut peers = peers_clone.lock().await;
+                                    if !peers.contains_key(&pid) {
+                                        // Get addresses from the swarm's address book
+                                        let addrs: Vec<String> = swarm
+                                            .external_addresses()
+                                            .map(|a| a.to_string())
+                                            .collect();
+                                        peers.insert(pid.clone(), NearbyPeer {
+                                            peer_id: pid.clone(),
+                                            addresses: addrs,
+                                            display_name: None,
+                                        });
+                                    }
+                                    drop(peers);
+
+                                    // Re-send WhoAreYou to refresh display names
+                                    swarm.behaviour_mut().messaging.send_request(
+                                        cp,
+                                        StoaRequest::WhoAreYou,
+                                    );
+                                }
                             } else {
                                 println!("[Stoa Network] Visibility OFF — mDNS paused, connections kept");
                                 // Clear nearby peers (we're not tracking anymore)
