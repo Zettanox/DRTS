@@ -18,6 +18,22 @@ pub enum StoaRequest {
         timestamp: i64,
         sender_name: String,
     },
+    /// Offer a file to a peer.
+    FileOffer {
+        transfer_id: String,
+        file_name: String,
+        file_size: u64,
+        checksum: String,
+        chunk_count: u32,
+        sender_name: String,
+    },
+    /// A chunk of file data (base64-encoded).
+    FileChunk {
+        transfer_id: String,
+        chunk_index: u32,
+        data_b64: String,
+        is_last: bool,
+    },
 }
 
 /// All response types for the `/stoa/msg/1.0.0` protocol.
@@ -32,4 +48,13 @@ pub enum StoaResponse {
     ContactRejected,
     /// Acknowledgement that a chat message was received.
     MessageAck { id: String },
+    /// File offer accepted — ready to receive chunks.
+    FileAccepted { transfer_id: String },
+    /// File offer rejected.
+    FileRejected { transfer_id: String },
+    /// Acknowledgement of a received chunk.
+    ChunkAck {
+        transfer_id: String,
+        chunk_index: u32,
+    },
 }

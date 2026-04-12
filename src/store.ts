@@ -15,6 +15,18 @@ export interface Message {
   content: string;
   timestamp: number;
   delivered: boolean;
+  fileInfo?: FileInfo;
+}
+
+export interface FileInfo {
+  transferId: string;
+  fileName: string;
+  fileSize: number;
+  direction: "upload" | "download";
+  progress: number;
+  status: "transferring" | "complete" | "failed";
+  chunkCount: number;
+  filePath?: string;
 }
 
 export interface Chat {

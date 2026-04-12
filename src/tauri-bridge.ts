@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { open } from "@tauri-apps/plugin-dialog";
 import {
   setIdentity,
   setNearbyPeers,
@@ -26,6 +27,7 @@ export interface IdentityInfo {
 export interface NearbyPeer {
   peer_id: string;
   addresses: string[];
+  display_name: string | null;
 }
 
 export interface RustContact {
@@ -194,6 +196,17 @@ export async function setUsername(newName: string): Promise<string> {
   return name;
 }
 
+/** Open file picker and send the selected file to a peer. */
+export async function sendFile(peerId: string): Promise<void> {
+  const file = await open({
+    multiple: false,
+    title: "Select a file to send",
+  });
+  if (file) {
+    await invoke("send_file", { peerId, filePath: file });
+  }
+}
+
 // ─── Event Listeners ──────────────────────────────────────────────────────────
 
 export async function setupNetworkListeners(): Promise<void> {
@@ -300,6 +313,98 @@ export async function setupNetworkListeners(): Promise<void> {
       }
     }
   );
+
+  // File transfer events
+  await listen<{
+    transfer_id: string;
+    peer_id: string;
+    file_name: string;
+    file_size: number;
+    direction: string;
+    chunk_count: number;
+    sender_name?: string;
+  }>("file-transfer-started", (event) => {
+    const { transfer_id, peer_id, file_name, file_size, direction, chunk_count } = event.payload;
+    console.log(`[File] Transfer started: ${file_name} (${direction}) with ${peer_id}`);
+
+    // Add a file message to chat
+    const msg: Message = {
+      id: `file-${transfer_id}`,
+      senderId: direction === "upload" ? "me" : peer_id,
+      content: `📎 ${file_name}`,
+      timestamp: Math.floor(Date.now() / 1000),
+      delivered: false,
+      fileInfo: {
+        transferId: transfer_id,
+        fileName: file_name,
+        fileSize: file_size,
+        direction: direction as "upload" | "download",
+        progress: 0,
+        status: "transferring",
+        chunkCount: chunk_count,
+      },
+    };
+
+    setChatMessages((prev) => ({
+      ...prev,
+      [peer_id]: [...(prev[peer_id] || []), msg],
+    }));
+  });
+
+  await listen<{
+    transfer_id: string;
+    chunk_index: number;
+    chunk_count: number;
+    progress: number;
+  }>("file-transfer-progress", (event) => {
+    const { transfer_id, progress } = event.payload;
+    // Update file message progress
+    const msgId = `file-${transfer_id}`;
+    for (const peerId of Object.keys(chatMessages)) {
+      const msgs = chatMessages[peerId];
+      if (msgs?.some((m) => m.id === msgId)) {
+        setChatMessages(
+          peerId,
+          (m: Message) => m.id === msgId,
+          "fileInfo",
+          "progress",
+          progress
+        );
+        break;
+      }
+    }
+  });
+
+  await listen<{
+    transfer_id: string;
+    peer_id: string;
+    file_name: string;
+    file_path?: string;
+    file_size: number;
+    direction: string;
+  }>("file-transfer-complete", (event) => {
+    const { transfer_id, peer_id, file_name, file_path } = event.payload;
+    console.log(`[File] Transfer complete: ${file_name}`);
+    const msgId = `file-${transfer_id}`;
+    // Update status and mark delivered
+    const msgs = chatMessages[peer_id];
+    if (msgs?.some((m) => m.id === msgId)) {
+      setChatMessages(
+        peer_id,
+        (m: Message) => m.id === msgId,
+        (msg) => ({
+          ...msg,
+          delivered: true,
+          fileInfo: msg.fileInfo ? {
+            ...msg.fileInfo,
+            progress: 1,
+            status: "complete" as const,
+            filePath: file_path,
+          } : undefined,
+        })
+      );
+    }
+  });
 
   // Load contacts after listeners are set up
   await getContacts();

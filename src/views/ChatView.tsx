@@ -1,7 +1,7 @@
-import { Component, createSignal, createMemo, createEffect, For, onMount } from "solid-js";
+import { Component, createSignal, createMemo, createEffect, For, Show, onMount } from "solid-js";
 import { dms, groups, contacts, identity, chatMessages, activeRightPane, setActiveRightPane, Message } from "../store";
-import { sendMessage as bridgeSendMessage, getChatHistory } from "../tauri-bridge";
-import { Send, Paperclip, Users, Shield, X, MapPin, Columns, Check, CheckCheck, Clock } from "lucide-solid";
+import { sendMessage as bridgeSendMessage, getChatHistory, sendFile } from "../tauri-bridge";
+import { Send, Paperclip, Users, Shield, X, MapPin, Columns, Check, CheckCheck, Clock, FileIcon, Download } from "lucide-solid";
 
 export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (props) => {
   const [inputText, setInputText] = createSignal("");
@@ -71,6 +71,13 @@ export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (prop
     // Timestamps from Rust are in seconds, JS uses milliseconds
     const ms = timestamp < 1e12 ? timestamp * 1000 : timestamp;
     return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
+
+  const formatFileSize = (bytes: number) => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
   };
 
   return (
@@ -146,7 +153,44 @@ export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (prop
                         {message.senderId}
                       </div>
                     )}
-                    <div class="text-[15px] leading-relaxed break-words">{message.content}</div>
+
+                    {/* File message */}
+                    <Show when={message.fileInfo} fallback={
+                      <div class="text-[15px] leading-relaxed break-words">{message.content}</div>
+                    }>
+                      {(fi) => (
+                        <div class="flex items-center gap-3 min-w-[200px]">
+                          <div class={`w-10 h-10 rounded-md flex items-center justify-center shrink-0 ${
+                            isMe(message.senderId)
+                              ? "bg-primary-400/30"
+                              : "bg-stone-200 dark:bg-stone-700"
+                          }`}>
+                            <FileIcon size={20} />
+                          </div>
+                          <div class="flex-1 min-w-0">
+                            <div class="text-sm font-black truncate">{fi().fileName}</div>
+                            <div class={`text-[10px] font-bold ${
+                              isMe(message.senderId) ? "text-primary-200" : "text-stone-500"
+                            }`}>
+                              {formatFileSize(fi().fileSize)} · {fi().direction === "upload" ? "Sending" : "Receiving"}
+                              {fi().status === "complete" && " · Complete ✓"}
+                            </div>
+                            {/* Progress bar */}
+                            <Show when={fi().status === "transferring"}>
+                              <div class={`w-full h-1.5 rounded-full mt-1.5 overflow-hidden ${
+                                isMe(message.senderId) ? "bg-primary-400/30" : "bg-stone-300 dark:bg-stone-600"
+                              }`}>
+                                <div
+                                  class="h-full rounded-full bg-emerald-400 transition-all duration-300"
+                                  style={{ width: `${Math.round(fi().progress * 100)}%` }}
+                                />
+                              </div>
+                            </Show>
+                          </div>
+                        </div>
+                      )}
+                    </Show>
+
                     <div class={`text-xs mt-1.5 font-bold flex items-center justify-end gap-1.5 ${isMe(message.senderId) ? "text-primary-100" : "text-stone-400 dark:text-stone-500"}`}>
                       {formatTime(message.timestamp)}
                       {deliveryIcon(message)}
@@ -161,7 +205,14 @@ export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (prop
           {/* Input */}
           <div class="p-3 md:p-4 bg-primary-50 dark:bg-[#1f1917] border-t-2 border-stone-800 dark:border-stone-700 shrink-0">
             <form onSubmit={handleSend} class="flex items-center gap-2 md:gap-3 flat-panel-all p-1.5 pl-3 w-full" style="--chamfer-outer: 8px; --chamfer-inner: 6px;">
-              <button type="button" class="p-1 md:p-2 text-stone-500 hover:text-stone-800 dark:hover:text-stone-200 transition-colors">
+              <button
+                type="button"
+                class="p-1 md:p-2 text-stone-500 hover:text-stone-800 dark:hover:text-stone-200 transition-colors"
+                onClick={() => {
+                  const pid = peerId();
+                  if (pid) sendFile(pid);
+                }}
+              >
                 <Paperclip size={20} />
               </button>
               <input

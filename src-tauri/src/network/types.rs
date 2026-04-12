@@ -31,6 +31,12 @@ pub enum NetworkCommand {
         content: String,
         sender_name: String,
     },
+    /// Send a file to a peer
+    SendFile {
+        peer_id: String,
+        file_path: String,
+        sender_name: String,
+    },
     /// Toggle LAN visibility (mDNS on/off)
     SetVisibility(bool),
     /// Shut down the network task

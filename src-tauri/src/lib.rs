@@ -1,4 +1,5 @@
 mod contacts;
+mod file_transfer;
 mod identity;
 mod messages;
 mod network;
@@ -332,6 +333,32 @@ async fn set_username(
     Ok(info.name)
 }
 
+// ─── File Transfer Commands ───────────────────────────────────────────────────
+
+#[tauri::command]
+async fn send_file(
+    peer_id: String,
+    file_path: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let sender_name = {
+        let info = state.identity_info.lock().await;
+        info.as_ref().map(|i| i.name.clone()).unwrap_or_default()
+    };
+
+    let tx = state.network_cmd_tx.lock().await;
+    if let Some(tx) = tx.as_ref() {
+        tx.send(NetworkCommand::SendFile {
+            peer_id,
+            file_path,
+            sender_name,
+        })
+        .await
+        .map_err(|e| format!("Failed to send file: {e}"))?;
+    }
+    Ok(())
+}
+
 // ─── App Entry ────────────────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -340,6 +367,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(AppState {
             identity_info: Arc::new(Mutex::new(None)),
             keypair: Arc::new(Mutex::new(None)),
@@ -366,6 +394,7 @@ pub fn run() {
             send_message,
             get_chat_history,
             set_username,
+            send_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

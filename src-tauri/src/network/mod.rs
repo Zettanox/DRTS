@@ -12,10 +12,11 @@ use libp2p::{mdns, PeerId, StreamProtocol, Swarm, Transport};
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
-use tauri::AppHandle;
+use tauri::{AppHandle, Emitter};
 use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinHandle;
 
+use crate::file_transfer::{self, ActiveTransfer, TransferDirection, TransferStatus};
 use crate::messages::{self, StoredMessage};
 use types::PendingMessage;
 
@@ -83,6 +84,7 @@ pub fn spawn_network(
     let handle = tokio::spawn(async move {
         let mut pending_messages: Vec<PendingMessage> = vec![];
         let mut lan_visible = true;
+        let mut active_transfers: HashMap<String, ActiveTransfer> = HashMap::new();
 
         // Reconnection sweep interval — retries cached addresses for offline contacts
         let mut reconnect_interval = tokio::time::interval(std::time::Duration::from_secs(10));
@@ -159,6 +161,7 @@ pub fn spawn_network(
                                         channel,
                                         &mut swarm,
                                         &our_name,
+                                        &mut active_transfers,
                                     ).await;
                                 }
                                 request_response::Message::Response {
@@ -172,6 +175,8 @@ pub fn spawn_network(
                                         response,
                                         request_id,
                                         &peers_clone,
+                                        &mut active_transfers,
+                                        &mut swarm,
                                     ).await;
                                 }
                             }
@@ -292,6 +297,88 @@ pub fn spawn_network(
                                         content: Some(content),
                                     });
                                     println!("[Stoa Network] Queued message for {peer_id} (connecting...)");
+                                }
+                            }
+                        }
+
+                        Some(NetworkCommand::SendFile {
+                            peer_id,
+                            file_path,
+                            sender_name,
+                        }) => {
+                            let path = std::path::Path::new(&file_path);
+                            match file_transfer::prepare_file_for_transfer(path) {
+                                Ok((file_name, file_size, checksum, chunks)) => {
+                                    let transfer_id = uuid::Uuid::new_v4().to_string();
+                                    let chunk_count = chunks.len() as u32;
+
+                                    println!(
+                                        "[Stoa File] Offering {} ({} bytes, {} chunks) to {}",
+                                        file_name, file_size, chunk_count, peer_id
+                                    );
+
+                                    let transfer = ActiveTransfer {
+                                        transfer_id: transfer_id.clone(),
+                                        peer_id: peer_id.clone(),
+                                        file_name: file_name.clone(),
+                                        file_size,
+                                        checksum: checksum.clone(),
+                                        chunk_count,
+                                        chunks_done: 0,
+                                        direction: TransferDirection::Upload,
+                                        status: TransferStatus::Offering,
+                                        chunks,
+                                        received_chunks: HashMap::new(),
+                                        dest_path: std::path::PathBuf::new(),
+                                    };
+                                    active_transfers.insert(transfer_id.clone(), transfer);
+
+                                    let offer = StoaRequest::FileOffer {
+                                        transfer_id: transfer_id.clone(),
+                                        file_name: file_name.clone(),
+                                        file_size,
+                                        checksum,
+                                        chunk_count,
+                                        sender_name,
+                                    };
+
+                                    if let Ok(target) = PeerId::from_str(&peer_id) {
+                                        if swarm.is_connected(&target) {
+                                            swarm.behaviour_mut().messaging.send_request(&target, offer);
+                                        } else {
+                                            handlers::dial_peer(&peers_clone, &peer_id, &mut swarm).await;
+                                            pending_messages.push(PendingMessage {
+                                                peer_id: target,
+                                                request: offer,
+                                                peer_id_str: peer_id.clone(),
+                                                message_id: None,
+                                                content: None,
+                                            });
+                                        }
+                                    }
+
+                                    // Emit transfer-started event to frontend
+                                    use serde::Serialize;
+                                    #[derive(Serialize, Clone)]
+                                    struct TransferEvent {
+                                        transfer_id: String,
+                                        peer_id: String,
+                                        file_name: String,
+                                        file_size: u64,
+                                        direction: String,
+                                        chunk_count: u32,
+                                    }
+                                    let _ = app_handle.emit("file-transfer-started", &TransferEvent {
+                                        transfer_id,
+                                        peer_id,
+                                        file_name,
+                                        file_size,
+                                        direction: "upload".into(),
+                                        chunk_count,
+                                    });
+                                }
+                                Err(e) => {
+                                    eprintln!("[Stoa File] Failed to prepare file: {e}");
                                 }
                             }
                         }
