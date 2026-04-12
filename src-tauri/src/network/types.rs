@@ -1,0 +1,54 @@
+use crate::contacts::Contact;
+use libp2p::PeerId;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::Mutex;
+
+use crate::protocol::StoaRequest;
+
+/// Info about a discovered LAN peer. Sent to the frontend.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NearbyPeer {
+    pub peer_id: String,
+    pub addresses: Vec<String>,
+    pub display_name: Option<String>,
+}
+
+/// Commands the frontend can send to the network task.
+#[derive(Debug)]
+pub enum NetworkCommand {
+    /// Send a contact request to a peer
+    SendContactRequest {
+        peer_id: String,
+        our_name: String,
+        our_peer_id: String,
+    },
+    /// Send a chat message to a contact
+    SendMessage {
+        peer_id: String,
+        message_id: String,
+        content: String,
+        sender_name: String,
+    },
+    /// Toggle LAN visibility (mDNS on/off)
+    SetVisibility(bool),
+    /// Shut down the network task
+    Shutdown,
+}
+
+/// A message waiting for a connection to be established.
+#[derive(Debug)]
+pub struct PendingMessage {
+    pub peer_id: PeerId,
+    pub request: StoaRequest,
+    pub peer_id_str: String,
+    pub message_id: Option<String>,
+    pub content: Option<String>,
+}
+
+/// Shared state tracking discovered peers.
+pub type NearbyPeersMap = Arc<Mutex<HashMap<String, NearbyPeer>>>;
+
+/// Shared list of known contacts for auto-dialing.
+pub type ContactsList = Arc<Mutex<Vec<Contact>>>;

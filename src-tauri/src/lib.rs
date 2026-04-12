@@ -52,7 +52,8 @@ async fn start_network(
     Ok(())
 }
 
-/// Helper: stop the network task and wait for clean shutdown.
+/// Helper: stop the network task and wait for clean shutdown (used on app exit).
+#[allow(dead_code)]
 async fn stop_network(state: &AppState) {
     // Send shutdown command
     let tx = {
@@ -165,7 +166,6 @@ async fn export_keypair() -> Result<String, String> {
 #[tauri::command]
 async fn toggle_visibility(
     visible: bool,
-    app_handle: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     {
@@ -173,17 +173,12 @@ async fn toggle_visibility(
         *v = visible;
     }
 
-    if visible {
-        let keypair = {
-            let kp = state.keypair.lock().await;
-            kp.clone().ok_or("No keypair available")?
-        };
-        stop_network(&state).await;
-        start_network(&keypair, &app_handle, &state).await?;
-        println!("[Stoa Network] Visibility ON — network respawned");
-    } else {
-        stop_network(&state).await;
-        println!("[Stoa Network] Visibility OFF — network stopped");
+    // Send visibility command to the running network task
+    let tx = state.network_cmd_tx.lock().await;
+    if let Some(tx) = tx.as_ref() {
+        tx.send(NetworkCommand::SetVisibility(visible))
+            .await
+            .map_err(|e| format!("Failed to send visibility command: {e}"))?;
     }
 
     Ok(())
