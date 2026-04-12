@@ -204,13 +204,16 @@ export async function setupNetworkListeners(): Promise<void> {
     if (existing) {
       setNearbyPeers(
         (p) => p.peerId === incoming.peer_id,
-        "addresses",
-        incoming.addresses
+        (prev) => ({
+          ...prev,
+          addresses: incoming.addresses,
+          displayName: incoming.display_name ?? prev.displayName,
+        })
       );
     } else {
       setNearbyPeers((prev) => [
         ...prev,
-        { peerId: incoming.peer_id, addresses: incoming.addresses },
+        { peerId: incoming.peer_id, addresses: incoming.addresses, displayName: incoming.display_name ?? null },
       ]);
     }
   });

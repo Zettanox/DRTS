@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum StoaRequest {
+    /// Ask a peer for their display name.
+    WhoAreYou,
     /// A peer wants to add us as a contact.
     ContactRequest {
         from_peer_id: String,
@@ -22,6 +24,8 @@ pub enum StoaRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum StoaResponse {
+    /// Response to WhoAreYou — our display name.
+    PeerIdentity { name: String },
     /// Contact request accepted — includes our display name.
     ContactAccepted { name: String },
     /// Contact request rejected.

@@ -19,6 +19,7 @@ use tokio::task::JoinHandle;
 pub struct NearbyPeer {
     pub peer_id: String,
     pub addresses: Vec<String>,
+    pub display_name: Option<String>,
 }
 
 /// Commands the frontend can send to the network task.
@@ -141,9 +142,11 @@ pub fn spawn_network(
 
                                 // Track peer
                                 let mut peers = peers_clone.lock().await;
+                                let is_new = !peers.contains_key(&pid);
                                 let entry = peers.entry(pid.clone()).or_insert_with(|| NearbyPeer {
                                     peer_id: pid.clone(),
                                     addresses: vec![],
+                                    display_name: None,
                                 });
                                 if !entry.addresses.contains(&addr_str) {
                                     entry.addresses.push(addr_str);
@@ -153,11 +156,11 @@ pub fn spawn_network(
 
                                 let _ = app_handle.emit("peer-discovered", &peer_info);
 
-                                // Auto-dial known contacts (connection events handle online status)
+                                // Auto-dial: new peers (for WhoAreYou) and known contacts
                                 let cts = contacts.lock().await;
                                 let is_contact = cts.iter().any(|c| c.peer_id == pid);
                                 drop(cts);
-                                if is_contact && !swarm.is_connected(&discovered_peer) {
+                                if (is_new || is_contact) && !swarm.is_connected(&discovered_peer) {
                                     let _ = swarm.dial(addr);
                                 }
                             }
@@ -178,6 +181,12 @@ pub fn spawn_network(
                         SwarmEvent::ConnectionEstablished { peer_id: connected_peer, .. } => {
                             let pid = connected_peer.to_string();
                             println!("[Stoa Network] Connection established with {pid}");
+
+                            // Send WhoAreYou to learn their display name
+                            swarm.behaviour_mut().messaging.send_request(
+                                &connected_peer,
+                                StoaRequest::WhoAreYou,
+                            );
 
                             // Notify frontend if this is a contact
                             let cts = contacts.lock().await;
@@ -240,6 +249,7 @@ pub fn spawn_network(
                                         &peer,
                                         response,
                                         request_id,
+                                        &peers_clone,
                                     )
                                     .await;
                                 }
@@ -358,6 +368,17 @@ async fn handle_incoming_request(
     our_name: &str,
 ) {
     match request {
+        StoaRequest::WhoAreYou => {
+            let pid = peer.to_string();
+            println!("[Stoa Network] WhoAreYou from {pid} — replying with '{our_name}'");
+            let response = StoaResponse::PeerIdentity {
+                name: our_name.to_string(),
+            };
+            let _ = swarm
+                .behaviour_mut()
+                .messaging
+                .send_response(channel, response);
+        }
         StoaRequest::ContactRequest {
             from_peer_id,
             from_name,
@@ -443,8 +464,23 @@ async fn handle_incoming_response(
     peer: &PeerId,
     response: StoaResponse,
     _request_id: request_response::OutboundRequestId,
+    peers_map: &NearbyPeersMap,
 ) {
     match response {
+        StoaResponse::PeerIdentity { name } => {
+            let pid = peer.to_string();
+            println!("[Stoa Network] Peer {pid} identified as '{name}'");
+
+            // Update nearby peers map with display name
+            let mut peers = peers_map.lock().await;
+            if let Some(peer_info) = peers.get_mut(&pid) {
+                peer_info.display_name = Some(name);
+                let updated = peer_info.clone();
+                drop(peers);
+                // Re-emit so frontend updates
+                let _ = app_handle.emit("peer-discovered", &updated);
+            }
+        }
         StoaResponse::ContactAccepted { name } => {
             let pid = peer.to_string();
             println!("[Stoa Network] Contact accepted by {name} ({pid})");

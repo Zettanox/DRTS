@@ -43,6 +43,7 @@ export interface Endbox {
 export interface NearbyPeerEntry {
   peerId: string;
   addresses: string[];
+  displayName: string | null;
 }
 
 export interface ContactEntry {

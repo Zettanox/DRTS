@@ -19,13 +19,14 @@ export const Sidebar: Component = () => {
     return id.slice(0, 6) + "…" + id.slice(-4);
   };
 
-  /** Extract readable IP from address list, fallback to truncated peer ID */
-  const peerDisplayName = (peer: { peerId: string; addresses: string[] }) => {
+  /** Show displayName @ IP, or just IP if name unknown yet */
+  const peerDisplayName = (peer: { peerId: string; addresses: string[]; displayName: string | null }) => {
+    const name = peer.displayName || "Peer";
     for (const addr of peer.addresses) {
       const match = addr.match(/\/ip4\/((?:192\.168|10\.|172\.(?:1[6-9]|2\d|3[01]))\.[\d.]+)/);
-      if (match) return `Peer @ ${match[1]}`;
+      if (match) return `${name} @ ${match[1]}`;
     }
-    return shortPeerId(peer.peerId);
+    return peer.displayName || shortPeerId(peer.peerId);
   };
 
   /** Check if a nearby peer is already a contact */
