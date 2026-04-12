@@ -1,11 +1,16 @@
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::HashSet;
+use std::fs::{File, OpenOptions};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 /// Size of each chunk in bytes (256 KB).
 pub const CHUNK_SIZE: usize = 256 * 1024;
+
+/// Maximum number of chunks to fetch concurrently (the pipeline window).
+pub const MAX_WINDOW_SIZE: u32 = 20;
 
 /// Direction of a file transfer.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -19,12 +24,13 @@ pub enum TransferDirection {
 pub enum TransferStatus {
     Offering,
     Transferring,
+    Paused,
     Complete,
     Failed,
     Cancelled,
 }
 
-/// Represents an active file transfer (upload or download).
+/// Represents an active file transfer stream without loading it fully into RAM.
 #[derive(Debug, Clone)]
 pub struct ActiveTransfer {
     pub transfer_id: String,
@@ -36,85 +42,109 @@ pub struct ActiveTransfer {
     pub chunks_done: u32,
     pub direction: TransferDirection,
     pub status: TransferStatus,
-    /// For uploads: all chunks ready to send (base64 encoded)
-    pub chunks: Vec<String>,
-    /// For downloads: received chunks stored by index
-    pub received_chunks: HashMap<u32, Vec<u8>>,
-    /// For downloads: where to save the assembled file
-    pub dest_path: PathBuf,
+    /// Path to read from (Sender) or write to (Receiver)
+    pub file_path: PathBuf,
+    /// For downloads: keep track of exactly which chunks are written to disk
+    pub received_chunks_set: HashSet<u32>,
+    /// For pipelining logic
+    pub last_requested_chunk: Option<u32>,
 }
 
-/// Read a file from disk, compute SHA-256, split into base64-encoded chunks.
-pub fn prepare_file_for_transfer(
-    path: &Path,
-) -> Result<(String, u64, String, Vec<String>), String> {
-    let data =
-        std::fs::read(path).map_err(|e| format!("Failed to read file: {e}"))?;
-    let file_size = data.len() as u64;
+/// Prepares a file for transfer by calculating its checksum without freezing the main thread.
+pub async fn prepare_file_off_thread(
+    path: PathBuf,
+) -> Result<(String, u64, String, u32), String> {
+    tokio::task::spawn_blocking(move || {
+        let file = File::open(&path).map_err(|e| format!("Failed to open file: {e}"))?;
+        let metadata = file.metadata().map_err(|e| format!("Failed to read metadata: {e}"))?;
+        let file_size = metadata.len();
+        
+        let file_name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown")
+            .to_string();
 
-    // SHA-256 checksum
-    let mut hasher = Sha256::new();
-    hasher.update(&data);
-    let checksum = hex::encode(hasher.finalize());
+        let chunk_count = if file_size == 0 {
+            0
+        } else {
+            ((file_size + (CHUNK_SIZE as u64) - 1) / (CHUNK_SIZE as u64)) as u32
+        };
 
-    // Split into chunks and base64-encode
-    let chunks: Vec<String> = data
-        .chunks(CHUNK_SIZE)
-        .map(|chunk| B64.encode(chunk))
-        .collect();
+        // Compute SHA-256 streamingly
+        let mut hasher = Sha256::new();
+        let mut f = file;
+        let mut buffer = vec![0u8; 1024 * 1024]; // 1MB buffer for hashing
+        loop {
+            let n = f.read(&mut buffer).map_err(|e| format!("Read error: {e}"))?;
+            if n == 0 {
+                break;
+            }
+            hasher.update(&buffer[..n]);
+        }
+        let checksum = hex::encode(hasher.finalize());
 
-    let file_name = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("unknown")
-        .to_string();
-
-    Ok((file_name, file_size, checksum, chunks))
+        Ok((file_name, file_size, checksum, chunk_count))
+    })
+    .await
+    .map_err(|e| format!("Task failed: {e}"))?
 }
 
-/// Assemble received chunks into a file, verify checksum, save to disk.
-pub fn assemble_and_save(
-    transfer: &ActiveTransfer,
-) -> Result<PathBuf, String> {
-    // Ensure destination directory exists
-    if let Some(parent) = transfer.dest_path.parent() {
+/// Verify a file's SHA-256 checksum after download is complete.
+pub async fn verify_file_off_thread(
+    path: PathBuf,
+    expected_checksum: String,
+) -> Result<bool, String> {
+    tokio::task::spawn_blocking(move || {
+        let mut file = File::open(&path).map_err(|e| format!("Failed to open file: {e}"))?;
+        let mut hasher = Sha256::new();
+        let mut buffer = vec![0u8; 1024 * 1024];
+        loop {
+            let n = file.read(&mut buffer).map_err(|e| format!("Read error: {e}"))?;
+            if n == 0 {
+                break;
+            }
+            hasher.update(&buffer[..n]);
+        }
+        let actual = hex::encode(hasher.finalize());
+        Ok(actual == expected_checksum)
+    })
+    .await
+    .map_err(|e| format!("Task failed: {e}"))?
+}
+
+/// Read exactly one chunk from disk and base64-encode it (Sender).
+pub fn read_chunk(path: &Path, chunk_index: u32) -> Result<String, String> {
+    let mut file = File::open(path).map_err(|e| format!("Cannot open file: {e}"))?;
+    let offset = (chunk_index as u64) * (CHUNK_SIZE as u64);
+    file.seek(SeekFrom::Start(offset)).map_err(|e| format!("Seek failed: {e}"))?;
+
+    let mut buffer = vec![0u8; CHUNK_SIZE];
+    let n = file.read(&mut buffer).map_err(|e| format!("Read chunk failed: {e}"))?;
+    
+    buffer.truncate(n);
+    Ok(B64.encode(&buffer))
+}
+
+/// Write exactly one chunk to disk and ensure directories exist (Receiver).
+pub fn write_chunk(path: &Path, chunk_index: u32, data_b64: &str) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|e| format!("Failed to create directory: {e}"))?;
     }
 
-    // Assemble chunks in order
-    let mut assembled = Vec::with_capacity(transfer.file_size as usize);
-    for i in 0..transfer.chunk_count {
-        let chunk_data = transfer
-            .received_chunks
-            .get(&i)
-            .ok_or_else(|| format!("Missing chunk {i}"))?;
-        assembled.extend_from_slice(chunk_data);
-    }
-
-    // Verify checksum
-    let mut hasher = Sha256::new();
-    hasher.update(&assembled);
-    let actual = hex::encode(hasher.finalize());
-    if actual != transfer.checksum {
-        return Err(format!(
-            "Checksum mismatch: expected {}, got {}",
-            transfer.checksum, actual
-        ));
-    }
-
-    // Write to disk
-    std::fs::write(&transfer.dest_path, &assembled)
-        .map_err(|e| format!("Failed to write file: {e}"))?;
-
-    println!(
-        "[Stoa File] Saved {} ({} bytes) to {:?}",
-        transfer.file_name,
-        assembled.len(),
-        transfer.dest_path
-    );
-
-    Ok(transfer.dest_path.clone())
+    let data = B64.decode(data_b64).map_err(|e| format!("Decode failed: {e}"))?;
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create(true) // will create sparse file on linux
+        .open(path)
+        .map_err(|e| format!("Failed to open dest file: {e}"))?;
+        
+    let offset = (chunk_index as u64) * (CHUNK_SIZE as u64);
+    file.seek(SeekFrom::Start(offset)).map_err(|e| format!("Seek failed: {e}"))?;
+    file.write_all(&data).map_err(|e| format!("Write failed: {e}"))?;
+    
+    Ok(())
 }
 
 /// Get the received files directory for a given sender.
@@ -124,17 +154,4 @@ pub fn received_dir(sender_peer_id: &str) -> PathBuf {
         .join(".stoa")
         .join("received")
         .join(sender_peer_id)
-}
-
-/// Format file size for display.
-pub fn format_size(bytes: u64) -> String {
-    if bytes < 1024 {
-        format!("{bytes} B")
-    } else if bytes < 1024 * 1024 {
-        format!("{:.1} KB", bytes as f64 / 1024.0)
-    } else if bytes < 1024 * 1024 * 1024 {
-        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
-    } else {
-        format!("{:.2} GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
-    }
 }

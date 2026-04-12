@@ -207,6 +207,38 @@ export async function sendFile(peerId: string): Promise<void> {
   }
 }
 
+/** Pause an ongoing file transfer (upload or download) */
+export async function pauseFileTransfer(transferId: string): Promise<void> {
+  await invoke("pause_transfer", { transferId });
+  setChatMessages((prev) => {
+    const next = { ...prev };
+    for (const [peerId, msgs] of Object.entries(next)) {
+      next[peerId] = msgs.map((m) =>
+        m.fileInfo?.transferId === transferId
+          ? { ...m, fileInfo: { ...m.fileInfo, status: "paused" } }
+          : m
+      );
+    }
+    return next;
+  });
+}
+
+/** Resume a paused file transfer */
+export async function resumeFileTransfer(transferId: string): Promise<void> {
+  await invoke("resume_transfer", { transferId });
+  setChatMessages((prev) => {
+    const next = { ...prev };
+    for (const [peerId, msgs] of Object.entries(next)) {
+      next[peerId] = msgs.map((m) =>
+        m.fileInfo?.transferId === transferId
+          ? { ...m, fileInfo: { ...m.fileInfo, status: "transferring" } }
+          : m
+      );
+    }
+    return next;
+  });
+}
+
 // ─── Event Listeners ──────────────────────────────────────────────────────────
 
 export async function setupNetworkListeners(): Promise<void> {

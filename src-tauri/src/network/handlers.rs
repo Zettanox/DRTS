@@ -1,11 +1,10 @@
 use crate::file_transfer::{self, ActiveTransfer, TransferDirection, TransferStatus};
 use crate::messages::{self, StoredMessage};
 use crate::protocol::{StoaRequest, StoaResponse};
-use base64::{engine::general_purpose::STANDARD as B64, Engine};
-use libp2p::request_response;
-use libp2p::{PeerId, Swarm};
+use libp2p::{request_response, PeerId, Swarm};
 use serde::Serialize;
 use std::collections::HashMap;
+use std::str::FromStr;
 use tauri::{AppHandle, Emitter};
 
 use super::types::{ContactsList, NearbyPeersMap};
@@ -240,7 +239,7 @@ pub async fn handle_incoming_request(
 
             // Auto-accept: create download transfer
             let dest = file_transfer::received_dir(&sender_id).join(&file_name);
-            let transfer = ActiveTransfer {
+            let mut transfer = ActiveTransfer {
                 transfer_id: transfer_id.clone(),
                 peer_id: sender_id.clone(),
                 file_name: file_name.clone(),
@@ -250,12 +249,11 @@ pub async fn handle_incoming_request(
                 chunks_done: 0,
                 direction: TransferDirection::Download,
                 status: TransferStatus::Transferring,
-                chunks: vec![],
-                received_chunks: HashMap::new(),
-                dest_path: dest,
+                file_path: dest,
+                received_chunks_set: std::collections::HashSet::new(),
+                last_requested_chunk: None,
             };
-            active_transfers.insert(transfer_id.clone(), transfer);
-
+            
             // Accept the offer
             let response = StoaResponse::FileAccepted {
                 transfer_id: transfer_id.clone(),
@@ -279,8 +277,8 @@ pub async fn handle_incoming_request(
             let _ = app_handle.emit(
                 "file-transfer-started",
                 &FileOfferEvent {
-                    transfer_id,
-                    peer_id: sender_id,
+                    transfer_id: transfer_id.clone(),
+                    peer_id: sender_id.clone(),
                     file_name,
                     file_size,
                     direction: "download".into(),
@@ -288,88 +286,121 @@ pub async fn handle_incoming_request(
                     sender_name,
                 },
             );
+
+            // If empty file, just complete it
+            if chunk_count == 0 {
+                transfer.status = TransferStatus::Complete;
+                if let Some(parent) = transfer.file_path.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                let _ = std::fs::write(&transfer.file_path, b"");
+                let _ = app_handle.emit(
+                    "file-transfer-complete",
+                    &serde_json::json!({
+                        "transfer_id": transfer_id,
+                        "peer_id": sender_id,
+                        "file_name": transfer.file_name,
+                        "file_path": transfer.file_path.to_string_lossy().to_string(),
+                        "file_size": transfer.file_size,
+                        "direction": "download"
+                    }),
+                );
+                active_transfers.insert(transfer_id.clone(), transfer);
+            } else {
+                // Determine pipeline window
+                let mut window_max = chunk_count;
+                if window_max > file_transfer::MAX_WINDOW_SIZE {
+                    window_max = file_transfer::MAX_WINDOW_SIZE;
+                }
+                
+                transfer.last_requested_chunk = Some(window_max - 1);
+                active_transfers.insert(transfer_id.clone(), transfer);
+                
+                if let Ok(target) = PeerId::from_str(&sender_id) {
+                    for i in 0..window_max {
+                        let fetch_req = StoaRequest::FetchChunk {
+                            transfer_id: transfer_id.clone(),
+                            chunk_index: i,
+                        };
+                        swarm.behaviour_mut().messaging.send_request(&target, fetch_req);
+                    }
+                }
+            }
         }
-        StoaRequest::FileChunk {
+
+
+        StoaRequest::FetchChunk {
             transfer_id,
             chunk_index,
-            data_b64,
-            is_last,
         } => {
-            let sender_id = peer.to_string();
-
             if let Some(transfer) = active_transfers.get_mut(&transfer_id) {
-                // Decode chunk and store
-                if let Ok(data) = B64.decode(&data_b64) {
-                    transfer.received_chunks.insert(chunk_index, data);
-                    transfer.chunks_done = chunk_index + 1;
-
-                    // Send ack
-                    let response = StoaResponse::ChunkAck {
-                        transfer_id: transfer_id.clone(),
-                        chunk_index,
-                    };
-                    let _ = swarm
-                        .behaviour_mut()
-                        .messaging
-                        .send_response(channel, response);
-
-                    // Emit progress
-                    #[derive(Serialize, Clone)]
-                    struct ProgressEvent {
-                        transfer_id: String,
-                        chunk_index: u32,
-                        chunk_count: u32,
-                        progress: f64,
-                    }
-                    let progress = (chunk_index + 1) as f64 / transfer.chunk_count as f64;
-                    let _ = app_handle.emit(
-                        "file-transfer-progress",
-                        &ProgressEvent {
+                if transfer.status == TransferStatus::Transferring {
+                    if let Ok(data_b64) = file_transfer::read_chunk(&transfer.file_path, chunk_index) {
+                        let response = StoaResponse::FileChunk {
                             transfer_id: transfer_id.clone(),
                             chunk_index,
-                            chunk_count: transfer.chunk_count,
-                            progress,
-                        },
-                    );
+                            data_b64,
+                        };
+                        let _ = swarm
+                            .behaviour_mut()
+                            .messaging
+                            .send_response(channel, response);
+                            
+                        // Update sender progress
+                        transfer.received_chunks_set.insert(chunk_index);
+                        transfer.chunks_done = transfer.received_chunks_set.len() as u32;
 
-                    // If last chunk, assemble and save
-                    if is_last {
-                        match file_transfer::assemble_and_save(transfer) {
-                            Ok(path) => {
-                                transfer.status = TransferStatus::Complete;
-                                println!(
-                                    "[Stoa File] Transfer complete: {} -> {:?}",
-                                    transfer.file_name, path
-                                );
-
-                                #[derive(Serialize, Clone)]
-                                struct CompleteEvent {
-                                    transfer_id: String,
-                                    peer_id: String,
-                                    file_name: String,
-                                    file_path: String,
-                                    file_size: u64,
-                                    direction: String,
-                                }
-                                let _ = app_handle.emit(
-                                    "file-transfer-complete",
-                                    &CompleteEvent {
-                                        transfer_id: transfer_id.clone(),
-                                        peer_id: sender_id,
-                                        file_name: transfer.file_name.clone(),
-                                        file_path: path.to_string_lossy().to_string(),
-                                        file_size: transfer.file_size,
-                                        direction: "download".into(),
-                                    },
-                                );
-                            }
-                            Err(e) => {
-                                transfer.status = TransferStatus::Failed;
-                                eprintln!("[Stoa File] Assembly failed: {e}");
-                            }
+                        #[derive(Serialize, Clone)]
+                        struct ProgressEvent {
+                            transfer_id: String,
+                            chunk_index: u32,
+                            chunk_count: u32,
+                            progress: f64,
                         }
-                        // Clean up
-                        active_transfers.remove(&transfer_id);
+                        let progress = transfer.chunks_done as f64 / transfer.chunk_count as f64;
+                        let _ = app_handle.emit(
+                            "file-transfer-progress",
+                            &ProgressEvent {
+                                transfer_id: transfer_id.clone(),
+                                chunk_index,
+                                chunk_count: transfer.chunk_count,
+                                progress,
+                            },
+                        );
+
+                        // If all chunks sent, mark complete for sender
+                        if transfer.chunks_done >= transfer.chunk_count {
+                            transfer.status = TransferStatus::Complete;
+                            println!(
+                                "[Stoa File] Upload complete: {} ({} chunks)",
+                                transfer.file_name, transfer.chunk_count
+                            );
+
+                            #[derive(Serialize, Clone)]
+                            struct CompleteEvent {
+                                transfer_id: String,
+                                peer_id: String,
+                                file_name: String,
+                                file_size: u64,
+                                direction: String,
+                            }
+                            let _ = app_handle.emit(
+                                "file-transfer-complete",
+                                &CompleteEvent {
+                                    transfer_id: transfer_id.clone(),
+                                    peer_id: transfer.peer_id.clone(),
+                                    file_name: transfer.file_name.clone(),
+                                    file_size: transfer.file_size,
+                                    direction: "upload".into(),
+                                },
+                            );
+                            
+                            // DO NOT remove active_transfers yet, because the receiver might retry fetching
+                            // the last chunk if the response was dropped. But let's remove it to clean up.
+                            active_transfers.remove(&transfer_id);
+                        }
+                    } else {
+                        eprintln!("[Stoa File] Failed to read chunk {chunk_index} for {}", transfer_id);
                     }
                 }
             }
@@ -449,31 +480,9 @@ pub async fn handle_incoming_response(
             );
         }
         StoaResponse::FileAccepted { transfer_id } => {
-            println!("[Stoa File] FileAccepted for {transfer_id} — sending chunks");
-
+            println!("[Stoa File] FileAccepted for {transfer_id} — awaiting Fetch requests");
             if let Some(transfer) = active_transfers.get_mut(&transfer_id) {
                 transfer.status = TransferStatus::Transferring;
-                let target = *peer;
-
-                // Send all chunks sequentially
-                let chunk_count = transfer.chunks.len();
-                for (i, chunk_b64) in transfer.chunks.iter().enumerate() {
-                    let is_last = i == chunk_count - 1;
-                    let req = StoaRequest::FileChunk {
-                        transfer_id: transfer_id.clone(),
-                        chunk_index: i as u32,
-                        data_b64: chunk_b64.clone(),
-                        is_last,
-                    };
-                    swarm
-                        .behaviour_mut()
-                        .messaging
-                        .send_request(&target, req);
-                }
-                println!(
-                    "[Stoa File] Queued {} chunks for {}",
-                    chunk_count, transfer_id
-                );
             }
         }
         StoaResponse::FileRejected { transfer_id } => {
@@ -483,12 +492,22 @@ pub async fn handle_incoming_response(
             }
             active_transfers.remove(&transfer_id);
         }
-        StoaResponse::ChunkAck {
+        StoaResponse::FileChunk {
             transfer_id,
             chunk_index,
+            data_b64,
         } => {
+            let sender_id = peer.to_string();
+
             if let Some(transfer) = active_transfers.get_mut(&transfer_id) {
-                transfer.chunks_done = chunk_index + 1;
+                if let Err(e) = file_transfer::write_chunk(&transfer.file_path, chunk_index, &data_b64) {
+                    eprintln!("[Stoa File] Failed to write chunk: {e}");
+                    transfer.status = TransferStatus::Failed;
+                    return;
+                }
+
+                transfer.received_chunks_set.insert(chunk_index);
+                transfer.chunks_done = transfer.received_chunks_set.len() as u32;
 
                 // Emit progress
                 #[derive(Serialize, Clone)]
@@ -498,7 +517,7 @@ pub async fn handle_incoming_response(
                     chunk_count: u32,
                     progress: f64,
                 }
-                let progress = (chunk_index + 1) as f64 / transfer.chunk_count as f64;
+                let progress = transfer.chunks_done as f64 / transfer.chunk_count as f64;
                 let _ = app_handle.emit(
                     "file-transfer-progress",
                     &ProgressEvent {
@@ -509,34 +528,55 @@ pub async fn handle_incoming_response(
                     },
                 );
 
-                // If all chunks acked, transfer is complete
+                // Check completion
                 if transfer.chunks_done >= transfer.chunk_count {
                     transfer.status = TransferStatus::Complete;
-                    println!(
-                        "[Stoa File] Upload complete: {} ({} chunks)",
-                        transfer.file_name, transfer.chunk_count
-                    );
-
-                    #[derive(Serialize, Clone)]
-                    struct CompleteEvent {
-                        transfer_id: String,
-                        peer_id: String,
-                        file_name: String,
-                        file_size: u64,
-                        direction: String,
-                    }
-                    let _ = app_handle.emit(
-                        "file-transfer-complete",
-                        &CompleteEvent {
-                            transfer_id: transfer_id.clone(),
-                            peer_id: transfer.peer_id.clone(),
-                            file_name: transfer.file_name.clone(),
-                            file_size: transfer.file_size,
-                            direction: "upload".into(),
-                        },
-                    );
-
+                    let path = transfer.file_path.clone();
+                    let expected_checksum = transfer.checksum.clone();
+                    let file_name = transfer.file_name.clone();
+                    let file_size = transfer.file_size;
+                    let transfer_id_clone = transfer_id.clone();
+                    
+                    println!("[Stoa File] All chunks received for {}. Verifying...", file_name);
+                    
+                    let app_handle_clone = app_handle.clone();
+                    tokio::spawn(async move {
+                        match file_transfer::verify_file_off_thread(path.clone(), expected_checksum).await {
+                            Ok(true) => {
+                                println!("[Stoa File] Transfer complete and verified: {} -> {:?}", file_name, path);
+                                let _ = app_handle_clone.emit(
+                                    "file-transfer-complete",
+                                    &serde_json::json!({
+                                        "transfer_id": transfer_id_clone,
+                                        "peer_id": sender_id,
+                                        "file_name": file_name,
+                                        "file_path": path.to_string_lossy().to_string(),
+                                        "file_size": file_size,
+                                        "direction": "download"
+                                    }),
+                                );
+                            }
+                            Ok(false) => eprintln!("[Stoa File] Checksum mismatch for {}", file_name),
+                            Err(e) => eprintln!("[Stoa File] Verification failed: {e}"),
+                        }
+                    });
+                    
                     active_transfers.remove(&transfer_id);
+                } else if transfer.status == TransferStatus::Transferring {
+                    // Fetch next chunk to keep pipeline full
+                    if let Some(mut last) = transfer.last_requested_chunk {
+                        if last + 1 < transfer.chunk_count {
+                            last += 1;
+                            transfer.last_requested_chunk = Some(last);
+                            if let Ok(target) = PeerId::from_str(&transfer.peer_id) {
+                                let req = StoaRequest::FetchChunk {
+                                    transfer_id: transfer_id.clone(),
+                                    chunk_index: last,
+                                };
+                                swarm.behaviour_mut().messaging.send_request(&target, req);
+                            }
+                        }
+                    }
                 }
             }
         }

@@ -359,6 +359,30 @@ async fn send_file(
     Ok(())
 }
 
+#[tauri::command]
+async fn pause_transfer(
+    transfer_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let tx = state.network_cmd_tx.lock().await;
+    if let Some(tx) = tx.as_ref() {
+        let _ = tx.send(NetworkCommand::PauseTransfer { transfer_id }).await;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn resume_transfer(
+    transfer_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let tx = state.network_cmd_tx.lock().await;
+    if let Some(tx) = tx.as_ref() {
+        let _ = tx.send(NetworkCommand::ResumeTransfer { transfer_id }).await;
+    }
+    Ok(())
+}
+
 // ─── App Entry ────────────────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -395,6 +419,8 @@ pub fn run() {
             get_chat_history,
             set_username,
             send_file,
+            pause_transfer,
+            resume_transfer,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

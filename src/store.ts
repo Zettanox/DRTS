@@ -24,7 +24,7 @@ export interface FileInfo {
   fileSize: number;
   direction: "upload" | "download";
   progress: number;
-  status: "transferring" | "complete" | "failed";
+  status: "transferring" | "paused" | "complete" | "failed";
   chunkCount: number;
   filePath?: string;
 }

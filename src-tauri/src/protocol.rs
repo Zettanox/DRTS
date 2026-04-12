@@ -27,12 +27,10 @@ pub enum StoaRequest {
         chunk_count: u32,
         sender_name: String,
     },
-    /// A chunk of file data (base64-encoded).
-    FileChunk {
+    /// Request a specific chunk of a file (Pull method).
+    FetchChunk {
         transfer_id: String,
         chunk_index: u32,
-        data_b64: String,
-        is_last: bool,
     },
 }
 
@@ -52,9 +50,10 @@ pub enum StoaResponse {
     FileAccepted { transfer_id: String },
     /// File offer rejected.
     FileRejected { transfer_id: String },
-    /// Acknowledgement of a received chunk.
-    ChunkAck {
+    /// A chunk of file data (base64-encoded) responding to a FetchChunk.
+    FileChunk {
         transfer_id: String,
         chunk_index: u32,
+        data_b64: String,
     },
 }

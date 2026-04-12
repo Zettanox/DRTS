@@ -1,6 +1,6 @@
 import { Component, createSignal, createMemo, createEffect, For, Show, onMount } from "solid-js";
 import { dms, groups, contacts, identity, chatMessages, activeRightPane, setActiveRightPane, Message } from "../store";
-import { sendMessage as bridgeSendMessage, getChatHistory, sendFile } from "../tauri-bridge";
+import { sendMessage as bridgeSendMessage, getChatHistory, sendFile, pauseFileTransfer, resumeFileTransfer } from "../tauri-bridge";
 import { Send, Paperclip, Users, Shield, X, MapPin, Columns, Check, CheckCheck, Clock, FileIcon, Download } from "lucide-solid";
 
 export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (props) => {
@@ -169,19 +169,44 @@ export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (prop
                           </div>
                           <div class="flex-1 min-w-0">
                             <div class="text-sm font-black truncate">{fi().fileName}</div>
-                            <div class={`text-[10px] font-bold ${
+                            <div class={`text-[10px] font-bold flex items-center justify-between ${
                               isMe(message.senderId) ? "text-primary-200" : "text-stone-500"
                             }`}>
-                              {formatFileSize(fi().fileSize)} · {fi().direction === "upload" ? "Sending" : "Receiving"}
-                              {fi().status === "complete" && " · Complete ✓"}
+                              <div>
+                                {formatFileSize(fi().fileSize)} · {fi().direction === "upload" ? "Sending" : "Receiving"}
+                                {fi().status === "complete" && " · Complete ✓"}
+                                {fi().status === "paused" && " · Paused"}
+                              </div>
+                              <Show when={fi().status === "transferring" || fi().status === "paused"}>
+                                <div class="flex gap-2">
+                                  <Show when={fi().status === "transferring"}>
+                                    <button 
+                                      onClick={() => pauseFileTransfer(fi().transferId)}
+                                      class="hover:text-stone-800 dark:hover:text-stone-200 transition-colors"
+                                      title="Pause Transfer"
+                                    >
+                                      ⏸️
+                                    </button>
+                                  </Show>
+                                  <Show when={fi().status === "paused"}>
+                                    <button 
+                                      onClick={() => resumeFileTransfer(fi().transferId)}
+                                      class="hover:text-stone-800 dark:hover:text-stone-200 transition-colors"
+                                      title="Resume Transfer"
+                                    >
+                                      ▶️
+                                    </button>
+                                  </Show>
+                                </div>
+                              </Show>
                             </div>
                             {/* Progress bar */}
-                            <Show when={fi().status === "transferring"}>
+                            <Show when={fi().status === "transferring" || fi().status === "paused"}>
                               <div class={`w-full h-1.5 rounded-full mt-1.5 overflow-hidden ${
                                 isMe(message.senderId) ? "bg-primary-400/30" : "bg-stone-300 dark:bg-stone-600"
                               }`}>
                                 <div
-                                  class="h-full rounded-full bg-emerald-400 transition-all duration-300"
+                                  class={`h-full rounded-full transition-all duration-300 ${fi().status === "paused" ? "bg-amber-400" : "bg-emerald-400"}`}
                                   style={{ width: `${Math.round(fi().progress * 100)}%` }}
                                 />
                               </div>

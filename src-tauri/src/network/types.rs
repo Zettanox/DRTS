@@ -37,6 +37,24 @@ pub enum NetworkCommand {
         file_path: String,
         sender_name: String,
     },
+    /// A file has finished hashing and is ready to be offered
+    FilePrepared {
+        peer_id: String,
+        file_path: String,
+        file_name: String,
+        file_size: u64,
+        checksum: String,
+        chunk_count: u32,
+        sender_name: String,
+    },
+    /// Pause an ongoing file transfer
+    PauseTransfer {
+        transfer_id: String,
+    },
+    /// Resume a paused file transfer
+    ResumeTransfer {
+        transfer_id: String,
+    },
     /// Toggle LAN visibility (mDNS on/off)
     SetVisibility(bool),
     /// Shut down the network task
