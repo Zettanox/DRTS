@@ -549,6 +549,28 @@ pub fn run() {
             remove_group_member,
             disband_group,
         ])
+        .on_window_event(|window, event| {
+            // Gracefully shut down the network task before the window closes,
+            // preventing the "corrupted double-linked list" glibc error from
+            // libp2p's crypto resources being freed in an unclean order.
+            if let tauri::WindowEvent::Destroyed = event {
+                let app_state = window.state::<AppState>();
+                let tx = app_state.network_cmd_tx.clone();
+                let handle = app_state.network_handle.clone();
+                tauri::async_runtime::block_on(async {
+                    if let Some(tx) = tx.lock().await.take() {
+                        let _ = tx.send(NetworkCommand::Shutdown).await;
+                    }
+                    if let Some(handle) = handle.lock().await.take() {
+                        // Give the task a moment to finish
+                        let _ = tokio::time::timeout(
+                            std::time::Duration::from_millis(500),
+                            handle,
+                        ).await;
+                    }
+                });
+            }
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

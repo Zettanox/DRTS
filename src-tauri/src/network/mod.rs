@@ -568,6 +568,22 @@ pub fn spawn_network(
                                         file_name, file_size, chunk_count, group_id
                                     );
 
+                                    // Emit once for the sender's UI
+                                    let first_transfer_id = uuid::Uuid::new_v4().to_string();
+                                    let _ = app_handle.emit(
+                                        "group-file-transfer-started",
+                                        &serde_json::json!({
+                                            "group_id": group_id,
+                                            "transfer_id": first_transfer_id,
+                                            "peer_id": our_peer_id_str,
+                                            "file_name": file_name,
+                                            "file_size": file_size,
+                                            "direction": "upload",
+                                            "chunk_count": chunk_count,
+                                            "sender_name": sender_name,
+                                        }),
+                                    );
+
                                     if let Some(group) = local_groups.iter().find(|g| g.id == group_id) {
                                         let members: Vec<String> = group.members.clone();
                                         for mid in &members {

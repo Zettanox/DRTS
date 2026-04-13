@@ -438,6 +438,10 @@ export async function setupNetworkListeners(): Promise<void> {
     }
   );
 
+  // ─── File transfer state tracking ─────────────────────────────────────────
+  // Maps transfer_id → peer_id for lookup during progress/complete events
+  const transferPeerMap: Record<string, string> = {};
+
   // File transfer events
   await listen<{
     transfer_id: string;
@@ -450,6 +454,9 @@ export async function setupNetworkListeners(): Promise<void> {
   }>("file-transfer-started", (event) => {
     const { transfer_id, peer_id, file_name, file_size, direction, chunk_count } = event.payload;
     console.log(`[File] Transfer started: ${file_name} (${direction}) with ${peer_id}`);
+
+    // Track this transfer
+    transferPeerMap[transfer_id] = peer_id;
 
     // Add a file message to chat
     const msg: Message = {
@@ -475,6 +482,47 @@ export async function setupNetworkListeners(): Promise<void> {
     }));
   });
 
+  // Group file transfer events
+  await listen<{
+    group_id: string;
+    transfer_id: string;
+    peer_id: string;
+    file_name: string;
+    file_size: number;
+    direction: string;
+    chunk_count: number;
+    sender_name?: string;
+  }>("group-file-transfer-started", (event) => {
+    const { group_id, transfer_id, peer_id, file_name, file_size, direction, chunk_count, sender_name } = event.payload;
+    console.log(`[File] Group transfer started: ${file_name} (${direction}) in group ${group_id}`);
+
+    // Track with a special group prefix so progress/complete can find it
+    transferPeerMap[transfer_id] = `__group__${group_id}`;
+
+    const groupKey = `group_${group_id}`;
+    const msg: Message = {
+      id: `file-${transfer_id}`,
+      senderId: direction === "upload" ? "me" : peer_id,
+      content: `📎 ${file_name}`,
+      timestamp: Math.floor(Date.now() / 1000),
+      delivered: false,
+      fileInfo: {
+        transferId: transfer_id,
+        fileName: file_name,
+        fileSize: file_size,
+        direction: direction as "upload" | "download",
+        progress: 0,
+        status: "transferring",
+        chunkCount: chunk_count,
+      },
+    };
+
+    setGroupMessages((prev) => ({
+      ...prev,
+      [groupKey]: [...(prev[groupKey] || []), msg],
+    }));
+  });
+
   await listen<{
     transfer_id: string;
     chunk_index: number;
@@ -482,19 +530,36 @@ export async function setupNetworkListeners(): Promise<void> {
     progress: number;
   }>("file-transfer-progress", (event) => {
     const { transfer_id, progress } = event.payload;
-    // Update file message progress
     const msgId = `file-${transfer_id}`;
-    for (const peerId of Object.keys(chatMessages)) {
-      const msgs = chatMessages[peerId];
-      if (msgs?.some((m) => m.id === msgId)) {
-        setChatMessages(
-          peerId,
-          (m: Message) => m.id === msgId,
-          "fileInfo",
-          "progress",
-          progress
-        );
-        break;
+    const target = transferPeerMap[transfer_id];
+    if (!target) return;
+
+    if (target.startsWith("__group__")) {
+      // Group file progress
+      const groupKey = `group_${target.replace("__group__", "")}`;
+      const msgs = groupMessages[groupKey];
+      if (msgs) {
+        setGroupMessages((prev) => ({
+          ...prev,
+          [groupKey]: prev[groupKey]?.map((m) =>
+            m.id === msgId && m.fileInfo
+              ? { ...m, fileInfo: { ...m.fileInfo, progress } }
+              : m
+          ) || [],
+        }));
+      }
+    } else {
+      // DM file progress
+      const msgs = chatMessages[target];
+      if (msgs) {
+        setChatMessages((prev) => ({
+          ...prev,
+          [target]: prev[target]?.map((m) =>
+            m.id === msgId && m.fileInfo
+              ? { ...m, fileInfo: { ...m.fileInfo, progress } }
+              : m
+          ) || [],
+        }));
       }
     }
   });
@@ -507,27 +572,53 @@ export async function setupNetworkListeners(): Promise<void> {
     file_size: number;
     direction: string;
   }>("file-transfer-complete", (event) => {
-    const { transfer_id, peer_id, file_name, file_path } = event.payload;
+    const { transfer_id, file_name, file_path } = event.payload;
     console.log(`[File] Transfer complete: ${file_name}`);
     const msgId = `file-${transfer_id}`;
-    // Update status and mark delivered
-    const msgs = chatMessages[peer_id];
-    if (msgs?.some((m) => m.id === msgId)) {
-      setChatMessages(
-        peer_id,
-        (m: Message) => m.id === msgId,
-        (msg) => ({
-          ...msg,
-          delivered: true,
-          fileInfo: msg.fileInfo ? {
-            ...msg.fileInfo,
-            progress: 1,
-            status: "complete" as const,
-            filePath: file_path,
-          } : undefined,
-        })
-      );
+    const target = transferPeerMap[transfer_id];
+    if (!target) return;
+
+    if (target.startsWith("__group__")) {
+      const groupKey = `group_${target.replace("__group__", "")}`;
+      setGroupMessages((prev) => ({
+        ...prev,
+        [groupKey]: prev[groupKey]?.map((m) =>
+          m.id === msgId
+            ? {
+                ...m,
+                delivered: true,
+                fileInfo: m.fileInfo ? {
+                  ...m.fileInfo,
+                  progress: 1,
+                  status: "complete" as const,
+                  filePath: file_path,
+                } : undefined,
+              }
+            : m
+        ) || [],
+      }));
+    } else {
+      setChatMessages((prev) => ({
+        ...prev,
+        [target]: prev[target]?.map((m) =>
+          m.id === msgId
+            ? {
+                ...m,
+                delivered: true,
+                fileInfo: m.fileInfo ? {
+                  ...m.fileInfo,
+                  progress: 1,
+                  status: "complete" as const,
+                  filePath: file_path,
+                } : undefined,
+              }
+            : m
+        ) || [],
+      }));
     }
+
+    // Clean up tracking
+    delete transferPeerMap[transfer_id];
   });
 
   // Load contacts after listeners are set up
