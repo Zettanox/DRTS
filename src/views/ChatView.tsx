@@ -1,7 +1,7 @@
 import { Component, createSignal, createMemo, createEffect, For, Show, onMount } from "solid-js";
-import { dms, groups, contacts, identity, chatMessages, activeRightPane, setActiveRightPane, Message } from "../store";
-import { sendMessage as bridgeSendMessage, getChatHistory, sendFile, pauseFileTransfer, resumeFileTransfer } from "../tauri-bridge";
-import { Send, Paperclip, Users, Shield, X, MapPin, Columns, Check, CheckCheck, Clock, FileIcon, Download } from "lucide-solid";
+import { dms, groups, contacts, identity, chatMessages, groupMessages, activeRightPane, setActiveRightPane, Message } from "../store";
+import { sendMessage as bridgeSendMessage, getChatHistory, sendFile, pauseFileTransfer, resumeFileTransfer, sendGroupMessage, getGroupHistory, sendGroupFile, leaveGroup, removeGroupMember, disbandGroup } from "../tauri-bridge";
+import { Send, Paperclip, Users, Shield, X, MapPin, Columns, Check, CheckCheck, Clock, FileIcon, Download, LogOut, UserMinus, Trash2, Hash } from "lucide-solid";
 
 export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (props) => {
   const [inputText, setInputText] = createSignal("");
@@ -12,10 +12,22 @@ export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (prop
   const currentChat = createMemo(() => dms.find(c => c.id === props.id) || groups.find(c => c.id === props.id));
   const isGroup = createMemo(() => !!groups.find(c => c.id === props.id));
 
-  // Extract peer ID from DM id (dm_<peerId>)
+  // Extract peer ID from DM id (dm_<peerId>) or group ID from group_<id>
   const peerId = createMemo(() => {
     if (isGroup()) return null;
     return props.id.replace("dm_", "");
+  });
+
+  const groupId = createMemo(() => {
+    if (!isGroup()) return null;
+    return props.id.replace("group_", "");
+  });
+
+  // Am I the admin of this group?
+  const isAdmin = createMemo(() => {
+    if (!isGroup()) return false;
+    const group = groups.find(g => g.id === props.id);
+    return group?.admin === identity()?.peerId;
   });
 
   // Get contact info
@@ -25,8 +37,14 @@ export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (prop
     return contacts.find(c => c.peerId === pid);
   });
 
-  // Get messages for this chat
+  // Get messages for this chat — DM or Group
   const messages = createMemo(() => {
+    if (isGroup()) {
+      const gid = groupId();
+      if (!gid) return [];
+      const groupKey = `group_${gid}`;
+      return groupMessages[groupKey] || [];
+    }
     const pid = peerId();
     if (!pid) return [];
     return chatMessages[pid] || [];
@@ -34,9 +52,12 @@ export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (prop
 
   // Load chat history on mount
   onMount(async () => {
-    const pid = peerId();
-    if (pid) {
-      await getChatHistory(pid);
+    if (isGroup()) {
+      const gid = groupId();
+      if (gid) await getGroupHistory(gid);
+    } else {
+      const pid = peerId();
+      if (pid) await getChatHistory(pid);
     }
   });
 
@@ -50,11 +71,21 @@ export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (prop
 
   const handleSend = async (e: Event) => {
     e.preventDefault();
-    if (!inputText().trim() || !peerId()) return;
+    if (!inputText().trim()) return;
 
-    const pid = peerId()!;
-    await bridgeSendMessage(pid, inputText());
-    setInputText("");
+    if (isGroup()) {
+      const gid = groupId();
+      if (gid) {
+        await sendGroupMessage(gid, inputText());
+        setInputText("");
+      }
+    } else {
+      const pid = peerId();
+      if (pid) {
+        await bridgeSendMessage(pid, inputText());
+        setInputText("");
+      }
+    }
   };
 
   const isMe = (senderId: string) => senderId === "me";
@@ -150,7 +181,7 @@ export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (prop
                   }`} style={{ "--bg-color": isMe(message.senderId) ? "var(--color-primary-500)" : "" }}>
                     {!isMe(message.senderId) && isGroup() && (
                       <div class="text-xs font-black mb-1 text-accent-600 dark:text-accent-400">
-                        {message.senderId}
+                        {contacts.find(c => c.peerId === message.senderId)?.petname || message.senderId.slice(0, 12) + '…'}
                       </div>
                     )}
 
@@ -234,8 +265,13 @@ export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (prop
                 type="button"
                 class="p-1 md:p-2 text-stone-500 hover:text-stone-800 dark:hover:text-stone-200 transition-colors"
                 onClick={() => {
-                  const pid = peerId();
-                  if (pid) sendFile(pid);
+                  if (isGroup()) {
+                    const gid = groupId();
+                    if (gid) sendGroupFile(gid);
+                  } else {
+                    const pid = peerId();
+                    if (pid) sendFile(pid);
+                  }
                 }}
               >
                 <Paperclip size={20} />
@@ -280,22 +316,84 @@ export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (prop
               )}
             </div>
             <div class="p-4 flex-1 overflow-y-auto">
-              <div class="flat-panel p-4 mb-4 flex flex-col gap-3">
-                 <div class="font-black text-xs uppercase text-stone-500 tracking-wider">Peer ID</div>
-                 <div class="font-mono text-xs text-stone-600 dark:text-stone-400 break-all">{peerId()}</div>
-              </div>
-              {contact() && (
-                <div class="flat-panel p-4 mb-4 flex flex-col gap-3">
-                  <div class="font-black text-xs uppercase text-stone-500 tracking-wider">Contact Since</div>
-                  <div class="font-bold text-stone-800 dark:text-stone-200">
-                    {new Date((contact()?.addedAt || 0) * 1000).toLocaleDateString()}
+              <Show when={!isGroup()} fallback={
+                /* Group Details */
+                <>
+                  <div class="flat-panel p-4 mb-4 flex flex-col gap-3">
+                    <div class="font-black text-xs uppercase text-stone-500 tracking-wider">Group ID</div>
+                    <div class="font-mono text-xs text-stone-600 dark:text-stone-400 break-all">{groupId()}</div>
                   </div>
+                  <div class="flat-panel p-4 mb-4 flex flex-col gap-3">
+                    <div class="font-black text-xs uppercase text-stone-500 tracking-wider mb-2">
+                      Members ({currentChat()?.participants.length})
+                    </div>
+                    <For each={currentChat()?.participants || []}>
+                      {(memberId) => {
+                        const memberContact = () => contacts.find(c => c.peerId === memberId);
+                        const isSelf = () => memberId === identity()?.peerId;
+                        return (
+                          <div class="flex items-center gap-3 py-2 px-1 rounded-lg">
+                            <div class={`w-2.5 h-2.5 rounded-full border border-stone-800 shrink-0 ${
+                              isSelf() ? 'bg-primary-500' : memberContact()?.online ? 'bg-emerald-500' : 'bg-stone-400'
+                            }`}></div>
+                            <div class="flex-1 min-w-0">
+                              <div class="text-sm font-bold truncate text-stone-800 dark:text-stone-200">
+                                {isSelf() ? 'You' : memberContact()?.petname || memberId.slice(0, 12) + '…'}
+                              </div>
+                            </div>
+                            <Show when={isAdmin() && !isSelf()}>
+                              <button
+                                class="p-1.5 text-stone-400 hover:text-red-500 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-md transition-colors"
+                                title="Remove from group"
+                                onClick={() => { const gid = groupId(); if(gid) removeGroupMember(gid, memberId); }}
+                              >
+                                <UserMinus size={14} />
+                              </button>
+                            </Show>
+                          </div>
+                        );
+                      }}
+                    </For>
+                  </div>
+                  {/* Group Actions */}
+                  <div class="space-y-2 mt-4">
+                    <button
+                      class="w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm text-amber-700 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900/30 transition-colors"
+                      onClick={() => { const gid = groupId(); if(gid) leaveGroup(gid); }}
+                    >
+                      <LogOut size={16} />
+                      Leave Group
+                    </button>
+                    <Show when={isAdmin()}>
+                      <button
+                        class="w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm text-red-700 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors"
+                        onClick={() => { const gid = groupId(); if(gid) disbandGroup(gid); }}
+                      >
+                        <Trash2 size={16} />
+                        Disband Group
+                      </button>
+                    </Show>
+                  </div>
+                </>
+              }>
+                {/* DM Details */}
+                <div class="flat-panel p-4 mb-4 flex flex-col gap-3">
+                   <div class="font-black text-xs uppercase text-stone-500 tracking-wider">Peer ID</div>
+                   <div class="font-mono text-xs text-stone-600 dark:text-stone-400 break-all">{peerId()}</div>
                 </div>
-              )}
-              <div class="flat-panel p-4 flex flex-col gap-3">
-                 <div class="font-black text-xs uppercase text-stone-500 tracking-wider">Trust Level</div>
-                 <div class="font-bold text-stone-800 dark:text-stone-200">{contact()?.trustLevel || "Direct"}</div>
-              </div>
+                {contact() && (
+                  <div class="flat-panel p-4 mb-4 flex flex-col gap-3">
+                    <div class="font-black text-xs uppercase text-stone-500 tracking-wider">Contact Since</div>
+                    <div class="font-bold text-stone-800 dark:text-stone-200">
+                      {new Date((contact()?.addedAt || 0) * 1000).toLocaleDateString()}
+                    </div>
+                  </div>
+                )}
+                <div class="flat-panel p-4 flex flex-col gap-3">
+                   <div class="font-black text-xs uppercase text-stone-500 tracking-wider">Trust Level</div>
+                   <div class="font-bold text-stone-800 dark:text-stone-200">{contact()?.trustLevel || "Direct"}</div>
+                </div>
+              </Show>
             </div>
           </div>
         )}

@@ -43,6 +43,47 @@ pub enum StoaRequest {
         ciphertext_b64: String,
         nonce_b64: String,
     },
+    // ─── Group Variants ──────────────────────────────────────────────────────
+    /// Invite a peer to a group (auto-accept since they're a contact).
+    GroupInvite {
+        group_id: String,
+        group_name: String,
+        members: Vec<String>,
+        admin: String,
+        inviter_name: String,
+    },
+    /// A chat message in a group.
+    GroupMessage {
+        group_id: String,
+        id: String,
+        content: String,
+        timestamp: i64,
+        sender_name: String,
+    },
+    /// Offer a file to a group (each member pulls independently).
+    GroupFileOffer {
+        group_id: String,
+        transfer_id: String,
+        file_name: String,
+        file_size: u64,
+        checksum: String,
+        chunk_count: u32,
+        sender_name: String,
+    },
+    /// Admin removed a member from the group.
+    MemberRemoved {
+        group_id: String,
+        removed_peer_id: String,
+    },
+    /// A member left the group voluntarily.
+    MemberLeft {
+        group_id: String,
+        peer_id: String,
+    },
+    /// Admin disbanded the group.
+    GroupDisbanded {
+        group_id: String,
+    },
 }
 
 /// All response types for the `/stoa/msg/1.0.0` protocol.
@@ -73,5 +114,10 @@ pub enum StoaResponse {
     /// E2E: Acknowledge key exchange with our X25519 public key.
     KeyExchangeAck {
         x25519_public_key_hex: String,
+    },
+    /// Acknowledgement of a group message.
+    GroupAck {
+        group_id: String,
+        message_id: String,
     },
 }

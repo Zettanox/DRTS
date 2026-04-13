@@ -13,7 +13,13 @@ import {
   setChatMessages,
   chatMessages,
   syncDMsFromContacts,
+  syncGroupsFromBackend,
+  setGroups,
+  groups,
+  setGroupMessages,
+  groupMessages,
   Message,
+  GroupEntry,
 } from "./store";
 
 // ─── Types matching Rust structs ──────────────────────────────────────────────
@@ -239,6 +245,92 @@ export async function resumeFileTransfer(transferId: string): Promise<void> {
   });
 }
 
+// ─── Group Commands ───────────────────────────────────────────────────────────────
+
+export async function createGroup(
+  name: string,
+  memberIds: string[]
+): Promise<void> {
+  await invoke("create_group", { name, memberIds });
+}
+
+export async function getGroups(): Promise<void> {
+  const gs = await invoke<GroupEntry[]>("get_groups");
+  syncGroupsFromBackend(gs);
+}
+
+export async function sendGroupMessage(
+  groupId: string,
+  content: string
+): Promise<string> {
+  const messageId = await invoke<string>("send_group_message", {
+    groupId,
+    content,
+  });
+
+  // Optimistic local update
+  const groupKey = `group_${groupId}`;
+  const msg: Message = {
+    id: messageId,
+    senderId: "me",
+    content,
+    timestamp: Date.now() / 1000,
+    delivered: false,
+  };
+
+  setGroupMessages((prev) => ({
+    ...prev,
+    [groupKey]: [...(prev[groupKey] || []), msg],
+  }));
+
+  return messageId;
+}
+
+export async function sendGroupFile(groupId: string): Promise<void> {
+  const file = await open({
+    multiple: false,
+    title: "Select a file to send to group",
+  });
+  if (file) {
+    await invoke("send_group_file", { groupId, filePath: file });
+  }
+}
+
+export async function getGroupHistory(groupId: string): Promise<void> {
+  const msgs = await invoke<RustStoredMessage[]>("get_group_history", {
+    groupId,
+  });
+  const groupKey = `group_${groupId}`;
+  setGroupMessages((prev) => ({
+    ...prev,
+    [groupKey]: msgs.map((m) => ({
+      id: m.id,
+      senderId: m.sender_id,
+      content: m.content,
+      timestamp: m.timestamp,
+      delivered: m.delivered,
+    })),
+  }));
+}
+
+export async function leaveGroup(groupId: string): Promise<void> {
+  await invoke("leave_group", { groupId });
+  // Remove from local store
+  setGroups((prev) => prev.filter((g) => g.id !== `group_${groupId}`));
+}
+
+export async function removeGroupMember(
+  groupId: string,
+  peerId: string
+): Promise<void> {
+  await invoke("remove_group_member", { groupId, peerId });
+}
+
+export async function disbandGroup(groupId: string): Promise<void> {
+  await invoke("disband_group", { groupId });
+  setGroups((prev) => prev.filter((g) => g.id !== `group_${groupId}`));
+}
+
 // ─── Event Listeners ──────────────────────────────────────────────────────────
 
 export async function setupNetworkListeners(): Promise<void> {
@@ -440,4 +532,63 @@ export async function setupNetworkListeners(): Promise<void> {
 
   // Load contacts after listeners are set up
   await getContacts();
+
+  // ─── Group Event Listeners ───────────────────────────────────────────────
+
+  await listen<{
+    id: string;
+    name: string;
+    members: string[];
+    admin: string;
+    created_at: number;
+  }>("group-created", async () => {
+    await getGroups();
+  });
+
+  await listen<{
+    group_id: string;
+    group_name: string;
+    members: string[];
+    admin: string;
+    inviter_name: string;
+  }>("group-invite", async () => {
+    await getGroups();
+  });
+
+  await listen<{
+    group_id: string;
+    id: string;
+    sender_id: string;
+    sender_name: string;
+    content: string;
+    timestamp: number;
+  }>("group-message", (event) => {
+    const { group_id, id, sender_id, sender_name, content, timestamp } =
+      event.payload;
+    const groupKey = `group_${group_id}`;
+    const msg: Message = {
+      id,
+      senderId: sender_id,
+      content,
+      timestamp,
+      delivered: true,
+    };
+
+    setGroupMessages((prev) => ({
+      ...prev,
+      [groupKey]: [...(prev[groupKey] || []), msg],
+    }));
+  });
+
+  await listen<{ group_id: string; reason: string }>("group-removed", async (event) => {
+    const { group_id } = event.payload;
+    setGroups((prev) => prev.filter((g) => g.id !== `group_${group_id}`));
+  });
+
+  await listen<{ group_id: string; removed: string }>("group-member-update", async () => {
+    await getGroups();
+  });
+
+  // Load groups
+  await getGroups();
 }

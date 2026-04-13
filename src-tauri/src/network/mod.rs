@@ -18,6 +18,7 @@ use tokio::task::JoinHandle;
 
 use crate::crypto;
 use crate::file_transfer::{self, ActiveTransfer, TransferDirection, TransferStatus};
+use crate::groups::{self, Group};
 use crate::messages::{self, StoredMessage};
 use types::PendingMessage;
 
@@ -87,6 +88,8 @@ pub fn spawn_network(
         let mut pending_messages: Vec<PendingMessage> = vec![];
         let mut lan_visible = true;
         let mut active_transfers: HashMap<String, ActiveTransfer> = HashMap::new();
+        let mut local_groups: Vec<Group> = groups::load_groups().unwrap_or_default();
+        let our_peer_id_str = peer_id.to_string();
 
         // Reconnection sweep interval — retries cached addresses for offline contacts
         let mut reconnect_interval = tokio::time::interval(std::time::Duration::from_secs(10));
@@ -182,6 +185,8 @@ pub fn spawn_network(
                                         &our_name,
                                         &mut active_transfers,
                                         &keypair,
+                                        &mut local_groups,
+                                        &our_peer_id_str,
                                     ).await;
                                 }
                                 request_response::Message::Response {
@@ -457,6 +462,220 @@ pub fn spawn_network(
                                     chunk_index: start_chunk,
                                 };
                                 swarm.behaviour_mut().messaging.send_request(&target, req);
+                            }
+                        }
+
+                        // ── Group Commands ──────────────────────────────────
+                        Some(NetworkCommand::CreateGroup { name, member_ids }) => {
+                            let group_id = uuid::Uuid::new_v4().to_string();
+                            let mut all_members = vec![our_peer_id_str.clone()];
+                            all_members.extend(member_ids.clone());
+
+                            match groups::create_group(
+                                &mut local_groups,
+                                group_id.clone(),
+                                name.clone(),
+                                all_members.clone(),
+                                our_peer_id_str.clone(),
+                            ) {
+                                Ok(group) => {
+                                    println!("[Stoa Group] Created group '{}' ({})", name, group_id);
+
+                                    // Fan-out GroupInvite to all members
+                                    for mid in &member_ids {
+                                        if let Ok(target) = PeerId::from_str(mid) {
+                                            let invite = StoaRequest::GroupInvite {
+                                                group_id: group_id.clone(),
+                                                group_name: name.clone(),
+                                                members: all_members.clone(),
+                                                admin: our_peer_id_str.clone(),
+                                                inviter_name: our_name.clone(),
+                                            };
+                                            let encrypted_invite = maybe_encrypt_request(mid, invite);
+                                            if swarm.is_connected(&target) {
+                                                swarm.behaviour_mut().messaging.send_request(&target, encrypted_invite);
+                                            } else {
+                                                println!("[Stoa Group] Member {mid} offline, invite pending");
+                                            }
+                                        }
+                                    }
+
+                                    // Notify frontend
+                                    let _ = app_handle.emit("group-created", &serde_json::json!({
+                                        "id": group_id,
+                                        "name": name,
+                                        "members": all_members,
+                                        "admin": our_peer_id_str,
+                                        "created_at": group.created_at,
+                                    }));
+                                }
+                                Err(e) => eprintln!("[Stoa Group] Create failed: {e}"),
+                            }
+                        }
+
+                        Some(NetworkCommand::SendGroupMessage {
+                            group_id,
+                            message_id,
+                            content,
+                            sender_name,
+                        }) => {
+                            let timestamp = chrono::Utc::now().timestamp();
+
+                            // Persist our own message
+                            let group_key = format!("group_{group_id}");
+                            let msg = StoredMessage {
+                                id: message_id.clone(),
+                                sender_id: "me".into(),
+                                content: content.clone(),
+                                timestamp,
+                                delivered: false,
+                            };
+                            let _ = messages::save_message(&group_key, &msg);
+
+                            // Fan-out to all members
+                            if let Some(group) = local_groups.iter().find(|g| g.id == group_id) {
+                                let members: Vec<String> = group.members.clone();
+                                for mid in &members {
+                                    if *mid == our_peer_id_str { continue; }
+                                    if let Ok(target) = PeerId::from_str(mid) {
+                                        let req = StoaRequest::GroupMessage {
+                                            group_id: group_id.clone(),
+                                            id: message_id.clone(),
+                                            content: content.clone(),
+                                            timestamp,
+                                            sender_name: sender_name.clone(),
+                                        };
+                                        let encrypted_req = maybe_encrypt_request(mid, req);
+                                        if swarm.is_connected(&target) {
+                                            swarm.behaviour_mut().messaging.send_request(&target, encrypted_req);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Some(NetworkCommand::SendGroupFile {
+                            group_id,
+                            file_path,
+                            sender_name,
+                        }) => {
+                            // Use same pattern as DM files: prepare off-thread, then send offers
+                            let path = std::path::PathBuf::from(file_path.clone());
+                            match file_transfer::prepare_file_off_thread(path).await {
+                                Ok((file_name, file_size, checksum, chunk_count)) => {
+                                    println!(
+                                        "[Stoa Group] Offering {} ({} bytes, {} chunks) to group {}",
+                                        file_name, file_size, chunk_count, group_id
+                                    );
+
+                                    if let Some(group) = local_groups.iter().find(|g| g.id == group_id) {
+                                        let members: Vec<String> = group.members.clone();
+                                        for mid in &members {
+                                            if *mid == our_peer_id_str { continue; }
+
+                                            let transfer_id = uuid::Uuid::new_v4().to_string();
+                                            let transfer = ActiveTransfer {
+                                                transfer_id: transfer_id.clone(),
+                                                peer_id: mid.clone(),
+                                                file_name: file_name.clone(),
+                                                file_size,
+                                                checksum: checksum.clone(),
+                                                chunk_count,
+                                                chunks_done: 0,
+                                                direction: TransferDirection::Upload,
+                                                status: TransferStatus::Transferring,
+                                                file_path: std::path::PathBuf::from(&file_path),
+                                                received_chunks_set: std::collections::HashSet::new(),
+                                                last_requested_chunk: None,
+                                            };
+                                            active_transfers.insert(transfer_id.clone(), transfer);
+
+                                            if let Ok(target) = PeerId::from_str(mid) {
+                                                let offer = StoaRequest::GroupFileOffer {
+                                                    group_id: group_id.clone(),
+                                                    transfer_id: transfer_id.clone(),
+                                                    file_name: file_name.clone(),
+                                                    file_size,
+                                                    checksum: checksum.clone(),
+                                                    chunk_count,
+                                                    sender_name: sender_name.clone(),
+                                                };
+                                                let encrypted_offer = maybe_encrypt_request(mid, offer);
+                                                if swarm.is_connected(&target) {
+                                                    swarm.behaviour_mut().messaging.send_request(&target, encrypted_offer);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                Err(e) => eprintln!("[Stoa Group] Failed to prepare file: {e}"),
+                            }
+                        }
+
+                        Some(NetworkCommand::LeaveGroup { group_id }) => {
+                            println!("[Stoa Group] Leaving group {group_id}");
+                            if let Some(group) = local_groups.iter().find(|g| g.id == group_id).cloned() {
+                                for mid in &group.members {
+                                    if *mid == our_peer_id_str { continue; }
+                                    if let Ok(target) = PeerId::from_str(mid) {
+                                        let req = StoaRequest::MemberLeft {
+                                            group_id: group_id.clone(),
+                                            peer_id: our_peer_id_str.clone(),
+                                        };
+                                        let encrypted_req = maybe_encrypt_request(mid, req);
+                                        if swarm.is_connected(&target) {
+                                            swarm.behaviour_mut().messaging.send_request(&target, encrypted_req);
+                                        }
+                                    }
+                                }
+                                let _ = groups::remove_group(&mut local_groups, &group_id);
+                            }
+                        }
+
+                        Some(NetworkCommand::RemoveGroupMember { group_id, peer_id: remove_pid }) => {
+                            println!("[Stoa Group] Admin removing {remove_pid} from {group_id}");
+                            if let Some(group) = local_groups.iter().find(|g| g.id == group_id).cloned() {
+                                if group.admin != our_peer_id_str {
+                                    eprintln!("[Stoa Group] Not admin, cannot remove member");
+                                    continue;
+                                }
+                                for mid in &group.members {
+                                    if *mid == our_peer_id_str { continue; }
+                                    if let Ok(target) = PeerId::from_str(mid) {
+                                        let req = StoaRequest::MemberRemoved {
+                                            group_id: group_id.clone(),
+                                            removed_peer_id: remove_pid.clone(),
+                                        };
+                                        let encrypted_req = maybe_encrypt_request(mid, req);
+                                        if swarm.is_connected(&target) {
+                                            swarm.behaviour_mut().messaging.send_request(&target, encrypted_req);
+                                        }
+                                    }
+                                }
+                                let _ = groups::remove_member(&mut local_groups, &group_id, &remove_pid);
+                            }
+                        }
+
+                        Some(NetworkCommand::DisbandGroup { group_id }) => {
+                            println!("[Stoa Group] Admin disbanding group {group_id}");
+                            if let Some(group) = local_groups.iter().find(|g| g.id == group_id).cloned() {
+                                if group.admin != our_peer_id_str {
+                                    eprintln!("[Stoa Group] Not admin, cannot disband");
+                                    continue;
+                                }
+                                for mid in &group.members {
+                                    if *mid == our_peer_id_str { continue; }
+                                    if let Ok(target) = PeerId::from_str(mid) {
+                                        let req = StoaRequest::GroupDisbanded {
+                                            group_id: group_id.clone(),
+                                        };
+                                        let encrypted_req = maybe_encrypt_request(mid, req);
+                                        if swarm.is_connected(&target) {
+                                            swarm.behaviour_mut().messaging.send_request(&target, encrypted_req);
+                                        }
+                                    }
+                                }
+                                let _ = groups::remove_group(&mut local_groups, &group_id);
                             }
                         }
 

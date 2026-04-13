@@ -1,5 +1,6 @@
 use crate::crypto;
 use crate::file_transfer::{self, ActiveTransfer, TransferDirection, TransferStatus};
+use crate::groups::{self, Group};
 use crate::messages::{self, StoredMessage};
 use crate::protocol::{StoaRequest, StoaResponse};
 use libp2p::identity::Keypair;
@@ -137,6 +138,8 @@ pub async fn handle_incoming_request(
     our_name: &str,
     active_transfers: &mut HashMap<String, ActiveTransfer>,
     our_keypair: &Keypair,
+    groups: &mut Vec<Group>,
+    our_peer_id: &str,
 ) {
     match request {
         StoaRequest::WhoAreYou => {
@@ -476,6 +479,8 @@ pub async fn handle_incoming_request(
                                 our_name,
                                 active_transfers,
                                 our_keypair,
+                                groups,
+                                our_peer_id,
                             ))
                             .await;
                         }
@@ -491,6 +496,260 @@ pub async fn handle_incoming_request(
                     eprintln!("[Stoa Crypto] Decryption failed from {pid}: {e}");
                 }
             }
+        }
+        // ─── Group Request Handlers ──────────────────────────────────────────
+        StoaRequest::GroupInvite {
+            group_id,
+            group_name,
+            members,
+            admin,
+            inviter_name,
+        } => {
+            let pid = peer.to_string();
+            println!("[Stoa Group] GroupInvite from {inviter_name}: '{group_name}' ({group_id})");
+
+            let group = Group {
+                id: group_id.clone(),
+                name: group_name.clone(),
+                members: members.clone(),
+                admin: admin.clone(),
+                created_at: chrono::Utc::now().timestamp(),
+            };
+
+            if let Err(e) = groups::add_group_from_invite(groups, group) {
+                eprintln!("[Stoa Group] Failed to save group: {e}");
+            }
+
+            // Notify frontend
+            #[derive(Serialize, Clone)]
+            struct GroupInviteEvent {
+                group_id: String,
+                group_name: String,
+                members: Vec<String>,
+                admin: String,
+                inviter_name: String,
+            }
+            let _ = app_handle.emit(
+                "group-invite",
+                &GroupInviteEvent {
+                    group_id,
+                    group_name,
+                    members,
+                    admin,
+                    inviter_name,
+                },
+            );
+
+            // Ack
+            let response = StoaResponse::MessageAck {
+                id: "group-invite-ack".into(),
+            };
+            let _ = swarm
+                .behaviour_mut()
+                .messaging
+                .send_response(channel, response);
+        }
+        StoaRequest::GroupMessage {
+            group_id,
+            id,
+            content,
+            timestamp,
+            sender_name,
+        } => {
+            let sender_id = peer.to_string();
+            println!("[Stoa Group] Message in '{group_id}' from {sender_name}: {content}");
+
+            // Check if we know this group; if not, it may be stale
+            let known = groups.iter().any(|g| g.id == group_id);
+            if !known {
+                println!("[Stoa Group] Unknown group {group_id} — ignoring");
+                let response = StoaResponse::MessageAck { id };
+                let _ = swarm
+                    .behaviour_mut()
+                    .messaging
+                    .send_response(channel, response);
+                return;
+            }
+
+            // Persist to group message store
+            let group_key = format!("group_{group_id}");
+            let msg = StoredMessage {
+                id: id.clone(),
+                sender_id: sender_id.clone(),
+                content: content.clone(),
+                timestamp,
+                delivered: true,
+            };
+            let _ = messages::save_message(&group_key, &msg);
+
+            // Notify frontend
+            #[derive(Serialize, Clone)]
+            struct GroupMessageEvent {
+                group_id: String,
+                id: String,
+                sender_id: String,
+                sender_name: String,
+                content: String,
+                timestamp: i64,
+            }
+            let _ = app_handle.emit(
+                "group-message",
+                &GroupMessageEvent {
+                    group_id: group_id.clone(),
+                    id: id.clone(),
+                    sender_id,
+                    sender_name,
+                    content,
+                    timestamp,
+                },
+            );
+
+            // Ack
+            let response = StoaResponse::GroupAck {
+                group_id,
+                message_id: id,
+            };
+            let _ = swarm
+                .behaviour_mut()
+                .messaging
+                .send_response(channel, response);
+        }
+        StoaRequest::GroupFileOffer {
+            group_id,
+            transfer_id,
+            file_name,
+            file_size,
+            checksum,
+            chunk_count,
+            sender_name,
+        } => {
+            let sender_id = peer.to_string();
+            println!(
+                "[Stoa Group] FileOffer in '{group_id}' from {sender_name}: {} ({} bytes)",
+                file_name, file_size
+            );
+
+            // Reuse the DM file offer logic — the file is pulled individually
+            let dest = file_transfer::received_dir(&sender_id).join(&file_name);
+            let mut transfer = ActiveTransfer {
+                transfer_id: transfer_id.clone(),
+                peer_id: sender_id.clone(),
+                file_name: file_name.clone(),
+                file_size,
+                checksum,
+                chunk_count,
+                chunks_done: 0,
+                direction: TransferDirection::Download,
+                status: TransferStatus::Transferring,
+                file_path: dest,
+                received_chunks_set: std::collections::HashSet::new(),
+                last_requested_chunk: None,
+            };
+
+            let response = StoaResponse::FileAccepted {
+                transfer_id: transfer_id.clone(),
+            };
+            let _ = swarm
+                .behaviour_mut()
+                .messaging
+                .send_response(channel, response);
+
+            // Notify frontend with group context
+            #[derive(Serialize, Clone)]
+            struct GroupFileEvent {
+                group_id: String,
+                transfer_id: String,
+                peer_id: String,
+                file_name: String,
+                file_size: u64,
+                direction: String,
+                chunk_count: u32,
+                sender_name: String,
+            }
+            let _ = app_handle.emit(
+                "group-file-transfer-started",
+                &GroupFileEvent {
+                    group_id,
+                    transfer_id: transfer_id.clone(),
+                    peer_id: sender_id.clone(),
+                    file_name,
+                    file_size,
+                    direction: "download".into(),
+                    chunk_count,
+                    sender_name,
+                },
+            );
+
+            if chunk_count == 0 {
+                transfer.status = TransferStatus::Complete;
+                if let Some(parent) = transfer.file_path.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                let _ = std::fs::write(&transfer.file_path, b"");
+                active_transfers.insert(transfer_id, transfer);
+            } else {
+                let mut window_max = chunk_count;
+                if window_max > file_transfer::MAX_WINDOW_SIZE {
+                    window_max = file_transfer::MAX_WINDOW_SIZE;
+                }
+                transfer.last_requested_chunk = Some(window_max - 1);
+                active_transfers.insert(transfer_id.clone(), transfer);
+
+                if let Ok(target) = PeerId::from_str(&sender_id) {
+                    for i in 0..window_max {
+                        let fetch_req = StoaRequest::FetchChunk {
+                            transfer_id: transfer_id.clone(),
+                            chunk_index: i,
+                        };
+                        swarm.behaviour_mut().messaging.send_request(&target, fetch_req);
+                    }
+                }
+            }
+        }
+        StoaRequest::MemberRemoved {
+            group_id,
+            removed_peer_id,
+        } => {
+            println!("[Stoa Group] MemberRemoved: {removed_peer_id} from {group_id}");
+            if removed_peer_id == our_peer_id {
+                // We were removed
+                let _ = groups::remove_group(groups, &group_id);
+                let _ = app_handle.emit("group-removed", &serde_json::json!({
+                    "group_id": group_id,
+                    "reason": "removed",
+                }));
+            } else {
+                let _ = groups::remove_member(groups, &group_id, &removed_peer_id);
+                let _ = app_handle.emit("group-member-update", &serde_json::json!({
+                    "group_id": group_id,
+                    "removed": removed_peer_id,
+                }));
+            }
+            let response = StoaResponse::MessageAck { id: "member-removed-ack".into() };
+            let _ = swarm.behaviour_mut().messaging.send_response(channel, response);
+        }
+        StoaRequest::MemberLeft {
+            group_id,
+            peer_id,
+        } => {
+            println!("[Stoa Group] MemberLeft: {peer_id} from {group_id}");
+            let _ = groups::remove_member(groups, &group_id, &peer_id);
+            let _ = app_handle.emit("group-member-update", &serde_json::json!({
+                "group_id": group_id,
+                "removed": peer_id,
+            }));
+            let response = StoaResponse::MessageAck { id: "member-left-ack".into() };
+            let _ = swarm.behaviour_mut().messaging.send_response(channel, response);
+        }
+        StoaRequest::GroupDisbanded { group_id } => {
+            println!("[Stoa Group] GroupDisbanded: {group_id}");
+            let _ = groups::remove_group(groups, &group_id);
+            let _ = app_handle.emit("group-removed", &serde_json::json!({
+                "group_id": group_id,
+                "reason": "disbanded",
+            }));
+            let response = StoaResponse::MessageAck { id: "disbanded-ack".into() };
+            let _ = swarm.behaviour_mut().messaging.send_response(channel, response);
         }
     }
 }
@@ -710,6 +969,12 @@ pub async fn handle_incoming_response(
                 }
                 Err(e) => eprintln!("[Stoa Crypto] ECDH failed: {e}"),
             }
+        }
+        StoaResponse::GroupAck {
+            group_id,
+            message_id,
+        } => {
+            println!("[Stoa Group] GroupAck for message {message_id} in {group_id}");
         }
     }
 }

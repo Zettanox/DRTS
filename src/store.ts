@@ -34,6 +34,7 @@ export interface Chat {
   name: string;
   participants: string[];
   messages: Message[];
+  admin?: string;
 }
 
 export interface StoredFile {
@@ -69,6 +70,15 @@ export interface ContactEntry {
 export interface ContactRequestEntry {
   fromPeerId: string;
   fromName: string;
+}
+
+/** Backend group data from Rust */
+export interface GroupEntry {
+  id: string;
+  name: string;
+  members: string[];
+  admin: string;
+  created_at: number;
 }
 
 // ─── Signals ──────────────────────────────────────────────────────────────────
@@ -127,8 +137,10 @@ export const [endboxes, setEndboxes] = createStore<Endbox[]>([
   },
 ]);
 
-// Chat messages keyed by peer ID
+// Chat messages keyed by peer ID (for DMs) or group_<id> (for groups)
 export const [chatMessages, setChatMessages] = createStore<Record<string, Message[]>>({});
+// Group messages keyed by group_<id>
+export const [groupMessages, setGroupMessages] = createStore<Record<string, Message[]>>({});
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -151,4 +163,16 @@ export function syncDMsFromContacts() {
     messages: [],
   }));
   setDMs(dmList);
+}
+
+/** Build group entries from backend data */
+export function syncGroupsFromBackend(backendGroups: GroupEntry[]) {
+  const groupList: Chat[] = backendGroups.map((g) => ({
+    id: `group_${g.id}`,
+    name: g.name,
+    participants: g.members,
+    messages: [],
+    admin: g.admin,
+  }));
+  setGroups(groupList);
 }

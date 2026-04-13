@@ -57,6 +57,38 @@ pub enum NetworkCommand {
     },
     /// Toggle LAN visibility (mDNS on/off)
     SetVisibility(bool),
+    // ─── Group Commands ──────────────────────────────────────────────────────
+    /// Create a new group and invite members
+    CreateGroup {
+        name: String,
+        member_ids: Vec<String>,
+    },
+    /// Send a message to all group members
+    SendGroupMessage {
+        group_id: String,
+        message_id: String,
+        content: String,
+        sender_name: String,
+    },
+    /// Send a file to all group members
+    SendGroupFile {
+        group_id: String,
+        file_path: String,
+        sender_name: String,
+    },
+    /// Leave a group
+    LeaveGroup {
+        group_id: String,
+    },
+    /// Admin: remove a member from a group
+    RemoveGroupMember {
+        group_id: String,
+        peer_id: String,
+    },
+    /// Admin: disband a group
+    DisbandGroup {
+        group_id: String,
+    },
     /// Shut down the network task
     Shutdown,
 }

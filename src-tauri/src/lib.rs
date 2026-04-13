@@ -1,6 +1,7 @@
 mod contacts;
 mod crypto;
 mod file_transfer;
+mod groups;
 mod identity;
 mod messages;
 mod network;
@@ -384,6 +385,123 @@ async fn resume_transfer(
     Ok(())
 }
 
+// ─── Group Commands ──────────────────────────────────────────────────────────
+
+#[tauri::command]
+async fn create_group(
+    name: String,
+    member_ids: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let tx = state.network_cmd_tx.lock().await;
+    if let Some(tx) = tx.as_ref() {
+        tx.send(NetworkCommand::CreateGroup { name, member_ids })
+            .await
+            .map_err(|e| format!("Failed to create group: {e}"))?;
+    }
+    Ok("ok".into())
+}
+
+#[tauri::command]
+async fn get_groups() -> Result<Vec<groups::Group>, String> {
+    groups::load_groups()
+}
+
+#[tauri::command]
+async fn send_group_message(
+    group_id: String,
+    content: String,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let message_id = uuid::Uuid::new_v4().to_string();
+    let sender_name = {
+        let info = state.identity_info.lock().await;
+        info.as_ref().map(|i| i.name.clone()).unwrap_or_default()
+    };
+
+    let tx = state.network_cmd_tx.lock().await;
+    if let Some(tx) = tx.as_ref() {
+        tx.send(NetworkCommand::SendGroupMessage {
+            group_id,
+            message_id: message_id.clone(),
+            content,
+            sender_name,
+        })
+        .await
+        .map_err(|e| format!("Failed to send group message: {e}"))?;
+    }
+    Ok(message_id)
+}
+
+#[tauri::command]
+async fn send_group_file(
+    group_id: String,
+    file_path: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let sender_name = {
+        let info = state.identity_info.lock().await;
+        info.as_ref().map(|i| i.name.clone()).unwrap_or_default()
+    };
+
+    let tx = state.network_cmd_tx.lock().await;
+    if let Some(tx) = tx.as_ref() {
+        tx.send(NetworkCommand::SendGroupFile {
+            group_id,
+            file_path,
+            sender_name,
+        })
+        .await
+        .map_err(|e| format!("Failed to send group file: {e}"))?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn get_group_history(
+    group_id: String,
+) -> Result<Vec<StoredMessage>, String> {
+    let group_key = format!("group_{group_id}");
+    messages::load_messages(&group_key)
+}
+
+#[tauri::command]
+async fn leave_group(
+    group_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let tx = state.network_cmd_tx.lock().await;
+    if let Some(tx) = tx.as_ref() {
+        let _ = tx.send(NetworkCommand::LeaveGroup { group_id }).await;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn remove_group_member(
+    group_id: String,
+    peer_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let tx = state.network_cmd_tx.lock().await;
+    if let Some(tx) = tx.as_ref() {
+        let _ = tx.send(NetworkCommand::RemoveGroupMember { group_id, peer_id }).await;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn disband_group(
+    group_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let tx = state.network_cmd_tx.lock().await;
+    if let Some(tx) = tx.as_ref() {
+        let _ = tx.send(NetworkCommand::DisbandGroup { group_id }).await;
+    }
+    Ok(())
+}
+
 // ─── App Entry ────────────────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -422,6 +540,14 @@ pub fn run() {
             send_file,
             pause_transfer,
             resume_transfer,
+            create_group,
+            get_groups,
+            send_group_message,
+            send_group_file,
+            get_group_history,
+            leave_group,
+            remove_group_member,
+            disband_group,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

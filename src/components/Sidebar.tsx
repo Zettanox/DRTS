@@ -1,10 +1,12 @@
 import { Component, createSignal, For, Show } from "solid-js";
 import { dms, groups, endboxes, nearbyPeers, contacts, activeLeftPane, setActiveLeftPane, lanVisible } from "../store";
-import { MessageSquare, FileText, Hash, Search, Radio, UserPlus } from "lucide-solid";
+import { MessageSquare, FileText, Hash, Search, Radio, UserPlus, Plus } from "lucide-solid";
 import { sendContactRequest } from "../tauri-bridge";
+import { CreateGroupModal } from "./CreateGroupModal";
 
 export const Sidebar: Component = () => {
   const [search, setSearch] = createSignal("");
+  const [showCreateGroup, setShowCreateGroup] = createSignal(false);
 
   const isActive = (type: string, id: string) =>
     activeLeftPane()?.type === type && activeLeftPane()?.id === id;
@@ -99,14 +101,21 @@ export const Sidebar: Component = () => {
 
         {/* Groups Section */}
         <div>
-          <h2 class="text-xs font-black text-stone-500 dark:text-stone-500 uppercase tracking-widest mb-3 px-2">
+          <h2 class="text-xs font-black text-stone-500 dark:text-stone-500 uppercase tracking-widest mb-3 px-2 flex items-center justify-between">
             Groups
+            <button
+              class="hover:bg-stone-200 dark:hover:bg-stone-800 p-1 rounded-md transition-colors text-stone-600"
+              title="Create Group"
+              onClick={() => setShowCreateGroup(true)}
+            >
+              <Plus size={14} />
+            </button>
           </h2>
           <div class="flex flex-col gap-1.5">
             <Show when={groups.length > 0} fallback={
               <p class="text-xs font-bold text-stone-400 dark:text-stone-600 px-2 italic">No groups yet</p>
             }>
-              <For each={groups.slice(0, 5)}>
+              <For each={groups}>
                 {(group) => (
                   <button
                     onClick={() => navigate('group', group.id)}
@@ -119,6 +128,7 @@ export const Sidebar: Component = () => {
                   >
                     <Hash size={16} />
                     <div class="flex-1 truncate text-sm">{group.name}</div>
+                    <div class="text-[10px] font-bold text-stone-400">{group.participants.length}</div>
                   </button>
                 )}
               </For>
@@ -197,6 +207,11 @@ export const Sidebar: Component = () => {
         </div>
 
       </div>
+
+      {/* Create Group Modal */}
+      <Show when={showCreateGroup()}>
+        <CreateGroupModal onClose={() => setShowCreateGroup(false)} />
+      </Show>
     </aside>
   );
 };
