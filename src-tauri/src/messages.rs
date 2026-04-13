@@ -1,6 +1,18 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+/// File metadata stored alongside a message.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StoredFileInfo {
+    pub transfer_id: String,
+    pub file_name: String,
+    pub file_size: u64,
+    pub direction: String,   // "upload" or "download"
+    pub status: String,      // "transferring", "complete", "failed"
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_path: Option<String>,
+}
+
 /// A persisted chat message.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoredMessage {
@@ -9,6 +21,8 @@ pub struct StoredMessage {
     pub content: String,
     pub timestamp: i64,
     pub delivered: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_info: Option<StoredFileInfo>,
 }
 
 fn messages_dir() -> Result<PathBuf, String> {

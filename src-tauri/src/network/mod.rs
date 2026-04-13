@@ -308,6 +308,7 @@ pub fn spawn_network(
                                     content: content.clone(),
                                     timestamp,
                                     delivered: false,
+                                    file_info: None,
                                 };
                                 let _ = messages::save_message(&peer_id, &msg);
 
@@ -386,6 +387,7 @@ pub fn spawn_network(
                                 file_path: std::path::PathBuf::from(file_path),
                                 received_chunks_set: std::collections::HashSet::new(),
                                 last_requested_chunk: None,
+                                group_id: None,
                             };
                             active_transfers.insert(transfer_id.clone(), transfer);
 
@@ -529,6 +531,7 @@ pub fn spawn_network(
                                 content: content.clone(),
                                 timestamp,
                                 delivered: false,
+                                file_info: None,
                             };
                             let _ = messages::save_message(&group_key, &msg);
 
@@ -603,6 +606,7 @@ pub fn spawn_network(
                                                 file_path: std::path::PathBuf::from(&file_path),
                                                 received_chunks_set: std::collections::HashSet::new(),
                                                 last_requested_chunk: None,
+                                                group_id: Some(group_id.clone()),
                                             };
                                             active_transfers.insert(transfer_id.clone(), transfer);
 

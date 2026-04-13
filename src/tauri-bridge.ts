@@ -43,12 +43,22 @@ export interface RustContact {
   trust_level: string;
 }
 
+export interface RustStoredFileInfo {
+  transfer_id: string;
+  file_name: string;
+  file_size: number;
+  direction: string;
+  status: string;
+  file_path?: string;
+}
+
 export interface RustStoredMessage {
   id: string;
   sender_id: string;
   content: string;
   timestamp: number;
   delivered: boolean;
+  file_info?: RustStoredFileInfo;
 }
 
 // ─── Identity Commands ────────────────────────────────────────────────────────
@@ -179,19 +189,34 @@ export async function sendMessage(
   return messageId;
 }
 
+/** Map a stored message from Rust to the frontend Message type. */
+function mapStoredMessage(m: RustStoredMessage): Message {
+  return {
+    id: m.id,
+    senderId: m.sender_id,
+    content: m.content,
+    timestamp: m.timestamp,
+    delivered: m.delivered,
+    fileInfo: m.file_info ? {
+      transferId: m.file_info.transfer_id,
+      fileName: m.file_info.file_name,
+      fileSize: m.file_info.file_size,
+      direction: m.file_info.direction as "upload" | "download",
+      progress: m.file_info.status === "complete" ? 1 : 0,
+      status: m.file_info.status as "transferring" | "paused" | "complete" | "failed",
+      chunkCount: 0,
+      filePath: m.file_info.file_path,
+    } : undefined,
+  };
+}
+
 export async function getChatHistory(peerId: string): Promise<void> {
   const msgs = await invoke<RustStoredMessage[]>("get_chat_history", {
     peerId,
   });
   setChatMessages((prev) => ({
     ...prev,
-    [peerId]: msgs.map((m) => ({
-      id: m.id,
-      senderId: m.sender_id,
-      content: m.content,
-      timestamp: m.timestamp,
-      delivered: m.delivered,
-    })),
+    [peerId]: msgs.map(mapStoredMessage),
   }));
 }
 
@@ -303,13 +328,7 @@ export async function getGroupHistory(groupId: string): Promise<void> {
   const groupKey = `group_${groupId}`;
   setGroupMessages((prev) => ({
     ...prev,
-    [groupKey]: msgs.map((m) => ({
-      id: m.id,
-      senderId: m.sender_id,
-      content: m.content,
-      timestamp: m.timestamp,
-      delivered: m.delivered,
-    })),
+    [groupKey]: msgs.map(mapStoredMessage),
   }));
 }
 
@@ -500,19 +519,21 @@ export async function setupNetworkListeners(): Promise<void> {
     transferPeerMap[transfer_id] = `__group__${group_id}`;
 
     const groupKey = `group_${group_id}`;
+    const isUpload = direction === "upload";
+
     const msg: Message = {
       id: `file-${transfer_id}`,
-      senderId: direction === "upload" ? "me" : peer_id,
-      content: `📎 ${file_name}`,
+      senderId: isUpload ? "me" : peer_id,
+      content: isUpload ? `📎 File offered: ${file_name}` : `📎 ${file_name}`,
       timestamp: Math.floor(Date.now() / 1000),
-      delivered: false,
+      delivered: isUpload,  // Uploads are "delivered" immediately since we don't track per-member progress
       fileInfo: {
         transferId: transfer_id,
         fileName: file_name,
         fileSize: file_size,
         direction: direction as "upload" | "download",
-        progress: 0,
-        status: "transferring",
+        progress: isUpload ? 1 : 0,  // Uploads show as complete immediately
+        status: isUpload ? "complete" : "transferring",
         chunkCount: chunk_count,
       },
     };

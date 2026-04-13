@@ -1,7 +1,9 @@
 import { Component, createSignal, createMemo, createEffect, For, Show, onMount } from "solid-js";
 import { dms, groups, contacts, identity, chatMessages, groupMessages, activeRightPane, setActiveRightPane, Message } from "../store";
 import { sendMessage as bridgeSendMessage, getChatHistory, sendFile, pauseFileTransfer, resumeFileTransfer, sendGroupMessage, getGroupHistory, sendGroupFile, leaveGroup, removeGroupMember, disbandGroup } from "../tauri-bridge";
-import { Send, Paperclip, Users, Shield, X, MapPin, Columns, Check, CheckCheck, Clock, FileIcon, Download, LogOut, UserMinus, Trash2, Hash } from "lucide-solid";
+import { Send, Paperclip, Users, Shield, X, MapPin, Columns, Check, CheckCheck, Clock, FileIcon, Download, LogOut, UserMinus, Trash2, Hash, Image as ImageIcon, ExternalLink } from "lucide-solid";
+import { convertFileSrc } from "@tauri-apps/api/core";
+import { openPath } from "@tauri-apps/plugin-opener";
 
 export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (props) => {
   const [inputText, setInputText] = createSignal("");
@@ -111,6 +113,21 @@ export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (prop
     return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
   };
 
+  const IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg', '.avif'];
+  const isImageFile = (fileName: string) => {
+    const lower = fileName.toLowerCase();
+    return IMAGE_EXTENSIONS.some(ext => lower.endsWith(ext));
+  };
+
+  const handleOpenFile = async (filePath?: string) => {
+    if (!filePath) return;
+    try {
+      await openPath(filePath);
+    } catch (e) {
+      console.error("Failed to open file:", e);
+    }
+  };
+
   return (
     <div class="h-full flex flex-col relative w-full overflow-hidden bg-transparent">
       {/* Header */}
@@ -190,58 +207,84 @@ export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (prop
                       <div class="text-[15px] leading-relaxed break-words">{message.content}</div>
                     }>
                       {(fi) => (
-                        <div class="flex items-center gap-3 min-w-[200px]">
-                          <div class={`w-10 h-10 rounded-md flex items-center justify-center shrink-0 ${
-                            isMe(message.senderId)
-                              ? "bg-primary-400/30"
-                              : "bg-stone-200 dark:bg-stone-700"
-                          }`}>
-                            <FileIcon size={20} />
-                          </div>
-                          <div class="flex-1 min-w-0">
-                            <div class="text-sm font-black truncate">{fi().fileName}</div>
-                            <div class={`text-[10px] font-bold flex items-center justify-between ${
-                              isMe(message.senderId) ? "text-primary-200" : "text-stone-500"
+                        <div>
+                          {/* Image Preview */}
+                          <Show when={fi().status === "complete" && fi().filePath && isImageFile(fi().fileName)}>
+                            <div
+                              class="mb-2 cursor-pointer rounded-lg overflow-hidden border border-stone-300 dark:border-stone-600 hover:opacity-90 transition-opacity"
+                              onClick={() => handleOpenFile(fi().filePath)}
+                            >
+                              <img
+                                src={convertFileSrc(fi().filePath!)}
+                                alt={fi().fileName}
+                                class="max-w-full max-h-64 object-contain bg-stone-100 dark:bg-stone-800"
+                                loading="lazy"
+                              />
+                            </div>
+                          </Show>
+                          {/* File info row */}
+                          <div
+                            class={`flex items-center gap-3 min-w-[200px] ${fi().status === 'complete' && fi().filePath ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}`}
+                            onClick={() => fi().status === 'complete' && fi().filePath && handleOpenFile(fi().filePath)}
+                          >
+                            <div class={`w-10 h-10 rounded-md flex items-center justify-center shrink-0 ${
+                              isMe(message.senderId)
+                                ? "bg-primary-400/30"
+                                : "bg-stone-200 dark:bg-stone-700"
                             }`}>
-                              <div>
-                                {formatFileSize(fi().fileSize)} · {fi().direction === "upload" ? "Sending" : "Receiving"}
-                                {fi().status === "complete" && " · Complete ✓"}
-                                {fi().status === "paused" && " · Paused"}
+                              {isImageFile(fi().fileName) ? <ImageIcon size={20} /> : <FileIcon size={20} />}
+                            </div>
+                            <div class="flex-1 min-w-0">
+                              <div class="text-sm font-black truncate flex items-center gap-1.5">
+                                {fi().fileName}
+                                <Show when={fi().status === 'complete' && fi().filePath}>
+                                  <ExternalLink size={12} class="opacity-50 shrink-0" />
+                                </Show>
                               </div>
+                              <div class={`text-[10px] font-bold flex items-center justify-between ${
+                                isMe(message.senderId) ? "text-primary-200" : "text-stone-500"
+                              }`}>
+                                <div>
+                                  {formatFileSize(fi().fileSize)} · {fi().direction === "upload" ? "Sent" : "Received"}
+                                  {fi().status === "complete" && " · Complete ✓"}
+                                  {fi().status === "paused" && " · Paused"}
+                                  {fi().status === "transferring" && " · Transferring…"}
+                                </div>
+                                <Show when={fi().status === "transferring" || fi().status === "paused"}>
+                                  <div class="flex gap-2">
+                                    <Show when={fi().status === "transferring"}>
+                                      <button 
+                                        onClick={(e) => { e.stopPropagation(); pauseFileTransfer(fi().transferId); }}
+                                        class="hover:text-stone-800 dark:hover:text-stone-200 transition-colors"
+                                        title="Pause Transfer"
+                                      >
+                                        ⏸️
+                                      </button>
+                                    </Show>
+                                    <Show when={fi().status === "paused"}>
+                                      <button 
+                                        onClick={(e) => { e.stopPropagation(); resumeFileTransfer(fi().transferId); }}
+                                        class="hover:text-stone-800 dark:hover:text-stone-200 transition-colors"
+                                        title="Resume Transfer"
+                                      >
+                                        ▶️
+                                      </button>
+                                    </Show>
+                                  </div>
+                                </Show>
+                              </div>
+                              {/* Progress bar */}
                               <Show when={fi().status === "transferring" || fi().status === "paused"}>
-                                <div class="flex gap-2">
-                                  <Show when={fi().status === "transferring"}>
-                                    <button 
-                                      onClick={() => pauseFileTransfer(fi().transferId)}
-                                      class="hover:text-stone-800 dark:hover:text-stone-200 transition-colors"
-                                      title="Pause Transfer"
-                                    >
-                                      ⏸️
-                                    </button>
-                                  </Show>
-                                  <Show when={fi().status === "paused"}>
-                                    <button 
-                                      onClick={() => resumeFileTransfer(fi().transferId)}
-                                      class="hover:text-stone-800 dark:hover:text-stone-200 transition-colors"
-                                      title="Resume Transfer"
-                                    >
-                                      ▶️
-                                    </button>
-                                  </Show>
+                                <div class={`w-full h-1.5 rounded-full mt-1.5 overflow-hidden ${
+                                  isMe(message.senderId) ? "bg-primary-400/30" : "bg-stone-300 dark:bg-stone-600"
+                                }`}>
+                                  <div
+                                    class={`h-full rounded-full transition-all duration-300 ${fi().status === "paused" ? "bg-amber-400" : "bg-emerald-400"}`}
+                                    style={{ width: `${Math.round(fi().progress * 100)}%` }}
+                                  />
                                 </div>
                               </Show>
                             </div>
-                            {/* Progress bar */}
-                            <Show when={fi().status === "transferring" || fi().status === "paused"}>
-                              <div class={`w-full h-1.5 rounded-full mt-1.5 overflow-hidden ${
-                                isMe(message.senderId) ? "bg-primary-400/30" : "bg-stone-300 dark:bg-stone-600"
-                              }`}>
-                                <div
-                                  class={`h-full rounded-full transition-all duration-300 ${fi().status === "paused" ? "bg-amber-400" : "bg-emerald-400"}`}
-                                  style={{ width: `${Math.round(fi().progress * 100)}%` }}
-                                />
-                              </div>
-                            </Show>
                           </div>
                         </div>
                       )}

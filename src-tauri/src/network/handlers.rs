@@ -198,6 +198,7 @@ pub async fn handle_incoming_request(
                 content: content.clone(),
                 timestamp,
                 delivered: true,
+                file_info: None,
             };
             let _ = messages::save_message(&sender_id, &msg);
 
@@ -258,6 +259,7 @@ pub async fn handle_incoming_request(
                 file_path: dest,
                 received_chunks_set: std::collections::HashSet::new(),
                 last_requested_chunk: None,
+                group_id: None,
             };
             
             // Accept the offer
@@ -394,6 +396,29 @@ pub async fn handle_incoming_request(
                                 transfer.file_name, transfer.chunk_count
                             );
 
+                            // Persist file message — use group key if this is a group transfer
+                            let persist_key = if let Some(ref gid) = transfer.group_id {
+                                format!("group_{}", gid)
+                            } else {
+                                transfer.peer_id.clone()
+                            };
+                            let file_msg = messages::StoredMessage {
+                                id: format!("file-{}", transfer_id),
+                                sender_id: "me".into(),
+                                content: format!("📎 {}", transfer.file_name),
+                                timestamp: chrono::Utc::now().timestamp(),
+                                delivered: true,
+                                file_info: Some(messages::StoredFileInfo {
+                                    transfer_id: transfer_id.clone(),
+                                    file_name: transfer.file_name.clone(),
+                                    file_size: transfer.file_size,
+                                    direction: "upload".into(),
+                                    status: "complete".into(),
+                                    file_path: Some(transfer.file_path.to_string_lossy().to_string()),
+                                }),
+                            };
+                            let _ = messages::save_message(&persist_key, &file_msg);
+
                             #[derive(Serialize, Clone)]
                             struct CompleteEvent {
                                 transfer_id: String,
@@ -413,8 +438,6 @@ pub async fn handle_incoming_request(
                                 },
                             );
                             
-                            // DO NOT remove active_transfers yet, because the receiver might retry fetching
-                            // the last chunk if the response was dropped. But let's remove it to clean up.
                             active_transfers.remove(&transfer_id);
                         }
                     } else {
@@ -579,6 +602,7 @@ pub async fn handle_incoming_request(
                 content: content.clone(),
                 timestamp,
                 delivered: true,
+                file_info: None,
             };
             let _ = messages::save_message(&group_key, &msg);
 
@@ -644,6 +668,7 @@ pub async fn handle_incoming_request(
                 file_path: dest,
                 received_chunks_set: std::collections::HashSet::new(),
                 last_requested_chunk: None,
+                group_id: Some(group_id.clone()),
             };
 
             let response = StoaResponse::FileAccepted {
@@ -905,6 +930,7 @@ pub async fn handle_incoming_response(
                     let file_name = transfer.file_name.clone();
                     let file_size = transfer.file_size;
                     let transfer_id_clone = transfer_id.clone();
+                    let transfer_group_id = transfer.group_id.clone();
                     
                     println!("[Stoa File] All chunks received for {}. Verifying...", file_name);
                     
@@ -913,6 +939,30 @@ pub async fn handle_incoming_response(
                         match file_transfer::verify_file_off_thread(path.clone(), expected_checksum).await {
                             Ok(true) => {
                                 println!("[Stoa File] Transfer complete and verified: {} -> {:?}", file_name, path);
+
+                                // Persist file message — use group key if this is a group transfer
+                                let persist_key = if let Some(ref gid) = transfer_group_id {
+                                    format!("group_{}", gid)
+                                } else {
+                                    sender_id.clone()
+                                };
+                                let file_msg = messages::StoredMessage {
+                                    id: format!("file-{}", transfer_id_clone),
+                                    sender_id: sender_id.clone(),
+                                    content: format!("📎 {}", file_name),
+                                    timestamp: chrono::Utc::now().timestamp(),
+                                    delivered: true,
+                                    file_info: Some(messages::StoredFileInfo {
+                                        transfer_id: transfer_id_clone.clone(),
+                                        file_name: file_name.clone(),
+                                        file_size,
+                                        direction: "download".into(),
+                                        status: "complete".into(),
+                                        file_path: Some(path.to_string_lossy().to_string()),
+                                    }),
+                                };
+                                let _ = messages::save_message(&persist_key, &file_msg);
+
                                 let _ = app_handle_clone.emit(
                                     "file-transfer-complete",
                                     &serde_json::json!({

@@ -48,6 +48,8 @@ pub struct ActiveTransfer {
     pub received_chunks_set: HashSet<u32>,
     /// For pipelining logic
     pub last_requested_chunk: Option<u32>,
+    /// If set, this transfer belongs to a group
+    pub group_id: Option<String>,
 }
 
 /// Prepares a file for transfer by calculating its checksum without freezing the main thread.
