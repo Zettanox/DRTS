@@ -16,6 +16,7 @@ use tauri::{AppHandle, Emitter};
 use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinHandle;
 
+use crate::crypto;
 use crate::file_transfer::{self, ActiveTransfer, TransferDirection, TransferStatus};
 use crate::messages::{self, StoredMessage};
 use types::PendingMessage;
@@ -137,6 +138,23 @@ pub fn spawn_network(
                                 &app_handle,
                                 &mut pending_messages,
                             ).await;
+
+                            // Auto-initiate E2E key exchange for contacts without a session
+                            let pid = connected_peer.to_string();
+                            let cts = contacts.lock().await;
+                            let is_contact = cts.iter().any(|c| c.peer_id == pid);
+                            drop(cts);
+                            if is_contact && !crypto::has_session(&pid) {
+                                if let Ok(our_pk_hex) = crypto::our_x25519_public_key_hex(&keypair) {
+                                    println!("[Stoa Crypto] Initiating key exchange with {pid}");
+                                    swarm.behaviour_mut().messaging.send_request(
+                                        &connected_peer,
+                                        StoaRequest::KeyExchange {
+                                            x25519_public_key_hex: our_pk_hex,
+                                        },
+                                    );
+                                }
+                            }
                         }
 
                         SwarmEvent::ConnectionClosed { peer_id: disconnected_peer, .. } => {
@@ -163,6 +181,7 @@ pub fn spawn_network(
                                         &mut swarm,
                                         &our_name,
                                         &mut active_transfers,
+                                        &keypair,
                                     ).await;
                                 }
                                 request_response::Message::Response {
@@ -178,6 +197,7 @@ pub fn spawn_network(
                                         &peers_clone,
                                         &mut active_transfers,
                                         &mut swarm,
+                                        &keypair,
                                     ).await;
                                 }
                             }
@@ -287,7 +307,8 @@ pub fn spawn_network(
                                 let _ = messages::save_message(&peer_id, &msg);
 
                                 if swarm.is_connected(&target) {
-                                    swarm.behaviour_mut().messaging.send_request(&target, req);
+                                    let encrypted_req = maybe_encrypt_request(&peer_id, req);
+                                    swarm.behaviour_mut().messaging.send_request(&target, encrypted_req);
                                 } else {
                                     handlers::dial_peer(&peers_clone, &peer_id, &mut swarm).await;
                                     pending_messages.push(PendingMessage {
@@ -374,7 +395,8 @@ pub fn spawn_network(
 
                             if let Ok(target) = PeerId::from_str(&peer_id) {
                                 if swarm.is_connected(&target) {
-                                    swarm.behaviour_mut().messaging.send_request(&target, offer);
+                                    let encrypted_offer = maybe_encrypt_request(&peer_id, offer);
+                                    swarm.behaviour_mut().messaging.send_request(&target, encrypted_offer);
                                 } else {
                                     handlers::dial_peer(&peers_clone, &peer_id, &mut swarm).await;
                                     pending_messages.push(PendingMessage {
@@ -465,4 +487,36 @@ pub fn spawn_network(
     });
 
     Ok((cmd_tx, nearby_peers, handle))
+}
+
+/// Encrypt a request for a peer if a session exists, otherwise return it as-is.
+/// This is the single point where outgoing messages get encrypted.
+fn maybe_encrypt_request(peer_id: &str, req: StoaRequest) -> StoaRequest {
+    if !crypto::has_session(peer_id) {
+        return req;
+    }
+
+    let plaintext = match serde_json::to_vec(&req) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("[Stoa Crypto] Failed to serialize for encryption: {e}");
+            return req;
+        }
+    };
+
+    match crypto::encrypt_for_peer(peer_id, &plaintext) {
+        Ok(Some((ciphertext_b64, nonce_b64))) => {
+            println!("[Stoa Crypto] Encrypting message for {peer_id}");
+            StoaRequest::EncryptedEnvelope {
+                id: uuid::Uuid::new_v4().to_string(),
+                ciphertext_b64,
+                nonce_b64,
+            }
+        }
+        Ok(None) => req,
+        Err(e) => {
+            eprintln!("[Stoa Crypto] Encryption failed, sending plaintext: {e}");
+            req
+        }
+    }
 }

@@ -1,4 +1,5 @@
 mod contacts;
+mod crypto;
 mod file_transfer;
 mod identity;
 mod messages;

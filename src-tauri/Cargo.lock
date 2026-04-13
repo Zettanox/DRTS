@@ -4891,8 +4891,10 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 name = "stoa"
 version = "0.1.0"
 dependencies = [
+ "aes-gcm",
  "base64 0.22.1",
  "chrono",
+ "curve25519-dalek",
  "dirs",
  "futures",
  "hex",
@@ -4907,6 +4909,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tokio",
  "uuid",
+ "x25519-dalek",
 ]
 
 [[package]]

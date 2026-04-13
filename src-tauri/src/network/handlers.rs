@@ -1,6 +1,8 @@
+use crate::crypto;
 use crate::file_transfer::{self, ActiveTransfer, TransferDirection, TransferStatus};
 use crate::messages::{self, StoredMessage};
 use crate::protocol::{StoaRequest, StoaResponse};
+use libp2p::identity::Keypair;
 use libp2p::{request_response, PeerId, Swarm};
 use serde::Serialize;
 use std::collections::HashMap;
@@ -134,6 +136,7 @@ pub async fn handle_incoming_request(
     swarm: &mut Swarm<StoaBehaviour>,
     our_name: &str,
     active_transfers: &mut HashMap<String, ActiveTransfer>,
+    our_keypair: &Keypair,
 ) {
     match request {
         StoaRequest::WhoAreYou => {
@@ -336,10 +339,22 @@ pub async fn handle_incoming_request(
             if let Some(transfer) = active_transfers.get_mut(&transfer_id) {
                 if transfer.status == TransferStatus::Transferring {
                     if let Ok(data_b64) = file_transfer::read_chunk(&transfer.file_path, chunk_index) {
+                        // Encrypt chunk data if we have a session with the peer
+                        let peer_id_str = transfer.peer_id.clone();
+                        let (final_data, final_nonce) = if crypto::has_session(&peer_id_str) {
+                            // Decode the b64 chunk, encrypt raw bytes, re-encode
+                            match crypto::encrypt_for_peer(&peer_id_str, data_b64.as_bytes()) {
+                                Ok(Some((ct, nonce))) => (ct, Some(nonce)),
+                                _ => (data_b64, None),
+                            }
+                        } else {
+                            (data_b64, None)
+                        };
                         let response = StoaResponse::FileChunk {
                             transfer_id: transfer_id.clone(),
                             chunk_index,
-                            data_b64,
+                            data_b64: final_data,
+                            nonce_b64: final_nonce,
                         };
                         let _ = swarm
                             .behaviour_mut()
@@ -405,6 +420,78 @@ pub async fn handle_incoming_request(
                 }
             }
         }
+        StoaRequest::KeyExchange {
+            x25519_public_key_hex,
+        } => {
+            let pid = peer.to_string();
+            println!("[Stoa Crypto] KeyExchange from {pid}");
+
+            match crypto::compute_shared_secret(our_keypair, &x25519_public_key_hex) {
+                Ok(shared_secret) => {
+                    if let Err(e) = crypto::save_session(&pid, &shared_secret) {
+                        eprintln!("[Stoa Crypto] Failed to save session: {e}");
+                    } else {
+                        println!("[Stoa Crypto] Session established with {pid}");
+                    }
+
+                    // Respond with our X25519 public key
+                    match crypto::our_x25519_public_key_hex(our_keypair) {
+                        Ok(our_pk_hex) => {
+                            let response = StoaResponse::KeyExchangeAck {
+                                x25519_public_key_hex: our_pk_hex,
+                            };
+                            let _ = swarm
+                                .behaviour_mut()
+                                .messaging
+                                .send_response(channel, response);
+                        }
+                        Err(e) => eprintln!("[Stoa Crypto] Failed to derive our X25519 key: {e}"),
+                    }
+                }
+                Err(e) => eprintln!("[Stoa Crypto] ECDH failed: {e}"),
+            }
+        }
+        StoaRequest::EncryptedEnvelope {
+            id: _,
+            ciphertext_b64,
+            nonce_b64,
+        } => {
+            let pid = peer.to_string();
+            match crypto::decrypt_from_peer(&pid, &ciphertext_b64, &nonce_b64) {
+                Ok(Some(plaintext)) => {
+                    // Deserialize the inner message and dispatch
+                    match serde_json::from_slice::<StoaRequest>(&plaintext) {
+                        Ok(inner_request) => {
+                            println!("[Stoa Crypto] Decrypted envelope from {pid}");
+                            // Recursively handle the decrypted inner request.
+                            // We create a dummy channel situation — the inner request
+                            // should use the original channel for its response.
+                            // For simplicity, we use Box::pin for the recursive call.
+                            Box::pin(handle_incoming_request(
+                                app_handle,
+                                peer,
+                                inner_request,
+                                channel,
+                                swarm,
+                                our_name,
+                                active_transfers,
+                                our_keypair,
+                            ))
+                            .await;
+                        }
+                        Err(e) => {
+                            eprintln!("[Stoa Crypto] Failed to deserialize decrypted payload: {e}");
+                        }
+                    }
+                }
+                Ok(None) => {
+                    eprintln!("[Stoa Crypto] No session for {pid} — cannot decrypt envelope");
+                }
+                Err(e) => {
+                    eprintln!("[Stoa Crypto] Decryption failed from {pid}: {e}");
+                }
+            }
+        }
     }
 }
 
@@ -419,6 +506,7 @@ pub async fn handle_incoming_response(
     peers_map: &NearbyPeersMap,
     active_transfers: &mut HashMap<String, ActiveTransfer>,
     swarm: &mut Swarm<StoaBehaviour>,
+    our_keypair: &Keypair,
 ) {
     match response {
         StoaResponse::PeerIdentity { name } => {
@@ -496,11 +584,33 @@ pub async fn handle_incoming_response(
             transfer_id,
             chunk_index,
             data_b64,
+            nonce_b64: encrypted_nonce,
         } => {
             let sender_id = peer.to_string();
 
             if let Some(transfer) = active_transfers.get_mut(&transfer_id) {
-                if let Err(e) = file_transfer::write_chunk(&transfer.file_path, chunk_index, &data_b64) {
+                // Decrypt chunk data if it was encrypted
+                let actual_data_b64 = if let Some(ref nonce) = encrypted_nonce {
+                    match crypto::decrypt_from_peer(&sender_id, &data_b64, nonce) {
+                        Ok(Some(decrypted_bytes)) => {
+                            // decrypted_bytes are the original b64 string bytes
+                            String::from_utf8(decrypted_bytes).unwrap_or_else(|_| data_b64.clone())
+                        }
+                        Ok(None) => {
+                            eprintln!("[Stoa Crypto] No session to decrypt chunk from {sender_id}");
+                            data_b64.clone()
+                        }
+                        Err(e) => {
+                            eprintln!("[Stoa Crypto] Chunk decryption failed: {e}");
+                            transfer.status = TransferStatus::Failed;
+                            return;
+                        }
+                    }
+                } else {
+                    data_b64
+                };
+
+                if let Err(e) = file_transfer::write_chunk(&transfer.file_path, chunk_index, &actual_data_b64) {
                     eprintln!("[Stoa File] Failed to write chunk: {e}");
                     transfer.status = TransferStatus::Failed;
                     return;
@@ -578,6 +688,27 @@ pub async fn handle_incoming_response(
                         }
                     }
                 }
+            }
+        }
+        StoaResponse::KeyExchangeAck {
+            x25519_public_key_hex,
+        } => {
+            let pid = peer.to_string();
+            println!("[Stoa Crypto] KeyExchangeAck from {pid}");
+
+            match crypto::compute_shared_secret(our_keypair, &x25519_public_key_hex) {
+                Ok(shared_secret) => {
+                    if let Err(e) = crypto::save_session(&pid, &shared_secret) {
+                        eprintln!("[Stoa Crypto] Failed to save session: {e}");
+                    } else {
+                        println!("[Stoa Crypto] Session established with {pid} (via ack)");
+                        let _ = app_handle.emit(
+                            "e2e-session-established",
+                            &serde_json::json!({ "peer_id": pid }),
+                        );
+                    }
+                }
+                Err(e) => eprintln!("[Stoa Crypto] ECDH failed: {e}"),
             }
         }
     }

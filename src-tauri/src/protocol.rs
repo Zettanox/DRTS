@@ -32,6 +32,17 @@ pub enum StoaRequest {
         transfer_id: String,
         chunk_index: u32,
     },
+    /// E2E: Send our X25519 public key for ECDH key exchange.
+    KeyExchange {
+        x25519_public_key_hex: String,
+    },
+    /// E2E: An encrypted envelope wrapping any message type.
+    /// The decrypted payload is JSON that identifies its inner type.
+    EncryptedEnvelope {
+        id: String,
+        ciphertext_b64: String,
+        nonce_b64: String,
+    },
 }
 
 /// All response types for the `/stoa/msg/1.0.0` protocol.
@@ -55,5 +66,12 @@ pub enum StoaResponse {
         transfer_id: String,
         chunk_index: u32,
         data_b64: String,
+        /// Optional nonce for E2E encrypted chunk data.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        nonce_b64: Option<String>,
+    },
+    /// E2E: Acknowledge key exchange with our X25519 public key.
+    KeyExchangeAck {
+        x25519_public_key_hex: String,
     },
 }
