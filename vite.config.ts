@@ -30,4 +30,22 @@ export default defineConfig(async () => ({
       ignored: ["**/src-tauri/**"],
     },
   },
+
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          // Bundle all codemirror packages into a single lazy chunk
+          if (id.includes("codemirror") || id.includes("@codemirror")) {
+            return "codemirror";
+          }
+          // Keep lucide as its own chunk (large icon library)
+          if (id.includes("lucide-solid")) {
+            return "lucide";
+          }
+        },
+      },
+    },
+  },
 }));
+

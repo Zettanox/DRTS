@@ -19,23 +19,288 @@ import {
   exportSpaceFile,
 } from "../tauri-bridge";
 import type { SpaceFile } from "../store";
+import { theme } from "../store";
 import { FilePlus, Upload, Trash2, FileText, AlertTriangle, Download } from "lucide-solid";
 
+// ─── CodeMirror Imports ───────────────────────────────────────────────────────
+import { EditorView, basicSetup } from "codemirror";
+import { EditorState, Compartment } from "@codemirror/state";
+import { oneDark } from "@codemirror/theme-one-dark";
+import { markdown } from "@codemirror/lang-markdown";
+import { javascript } from "@codemirror/lang-javascript";
+import { python } from "@codemirror/lang-python";
+import { rust } from "@codemirror/lang-rust";
+import { json } from "@codemirror/lang-json";
+import { css } from "@codemirror/lang-css";
+import { html } from "@codemirror/lang-html";
+import { cpp } from "@codemirror/lang-cpp";
+import { java } from "@codemirror/lang-java";
+
+// ─── Language Detection ───────────────────────────────────────────────────────
+function getLanguageExtension(fileName: string) {
+  const ext = fileName.split(".").pop()?.toLowerCase() ?? "";
+  switch (ext) {
+    case "md":
+    case "markdown":
+      return markdown();
+    case "js":
+    case "mjs":
+    case "cjs":
+      return javascript();
+    case "jsx":
+      return javascript({ jsx: true });
+    case "ts":
+    case "mts":
+      return javascript({ typescript: true });
+    case "tsx":
+      return javascript({ jsx: true, typescript: true });
+    case "py":
+      return python();
+    case "rs":
+      return rust();
+    case "json":
+    case "jsonc":
+      return json();
+    case "css":
+    case "scss":
+    case "less":
+      return css();
+    case "html":
+    case "htm":
+    case "svg":
+      return html();
+    case "c":
+    case "cpp":
+    case "cc":
+    case "h":
+    case "hpp":
+      return cpp();
+    case "java":
+    case "kt":
+      return java();
+    default:
+      return []; // plain text — still gets basicSetup features
+  }
+}
+
+// ─── Custom Light Theme ────────────────────────────────────────────────────────
+// Matches the app's warm stone palette so the editor feels native
+const stoaLightTheme = EditorView.theme({
+  "&": {
+    backgroundColor: "transparent",
+    color: "#1c1917",       // stone-900
+    fontSize: "13.5px",
+    fontFamily: "'JetBrains Mono', 'Fira Mono', 'Cascadia Code', 'Consolas', monospace",
+    height: "100%",
+  },
+  ".cm-scroller": {
+    fontFamily: "inherit",
+    lineHeight: "1.75",
+    overflow: "auto",
+    padding: "12px 0",
+  },
+  ".cm-content": {
+    padding: "0 24px",
+    caretColor: "#eb6534",  // primary-500
+  },
+  ".cm-cursor": {
+    borderLeftColor: "#eb6534",
+    borderLeftWidth: "2px",
+  },
+  ".cm-activeLine": {
+    backgroundColor: "rgba(235,101,52,0.06)",
+  },
+  ".cm-activeLineGutter": {
+    backgroundColor: "rgba(235,101,52,0.06)",
+  },
+  ".cm-selectionBackground, ::selection": {
+    backgroundColor: "rgba(235,101,52,0.18) !important",
+  },
+  ".cm-gutters": {
+    backgroundColor: "transparent",
+    border: "none",
+    color: "#a8a29e",        // stone-400
+    paddingRight: "8px",
+  },
+  ".cm-lineNumbers .cm-gutterElement": {
+    minWidth: "36px",
+    textAlign: "right",
+  },
+  ".cm-foldGutter": { width: "16px" },
+  ".cm-tooltip": {
+    backgroundColor: "#f5f5f4",
+    border: "1px solid #d6d3d1",
+    borderRadius: "6px",
+  },
+  ".cm-searchMatch": {
+    backgroundColor: "rgba(235,101,52,0.25)",
+    outline: "1px solid #eb6534",
+  },
+  ".cm-searchMatch.cm-searchMatch-selected": {
+    backgroundColor: "rgba(235,101,52,0.45)",
+  },
+}, { dark: false });
+
+// ─── Custom Dark Theme ─────────────────────────────────────────────────────────
+const stoaDarkTheme = EditorView.theme({
+  "&": {
+    backgroundColor: "transparent",
+    color: "#d6d3d1",        // stone-300
+    fontSize: "13.5px",
+    fontFamily: "'JetBrains Mono', 'Fira Mono', 'Cascadia Code', 'Consolas', monospace",
+    height: "100%",
+  },
+  ".cm-scroller": {
+    fontFamily: "inherit",
+    lineHeight: "1.75",
+    overflow: "auto",
+    padding: "12px 0",
+  },
+  ".cm-content": {
+    padding: "0 24px",
+    caretColor: "#f48c66",   // primary-400
+  },
+  ".cm-cursor": {
+    borderLeftColor: "#f48c66",
+    borderLeftWidth: "2px",
+  },
+  ".cm-activeLine": {
+    backgroundColor: "rgba(244,140,102,0.08)",
+  },
+  ".cm-activeLineGutter": {
+    backgroundColor: "rgba(244,140,102,0.08)",
+  },
+  ".cm-selectionBackground, ::selection": {
+    backgroundColor: "rgba(244,140,102,0.2) !important",
+  },
+  ".cm-gutters": {
+    backgroundColor: "transparent",
+    border: "none",
+    color: "#57534e",        // stone-600
+    paddingRight: "8px",
+  },
+  ".cm-lineNumbers .cm-gutterElement": {
+    minWidth: "36px",
+    textAlign: "right",
+  },
+  ".cm-foldGutter": { width: "16px" },
+  ".cm-tooltip": {
+    backgroundColor: "#292524",
+    border: "1px solid #44403c",
+    borderRadius: "6px",
+    color: "#d6d3d1",
+  },
+  ".cm-searchMatch": {
+    backgroundColor: "rgba(244,140,102,0.25)",
+    outline: "1px solid #f48c66",
+  },
+  ".cm-searchMatch.cm-searchMatch-selected": {
+    backgroundColor: "rgba(244,140,102,0.45)",
+  },
+}, { dark: true });
+
+// ─── Component ────────────────────────────────────────────────────────────────
 export const SpaceEditor: Component<{ groupId: string }> = (props) => {
-  let textareaRef!: HTMLTextAreaElement;
+  let editorContainerRef!: HTMLDivElement;
+  let editorView: EditorView | null = null;
+
+  // Compartments allow reconfiguring parts of the editor without rebuilding
+  const themeCompartment = new Compartment();
+  const langCompartment = new Compartment();
 
   const [files, setFiles] = createSignal<SpaceFile[]>([]);
   const [activeFileId, setActiveFileId] = createSignal<string | null>(null);
-  const [content, setContent] = createSignal("");
   const [synced, setSynced] = createSignal(true);
   const [newFileName, setNewFileName] = createSignal("");
   const [showNewInput, setShowNewInput] = createSignal(false);
   const [errorMsg, setErrorMsg] = createSignal<string | null>(null);
 
-  let prevValue = "";
   let selectNewest = false;
+  // When true, the next editor change is from us pushing remote content —
+  // we should NOT broadcast it back as a local edit.
+  let suppressBroadcast = false;
 
-  // ─── Data Loading ───────────────────────────────────────────────────────────
+  // ─── Editor Setup / Teardown ─────────────────────────────────────────────
+
+  const createEditor = (initialContent: string, fileName: string) => {
+    if (editorView) {
+      editorView.destroy();
+      editorView = null;
+    }
+
+    const isDark = theme() === "dark";
+    const themeExt = isDark
+      ? [stoaDarkTheme, oneDark]
+      : [stoaLightTheme];
+
+    const state = EditorState.create({
+      doc: initialContent,
+      extensions: [
+        basicSetup,
+        langCompartment.of(getLanguageExtension(fileName)),
+        themeCompartment.of(themeExt),
+        EditorView.updateListener.of((update) => {
+          if (!update.docChanged || suppressBroadcast) return;
+          // Only process changes that originated from user interaction
+          for (const txn of update.transactions) {
+            if (!txn.docChanged) continue;
+            txn.changes.iterChanges(async (fromA, toA, _fromB, _toB, inserted) => {
+              const fid = activeFileId();
+              if (!fid) return;
+              const deleteCount = toA - fromA;
+              const insertText = inserted.toString();
+              if (deleteCount === 0 && insertText.length === 0) return;
+              setSynced(false);
+              await editSpaceFile(props.groupId, fid, fromA, deleteCount, insertText);
+              setSynced(true);
+            });
+          }
+        }),
+        EditorView.lineWrapping,
+      ],
+    });
+
+    editorView = new EditorView({
+      state,
+      parent: editorContainerRef,
+    });
+  };
+
+  // Push new content into an existing editor without destroying it
+  // (preserves cursor position as much as possible)
+  const setEditorContent = (newContent: string) => {
+    if (!editorView) return;
+    const current = editorView.state.doc.toString();
+    if (current === newContent) return; // nothing changed
+
+    suppressBroadcast = true;
+    editorView.dispatch({
+      changes: {
+        from: 0,
+        to: editorView.state.doc.length,
+        insert: newContent,
+      },
+    });
+    suppressBroadcast = false;
+  };
+
+  const switchEditorLanguage = (fileName: string) => {
+    if (!editorView) return;
+    editorView.dispatch({
+      effects: langCompartment.reconfigure(getLanguageExtension(fileName)),
+    });
+  };
+
+  const switchEditorTheme = (isDark: boolean) => {
+    if (!editorView) return;
+    editorView.dispatch({
+      effects: themeCompartment.reconfigure(
+        isDark ? [stoaDarkTheme, oneDark] : [stoaLightTheme]
+      ),
+    });
+  };
+
+  // ─── Data Loading ─────────────────────────────────────────────────────────
 
   const loadFiles = async () => {
     try {
@@ -44,12 +309,10 @@ export const SpaceEditor: Component<{ groupId: string }> = (props) => {
       setFiles(visible);
 
       if (selectNewest && visible.length > 0) {
-        // Auto-select the newest file (last by timestamp)
         const newest = visible.reduce((a, b) => a.timestamp > b.timestamp ? a : b);
         setActiveFileId(newest.id);
         selectNewest = false;
       } else {
-        // If active file was deleted or doesn't exist, select first available
         const currentId = activeFileId();
         if (currentId && !visible.find((f) => f.id === currentId)) {
           setActiveFileId(visible.length > 0 ? visible[0].id : null);
@@ -65,27 +328,21 @@ export const SpaceEditor: Component<{ groupId: string }> = (props) => {
   const loadFileContent = async (fileId: string) => {
     try {
       const text = await getSpaceFileText(props.groupId, fileId);
-      // Preserve cursor if focused
-      let selStart = 0, selEnd = 0, focused = false;
-      if (textareaRef && document.activeElement === textareaRef) {
-        focused = true;
-        selStart = textareaRef.selectionStart;
-        selEnd = textareaRef.selectionEnd;
-      }
+      const fileName = files().find((f) => f.id === fileId)?.name ?? "";
 
-      setContent(text);
-      prevValue = text;
-
-      if (focused && textareaRef) {
-        textareaRef.selectionStart = selStart;
-        textareaRef.selectionEnd = selEnd;
+      if (!editorView) {
+        // First load or after a destroy — build fresh
+        createEditor(text, fileName);
+      } else {
+        setEditorContent(text);
+        switchEditorLanguage(fileName);
       }
     } catch (e) {
       console.error("Failed to load file text", e);
     }
   };
 
-  // ─── Lifecycle ──────────────────────────────────────────────────────────────
+  // ─── Lifecycle ───────────────────────────────────────────────────────────
 
   onMount(async () => {
     await loadFiles();
@@ -98,7 +355,10 @@ export const SpaceEditor: Component<{ groupId: string }> = (props) => {
           setSynced(false);
           await loadFiles();
           const fid = activeFileId();
-          if (fid) await loadFileContent(fid);
+          if (fid) {
+            const text = await getSpaceFileText(props.groupId, fid);
+            setEditorContent(text);
+          }
           setTimeout(() => setSynced(true), 500);
         }
       }
@@ -106,61 +366,28 @@ export const SpaceEditor: Component<{ groupId: string }> = (props) => {
 
     onCleanup(() => {
       unlistenUpdate();
+      editorView?.destroy();
+      editorView = null;
     });
   });
 
-  // Load content whenever the active file changes
+  // Rebuild/update the editor when the active file changes
   createEffect(() => {
     const fid = activeFileId();
     if (fid) {
       loadFileContent(fid);
     } else {
-      setContent("");
-      prevValue = "";
+      editorView?.destroy();
+      editorView = null;
     }
   });
 
-  // ─── Actions ────────────────────────────────────────────────────────────────
+  // Reconfigure the theme whenever the global theme signal changes
+  createEffect(() => {
+    switchEditorTheme(theme() === "dark");
+  });
 
-  const handleInput = async (e: Event) => {
-    const target = e.target as HTMLTextAreaElement;
-    const newValue = target.value;
-    const fid = activeFileId();
-    if (!fid) return;
-
-    // Simple diff
-    let start = 0;
-    while (
-      start < prevValue.length &&
-      start < newValue.length &&
-      prevValue[start] === newValue[start]
-    ) {
-      start++;
-    }
-
-    let endPrev = prevValue.length - 1;
-    let endNew = newValue.length - 1;
-    while (
-      endPrev >= start &&
-      endNew >= start &&
-      prevValue[endPrev] === newValue[endNew]
-    ) {
-      endPrev--;
-      endNew--;
-    }
-
-    const deleteCount = endPrev - start + 1;
-    const insertText = newValue.substring(start, endNew + 1);
-
-    setContent(newValue);
-    prevValue = newValue;
-
-    if (deleteCount > 0 || insertText.length > 0) {
-      setSynced(false);
-      await editSpaceFile(props.groupId, fid, start, deleteCount, insertText);
-      setSynced(true);
-    }
-  };
+  // ─── File Actions ─────────────────────────────────────────────────────────
 
   const handleCreateFile = async () => {
     const name = newFileName().trim();
@@ -170,7 +397,6 @@ export const SpaceEditor: Component<{ groupId: string }> = (props) => {
       await createSpaceFile(props.groupId, name);
       setNewFileName("");
       setShowNewInput(false);
-      // File list will refresh via space-remote-update event
     } catch (e: any) {
       selectNewest = false;
       setErrorMsg(e?.toString() || "Failed to create file");
@@ -182,7 +408,6 @@ export const SpaceEditor: Component<{ groupId: string }> = (props) => {
     try {
       selectNewest = true;
       await importSpaceFile(props.groupId);
-      // File list will refresh via space-remote-update event
     } catch (e: any) {
       selectNewest = false;
       const msg = e?.toString() || "Failed to import file";
@@ -197,6 +422,8 @@ export const SpaceEditor: Component<{ groupId: string }> = (props) => {
     try {
       await deleteSpaceFile(props.groupId, fileId);
       if (activeFileId() === fileId) {
+        editorView?.destroy();
+        editorView = null;
         setActiveFileId(null);
       }
       await loadFiles();
@@ -206,7 +433,20 @@ export const SpaceEditor: Component<{ groupId: string }> = (props) => {
     }
   };
 
-  // ─── Render ─────────────────────────────────────────────────────────────────
+  const handleExportFile = async () => {
+    const fid = activeFileId();
+    if (!fid) return;
+    const file = files().find((f) => f.id === fid);
+    if (!file) return;
+    try {
+      await exportSpaceFile(props.groupId, fid, file.name);
+    } catch (e: any) {
+      setErrorMsg(e?.toString() || "Failed to export file");
+      setTimeout(() => setErrorMsg(null), 4000);
+    }
+  };
+
+  // ─── Render ───────────────────────────────────────────────────────────────
 
   return (
     <div class="flex-1 flex h-full overflow-hidden bg-stone-100 dark:bg-stone-900">
@@ -322,7 +562,7 @@ export const SpaceEditor: Component<{ groupId: string }> = (props) => {
       <div class="flex-1 flex flex-col overflow-hidden">
         {/* Error Toast */}
         <Show when={errorMsg()}>
-          <div class="mx-4 mt-3 px-4 py-3 rounded-lg bg-red-100 dark:bg-red-900/40 border-2 border-red-300 dark:border-red-700 flex items-start gap-2 animate-in fade-in slide-in-from-top-2 duration-200">
+          <div class="mx-4 mt-3 px-4 py-3 rounded-lg bg-red-100 dark:bg-red-900/40 border-2 border-red-300 dark:border-red-700 flex items-start gap-2">
             <AlertTriangle size={16} class="text-red-500 shrink-0 mt-0.5" />
             <p class="text-xs font-bold text-red-700 dark:text-red-300">{errorMsg()}</p>
           </div>
@@ -344,43 +584,26 @@ export const SpaceEditor: Component<{ groupId: string }> = (props) => {
             </div>
           }
         >
-          {/* Active file header */}
-          <div class="px-6 py-3 border-b border-stone-200 dark:border-stone-800 flex items-center gap-2 select-none">
-            <FileText size={16} class="text-primary-500" />
-            <h3 class="flex-1 text-sm font-black text-stone-700 dark:text-stone-300">
+          {/* File header bar */}
+          <div class="px-4 py-2.5 border-b border-stone-200 dark:border-stone-800 flex items-center gap-2 select-none shrink-0">
+            <FileText size={14} class="text-primary-500 shrink-0" />
+            <h3 class="flex-1 text-sm font-black text-stone-700 dark:text-stone-300 truncate">
               {files().find((f) => f.id === activeFileId())?.name || "Untitled"}
             </h3>
             <button
-              onClick={async () => {
-                const fid = activeFileId();
-                if (!fid) return;
-                const file = files().find((f) => f.id === fid);
-                if (!file) return;
-                try {
-                  await exportSpaceFile(props.groupId, fid, file.name);
-                } catch (e: any) {
-                  setErrorMsg(e?.toString() || "Failed to export file");
-                  setTimeout(() => setErrorMsg(null), 4000);
-                }
-              }}
-              class="p-1.5 rounded-md hover:bg-stone-200 dark:hover:bg-stone-800 text-stone-400 hover:text-stone-700 dark:hover:text-stone-300 transition-colors"
+              onClick={handleExportFile}
+              class="p-1.5 rounded-md hover:bg-stone-200 dark:hover:bg-stone-800 text-stone-400 hover:text-stone-700 dark:hover:text-stone-300 transition-colors shrink-0"
               title="Export file to disk"
             >
               <Download size={14} />
             </button>
           </div>
 
-          {/* Textarea */}
-          <div class="flex-1 overflow-y-auto">
-            <textarea
-              ref={textareaRef}
-              value={content()}
-              onInput={handleInput}
-              class="w-full h-full min-h-full p-6 bg-transparent outline-none resize-none font-mono text-sm leading-relaxed text-stone-800 dark:text-stone-300 placeholder-stone-400 dark:placeholder-stone-600"
-              placeholder="Start typing... everything syncs instantly."
-              spellcheck={false}
-            />
-          </div>
+          {/* CodeMirror editor mount point */}
+          <div
+            ref={editorContainerRef}
+            class="flex-1 overflow-hidden [&_.cm-editor]:h-full [&_.cm-editor.cm-focused]:outline-none [&_.cm-scroller]:overflow-auto"
+          />
         </Show>
       </div>
     </div>
