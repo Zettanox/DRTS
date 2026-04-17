@@ -2,8 +2,7 @@ import { Component, createSignal, createMemo, createEffect, For, Show, onMount }
 import { dms, groups, contacts, identity, chatMessages, groupMessages, activeRightPane, setActiveRightPane, Message } from "../store";
 import { sendMessage as bridgeSendMessage, getChatHistory, sendFile, pauseFileTransfer, resumeFileTransfer, sendGroupMessage, getGroupHistory, sendGroupFile, leaveGroup, removeGroupMember, disbandGroup } from "../tauri-bridge";
 import { Send, Paperclip, Users, Shield, X, MapPin, Columns, Check, CheckCheck, Clock, FileIcon, Download, LogOut, UserMinus, Trash2, Hash, Image as ImageIcon, ExternalLink } from "lucide-solid";
-import { convertFileSrc } from "@tauri-apps/api/core";
-import { openPath } from "@tauri-apps/plugin-opener";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 
 export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (props) => {
   const [inputText, setInputText] = createSignal("");
@@ -122,7 +121,7 @@ export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (prop
   const handleOpenFile = async (filePath?: string) => {
     if (!filePath) return;
     try {
-      await openPath(filePath);
+      await invoke('open_file_native', { path: filePath });
     } catch (e) {
       console.error("Failed to open file:", e);
     }

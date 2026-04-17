@@ -502,6 +502,40 @@ async fn disband_group(
     Ok(())
 }
 
+#[tauri::command]
+async fn open_file_native(path: String) -> Result<(), String> {
+    let path = std::path::PathBuf::from(&path);
+    if !path.exists() {
+        return Err(format!("File not found: {}", path.display()));
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| format!("Failed to open file: {e}"))?;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| format!("Failed to open file: {e}"))?;
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| format!("Failed to open file: {e}"))?;
+    }
+
+    Ok(())
+}
+
 // ─── App Entry ────────────────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -548,6 +582,7 @@ pub fn run() {
             leave_group,
             remove_group_member,
             disband_group,
+            open_file_native,
         ])
         .on_window_event(|window, event| {
             // Gracefully shut down the network task before the window closes,
