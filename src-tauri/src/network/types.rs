@@ -93,12 +93,24 @@ pub enum NetworkCommand {
     OpenGroupSpace {
         group_id: String,
     },
-    /// Edit group space (apply local CRDT edit and broadcast)
+    /// Edit a specific file in the group space (apply local CRDT edit and broadcast)
     EditGroupSpace {
         group_id: String,
+        file_id: String,
         index: u32,
         delete_count: u32,
         insert_text: String,
+    },
+    /// Create a new text file in the group space
+    CreateSpaceFile {
+        group_id: String,
+        file_name: String,
+        content: Option<String>,
+    },
+    /// Delete a file from the group space
+    DeleteSpaceFile {
+        group_id: String,
+        file_id: String,
     },
     /// Shut down the network task
     Shutdown,

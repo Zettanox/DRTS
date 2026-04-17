@@ -784,8 +784,8 @@ pub fn spawn_network(
                             }
                         }
 
-                        Some(NetworkCommand::EditGroupSpace { group_id, index, delete_count, insert_text }) => {
-                            if let Ok(update_bytes) = crate::crdt::apply_local_edit(&group_id, index, delete_count, &insert_text).await {
+                        Some(NetworkCommand::EditGroupSpace { group_id, file_id, index, delete_count, insert_text }) => {
+                            if let Ok(update_bytes) = crate::crdt::apply_file_edit(&group_id, &file_id, index, delete_count, &insert_text).await {
                                 let update_b64 = base64::encode(&update_bytes);
                                 if let Some(group) = local_groups.iter().find(|g| g.id == group_id).cloned() {
                                     for mid in &group.members {
@@ -811,6 +811,81 @@ pub fn spawn_network(
                                         }
                                     }
                                 }
+                            }
+                        }
+
+                        Some(NetworkCommand::CreateSpaceFile { group_id, file_name, content }) => {
+                            println!("[Stoa Space] Creating file '{}' in group {}", file_name, group_id);
+                            let result = if let Some(text) = content {
+                                crate::crdt::create_file_with_content(&group_id, &file_name, &text, &our_peer_id_str).await
+                            } else {
+                                crate::crdt::create_file(&group_id, &file_name, &our_peer_id_str).await
+                            };
+                            if let Ok((_file_id, update_bytes)) = result {
+                                let update_b64 = base64::encode(&update_bytes);
+                                if let Some(group) = local_groups.iter().find(|g| g.id == group_id).cloned() {
+                                    for mid in &group.members {
+                                        if *mid == our_peer_id_str { continue; }
+                                        if let Ok(target) = PeerId::from_str(mid) {
+                                            let req = StoaRequest::GroupSpaceUpdate {
+                                                group_id: group_id.clone(),
+                                                update_b64: update_b64.clone(),
+                                            };
+                                            let encrypted_req = maybe_encrypt_request(mid, req.clone());
+                                            if swarm.is_connected(&target) {
+                                                swarm.behaviour_mut().messaging.send_request(&target, encrypted_req);
+                                            } else {
+                                                handlers::dial_peer(&peers_clone, mid, &mut swarm).await;
+                                                pending_messages.push(PendingMessage {
+                                                    peer_id: target,
+                                                    request: req,
+                                                    peer_id_str: mid.clone(),
+                                                    message_id: None,
+                                                    content: None,
+                                                });
+                                            }
+                                        }
+                                    }
+                                }
+                                // Notify our own frontend
+                                let _ = app_handle.emit("space-remote-update", &serde_json::json!({
+                                    "group_id": group_id,
+                                }));
+                            }
+                        }
+
+                        Some(NetworkCommand::DeleteSpaceFile { group_id, file_id }) => {
+                            println!("[Stoa Space] Deleting file {} in group {}", file_id, group_id);
+                            if let Ok(update_bytes) = crate::crdt::delete_file(&group_id, &file_id).await {
+                                let update_b64 = base64::encode(&update_bytes);
+                                if let Some(group) = local_groups.iter().find(|g| g.id == group_id).cloned() {
+                                    for mid in &group.members {
+                                        if *mid == our_peer_id_str { continue; }
+                                        if let Ok(target) = PeerId::from_str(mid) {
+                                            let req = StoaRequest::GroupSpaceUpdate {
+                                                group_id: group_id.clone(),
+                                                update_b64: update_b64.clone(),
+                                            };
+                                            let encrypted_req = maybe_encrypt_request(mid, req.clone());
+                                            if swarm.is_connected(&target) {
+                                                swarm.behaviour_mut().messaging.send_request(&target, encrypted_req);
+                                            } else {
+                                                handlers::dial_peer(&peers_clone, mid, &mut swarm).await;
+                                                pending_messages.push(PendingMessage {
+                                                    peer_id: target,
+                                                    request: req,
+                                                    peer_id_str: mid.clone(),
+                                                    message_id: None,
+                                                    content: None,
+                                                });
+                                            }
+                                        }
+                                    }
+                                }
+                                // Notify our own frontend
+                                let _ = app_handle.emit("space-remote-update", &serde_json::json!({
+                                    "group_id": group_id,
+                                }));
                             }
                         }
 

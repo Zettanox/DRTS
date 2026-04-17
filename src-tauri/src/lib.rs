@@ -549,8 +549,111 @@ async fn open_group_space(group_id: String, state: State<'_, AppState>) -> Resul
 }
 
 #[tauri::command]
-async fn edit_group_space(
+async fn list_space_files(group_id: String) -> Result<Vec<crate::crdt::SpaceFile>, String> {
+    crate::crdt::list_files(&group_id).await
+}
+
+#[tauri::command]
+async fn create_space_file(
     group_id: String,
+    file_name: String,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    // Create locally first to get the file_id
+    let (file_id, _update) = crate::crdt::create_file(&group_id, &file_name, "local").await?;
+
+    // Broadcast via network
+    let tx = state.network_cmd_tx.lock().await;
+    if let Some(tx) = tx.as_ref() {
+        let _ = tx.send(NetworkCommand::CreateSpaceFile {
+            group_id,
+            file_name,
+            content: None,
+        }).await;
+    }
+    Ok(file_id)
+}
+
+#[tauri::command]
+async fn import_space_file(
+    group_id: String,
+    file_path: String,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let path = std::path::Path::new(&file_path);
+
+    // Validate extension
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+
+    if !crate::crdt::ALLOWED_EXTENSIONS.contains(&ext.as_str()) {
+        return Err("File type unfit for Shared Spaces! Only text and source code files are supported. Binary files can be shared via group chat.".to_string());
+    }
+
+    // Read content
+    let content = std::fs::read_to_string(&file_path)
+        .map_err(|e| format!("Failed to read file: {}", e))?;
+
+    // Check size limit
+    if content.len() > crate::crdt::MAX_IMPORT_SIZE {
+        return Err(format!(
+            "File too large for Shared Spaces. Maximum size is 1 MB, but this file is {} KB.",
+            content.len() / 1024
+        ));
+    }
+
+    let file_name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("imported_file")
+        .to_string();
+
+    // Create locally with content
+    let (file_id, _update) = crate::crdt::create_file_with_content(
+        &group_id,
+        &file_name,
+        &content,
+        "local",
+    ).await?;
+
+    // Broadcast via network
+    let tx = state.network_cmd_tx.lock().await;
+    if let Some(tx) = tx.as_ref() {
+        let _ = tx.send(NetworkCommand::CreateSpaceFile {
+            group_id,
+            file_name,
+            content: Some(content),
+        }).await;
+    }
+
+    Ok(file_id)
+}
+
+#[tauri::command]
+async fn delete_space_file(
+    group_id: String,
+    file_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let tx = state.network_cmd_tx.lock().await;
+    if let Some(tx) = tx.as_ref() {
+        let _ = tx.send(NetworkCommand::DeleteSpaceFile { group_id, file_id }).await;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn get_space_file_text(group_id: String, file_id: String) -> Result<String, String> {
+    crate::crdt::get_file_text(&group_id, &file_id).await
+}
+
+#[tauri::command]
+async fn edit_space_file(
+    group_id: String,
+    file_id: String,
     index: u32,
     delete_count: u32,
     insert_text: String,
@@ -560,17 +663,13 @@ async fn edit_group_space(
     if let Some(tx) = tx.as_ref() {
         let _ = tx.send(NetworkCommand::EditGroupSpace {
             group_id,
+            file_id,
             index,
             delete_count,
             insert_text,
         }).await;
     }
     Ok(())
-}
-
-#[tauri::command]
-async fn get_group_space_text(group_id: String) -> Result<String, String> {
-    crate::crdt::get_text(&group_id).await
 }
 
 // ─── App Entry ────────────────────────────────────────────────────────────────
@@ -621,8 +720,12 @@ pub fn run() {
             disband_group,
             open_file_native,
             open_group_space,
-            edit_group_space,
-            get_group_space_text,
+            list_space_files,
+            create_space_file,
+            import_space_file,
+            delete_space_file,
+            get_space_file_text,
+            edit_space_file,
         ])
         .on_window_event(|window, event| {
             // Gracefully shut down the network task before the window closes,

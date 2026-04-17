@@ -66,6 +66,15 @@ export interface GroupEntry {
   created_at: number;
 }
 
+/** A file within a group's Shared Space */
+export interface SpaceFile {
+  id: string;
+  name: string;
+  added_by: string;
+  timestamp: number;
+  deleted: boolean;
+}
+
 // ─── Signals ──────────────────────────────────────────────────────────────────
 
 export const [identity, setIdentity] = createSignal<{
