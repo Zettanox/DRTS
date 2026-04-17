@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { open } from "@tauri-apps/plugin-dialog";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import {
   setIdentity,
   setNearbyPeers,
@@ -381,6 +381,15 @@ export async function deleteSpaceFile(groupId: string, fileId: string): Promise<
 
 export async function getSpaceFileText(groupId: string, fileId: string): Promise<string> {
   return await invoke<string>("get_space_file_text", { groupId, fileId });
+}
+
+export async function exportSpaceFile(groupId: string, fileId: string, fileName: string): Promise<void> {
+  const savePath = await save({
+    title: "Export file from Shared Space",
+    defaultPath: fileName,
+  });
+  if (!savePath) return;
+  await invoke("export_space_file", { groupId, fileId, exportPath: savePath });
 }
 
 export async function editSpaceFile(

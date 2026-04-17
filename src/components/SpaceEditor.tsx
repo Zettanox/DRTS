@@ -16,9 +16,10 @@ import {
   deleteSpaceFile,
   getSpaceFileText,
   editSpaceFile,
+  exportSpaceFile,
 } from "../tauri-bridge";
 import type { SpaceFile } from "../store";
-import { FilePlus, Upload, Trash2, FileText, AlertTriangle } from "lucide-solid";
+import { FilePlus, Upload, Trash2, FileText, AlertTriangle, Download } from "lucide-solid";
 
 export const SpaceEditor: Component<{ groupId: string }> = (props) => {
   let textareaRef!: HTMLTextAreaElement;
@@ -346,9 +347,27 @@ export const SpaceEditor: Component<{ groupId: string }> = (props) => {
           {/* Active file header */}
           <div class="px-6 py-3 border-b border-stone-200 dark:border-stone-800 flex items-center gap-2 select-none">
             <FileText size={16} class="text-primary-500" />
-            <h3 class="text-sm font-black text-stone-700 dark:text-stone-300">
+            <h3 class="flex-1 text-sm font-black text-stone-700 dark:text-stone-300">
               {files().find((f) => f.id === activeFileId())?.name || "Untitled"}
             </h3>
+            <button
+              onClick={async () => {
+                const fid = activeFileId();
+                if (!fid) return;
+                const file = files().find((f) => f.id === fid);
+                if (!file) return;
+                try {
+                  await exportSpaceFile(props.groupId, fid, file.name);
+                } catch (e: any) {
+                  setErrorMsg(e?.toString() || "Failed to export file");
+                  setTimeout(() => setErrorMsg(null), 4000);
+                }
+              }}
+              class="p-1.5 rounded-md hover:bg-stone-200 dark:hover:bg-stone-800 text-stone-400 hover:text-stone-700 dark:hover:text-stone-300 transition-colors"
+              title="Export file to disk"
+            >
+              <Download size={14} />
+            </button>
           </div>
 
           {/* Textarea */}

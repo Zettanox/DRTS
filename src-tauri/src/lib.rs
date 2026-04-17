@@ -639,6 +639,17 @@ async fn get_space_file_text(group_id: String, file_id: String) -> Result<String
 }
 
 #[tauri::command]
+async fn export_space_file(
+    group_id: String,
+    file_id: String,
+    export_path: String,
+) -> Result<(), String> {
+    let content = crate::crdt::get_file_text(&group_id, &file_id).await?;
+    std::fs::write(&export_path, &content)
+        .map_err(|e| format!("Failed to export file: {}", e))
+}
+
+#[tauri::command]
 async fn edit_space_file(
     group_id: String,
     file_id: String,
@@ -713,6 +724,7 @@ pub fn run() {
             import_space_file,
             delete_space_file,
             get_space_file_text,
+            export_space_file,
             edit_space_file,
         ])
         .on_window_event(|window, event| {
