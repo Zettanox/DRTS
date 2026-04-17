@@ -3,7 +3,7 @@ import { dms, groups, contacts, identity, chatMessages, groupMessages, activeRig
 import { sendMessage as bridgeSendMessage, getChatHistory, sendFile, pauseFileTransfer, resumeFileTransfer, sendGroupMessage, getGroupHistory, sendGroupFile, leaveGroup, removeGroupMember, disbandGroup } from "../tauri-bridge";
 import { Send, Paperclip, Users, Shield, X, MapPin, Columns, Check, CheckCheck, Clock, FileIcon, Download, LogOut, UserMinus, Trash2, Hash, Image as ImageIcon, ExternalLink } from "lucide-solid";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
-import { SpaceEditor } from "./SpaceEditor";
+import { SpaceEditor } from "../components/SpaceEditor";
 
 export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (props) => {
   const [inputText, setInputText] = createSignal("");
