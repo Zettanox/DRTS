@@ -241,20 +241,49 @@ export const SpaceEditor: Component<{ groupId: string }> = (props) => {
         themeCompartment.of(themeExt),
         EditorView.updateListener.of((update) => {
           if (!update.docChanged || suppressBroadcast) return;
-          // Only process changes that originated from user interaction
+
+          // Collect all changes synchronously BEFORE any await.
+          // iterChanges gives positions in the OLD document (before each transaction).
+          // Multiple changes within one transaction need cumulative offset adjustment
+          // so each subsequent CRDT write targets the correct shifted position.
+          // Between transactions, positions are already relative to the doc after
+          // all prior transactions, so no inter-transaction delta is needed.
+          type Change = { from: number; deleteCount: number; insert: string };
+          const allChanges: Change[] = [];
+
           for (const txn of update.transactions) {
             if (!txn.docChanged) continue;
-            txn.changes.iterChanges(async (fromA, toA, _fromB, _toB, inserted) => {
-              const fid = activeFileId();
-              if (!fid) return;
-              const deleteCount = toA - fromA;
-              const insertText = inserted.toString();
-              if (deleteCount === 0 && insertText.length === 0) return;
-              setSynced(false);
-              await editSpaceFile(props.groupId, fid, fromA, deleteCount, insertText);
-              setSynced(true);
+            const txnChanges: Change[] = [];
+            txn.changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
+              txnChanges.push({
+                from: fromA,
+                deleteCount: toA - fromA,
+                insert: inserted.toString(),
+              });
             });
+
+            // Within a single transaction, apply offset to account for earlier
+            // changes that have already shifted the CRDT's text.
+            let delta = 0;
+            for (const c of txnChanges) {
+              allChanges.push({ from: c.from + delta, deleteCount: c.deleteCount, insert: c.insert });
+              delta += c.insert.length - c.deleteCount;
+            }
           }
+
+          if (allChanges.length === 0) return;
+
+          // Apply sequentially — never concurrently — to prevent position races.
+          setSynced(false);
+          (async () => {
+            const fid = activeFileId();
+            if (!fid) return;
+            for (const change of allChanges) {
+              if (change.deleteCount === 0 && change.insert.length === 0) continue;
+              await editSpaceFile(props.groupId, fid, change.from, change.deleteCount, change.insert);
+            }
+            setSynced(true);
+          })();
         }),
         EditorView.lineWrapping,
       ],
