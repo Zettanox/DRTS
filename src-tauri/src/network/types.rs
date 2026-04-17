@@ -89,6 +89,17 @@ pub enum NetworkCommand {
     DisbandGroup {
         group_id: String,
     },
+    /// Open group space (initiate CRDT sync)
+    OpenGroupSpace {
+        group_id: String,
+    },
+    /// Edit group space (apply local CRDT edit and broadcast)
+    EditGroupSpace {
+        group_id: String,
+        index: u32,
+        delete_count: u32,
+        insert_text: String,
+    },
     /// Shut down the network task
     Shutdown,
 }

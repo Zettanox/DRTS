@@ -350,6 +350,25 @@ export async function disbandGroup(groupId: string): Promise<void> {
   setGroups((prev) => prev.filter((g) => g.id !== `group_${groupId}`));
 }
 
+// ─── Group Spaces ─────────────────────────────────────────────────────────────
+
+export async function openGroupSpace(groupId: string): Promise<void> {
+  await invoke("open_group_space", { groupId });
+}
+
+export async function editGroupSpace(
+  groupId: string,
+  index: number,
+  deleteCount: number,
+  insertText: string
+): Promise<void> {
+  await invoke("edit_group_space", { groupId, index, deleteCount, insertText });
+}
+
+export async function getGroupSpaceText(groupId: string): Promise<string> {
+  return await invoke<string>("get_group_space_text", { groupId });
+}
+
 // ─── Event Listeners ──────────────────────────────────────────────────────────
 
 export async function setupNetworkListeners(): Promise<void> {

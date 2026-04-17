@@ -776,6 +776,32 @@ pub async fn handle_incoming_request(
             let response = StoaResponse::MessageAck { id: "disbanded-ack".into() };
             let _ = swarm.behaviour_mut().messaging.send_response(channel, response);
         }
+        StoaRequest::GroupSpaceSync { group_id, state_vector_b64 } => {
+            println!("[Stoa Space] Sync request from {} for {}", peer.to_string(), group_id);
+            if let Ok(sv_bytes) = base64::decode(&state_vector_b64) {
+                if let Ok(update_bytes) = crate::crdt::encode_diff(&group_id, &sv_bytes).await {
+                    let response = StoaResponse::GroupSpaceSyncReply {
+                        group_id: group_id.clone(),
+                        update_b64: base64::encode(&update_bytes),
+                    };
+                    let _ = swarm.behaviour_mut().messaging.send_response(channel, response);
+                }
+            }
+        }
+        StoaRequest::GroupSpaceUpdate { group_id, update_b64 } => {
+            println!("[Stoa Space] Live update from {} for {}", peer.to_string(), group_id);
+            if let Ok(update_bytes) = base64::decode(&update_b64) {
+                if let Ok(_) = crate::crdt::apply_remote_update(&group_id, &update_bytes).await {
+                    let _ = app_handle.emit("space-remote-update", &serde_json::json!({
+                        "group_id": group_id,
+                    }));
+                    let response = StoaResponse::GroupSpaceUpdateAck {
+                        group_id: group_id.clone(),
+                    };
+                    let _ = swarm.behaviour_mut().messaging.send_response(channel, response);
+                }
+            }
+        }
     }
 }
 
@@ -1025,6 +1051,19 @@ pub async fn handle_incoming_response(
             message_id,
         } => {
             println!("[Stoa Group] GroupAck for message {message_id} in {group_id}");
+        }
+        StoaResponse::GroupSpaceSyncReply { group_id, update_b64 } => {
+            println!("[Stoa Space] Sync reply from {} for {}", peer.to_string(), group_id);
+            if let Ok(update_bytes) = base64::decode(&update_b64) {
+                if let Ok(_) = crate::crdt::apply_remote_update(&group_id, &update_bytes).await {
+                    let _ = app_handle.emit("space-remote-update", &serde_json::json!({
+                        "group_id": group_id,
+                    }));
+                }
+            }
+        }
+        StoaResponse::GroupSpaceUpdateAck { group_id: _ } => {
+            // Can be used for "Synced ✓" indicator in UI later
         }
     }
 }

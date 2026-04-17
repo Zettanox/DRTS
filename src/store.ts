@@ -37,21 +37,6 @@ export interface Chat {
   admin?: string;
 }
 
-export interface StoredFile {
-  id: string;
-  name: string;
-  sizeBytes: number;
-  lastModified: number;
-}
-
-export interface Endbox {
-  id: string;
-  name: string;
-  collaborators: string[];
-  files: StoredFile[];
-  host: string;
-  createdAt: number;
-}
 
 export interface NearbyPeerEntry {
   peerId: string;
@@ -94,7 +79,7 @@ export const [globalNetwork, setGlobalNetwork] = createSignal<"Auto" | "LAN-Only
 export const [lanVisible, setLanVisible] = createSignal(true);
 
 // Desktop Split Pane Logic
-export type PaneState = { type: "dm" | "group" | "endbox"; id: string } | null;
+export type PaneState = { type: "dm" | "group"; id: string } | null;
 export const [activeLeftPane, setActiveLeftPane] = createSignal<PaneState>(null);
 export const [activeRightPane, setActiveRightPane] = createSignal<PaneState>(null);
 
@@ -112,30 +97,6 @@ export const [dms, setDMs] = createStore<Chat[]>([]);
 
 export const [groups, setGroups] = createStore<Chat[]>([]);
 
-export const [endboxes, setEndboxes] = createStore<Endbox[]>([
-  {
-    id: "end1",
-    name: "Stoa Assets Base",
-    collaborators: [],
-    host: "me",
-    createdAt: Date.now() - 86400000,
-    files: [
-      { id: "f1", name: "logo.png", sizeBytes: 102400, lastModified: Date.now() - 3600000 },
-      { id: "f2", name: "pitch_deck.pdf", sizeBytes: 5242880, lastModified: Date.now() - 7200000 },
-    ],
-  },
-  {
-    id: "end2",
-    name: "Rust Configs",
-    collaborators: [],
-    host: "me",
-    createdAt: Date.now() - 172800000,
-    files: [
-      { id: "f3", name: "libp2p_params.toml", sizeBytes: 2048, lastModified: Date.now() - 1800000 },
-      { id: "f4", name: "keys.json", sizeBytes: 512, lastModified: Date.now() - 1900000 },
-    ],
-  },
-]);
 
 // Chat messages keyed by peer ID (for DMs) or group_<id> (for groups)
 export const [chatMessages, setChatMessages] = createStore<Record<string, Message[]>>({});

@@ -1,4 +1,5 @@
 mod contacts;
+mod crdt;
 mod crypto;
 mod file_transfer;
 mod groups;
@@ -536,6 +537,42 @@ async fn open_file_native(path: String) -> Result<(), String> {
     Ok(())
 }
 
+// ─── Shared Spaces ──────────────────────────────────────────────────────────
+
+#[tauri::command]
+async fn open_group_space(group_id: String, state: State<'_, AppState>) -> Result<(), String> {
+    let tx = state.network_cmd_tx.lock().await;
+    if let Some(tx) = tx.as_ref() {
+        let _ = tx.send(NetworkCommand::OpenGroupSpace { group_id }).await;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn edit_group_space(
+    group_id: String,
+    index: u32,
+    delete_count: u32,
+    insert_text: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let tx = state.network_cmd_tx.lock().await;
+    if let Some(tx) = tx.as_ref() {
+        let _ = tx.send(NetworkCommand::EditGroupSpace {
+            group_id,
+            index,
+            delete_count,
+            insert_text,
+        }).await;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn get_group_space_text(group_id: String) -> Result<String, String> {
+    crate::crdt::get_text(&group_id).await
+}
+
 // ─── App Entry ────────────────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -583,6 +620,9 @@ pub fn run() {
             remove_group_member,
             disband_group,
             open_file_native,
+            open_group_space,
+            edit_group_space,
+            get_group_space_text,
         ])
         .on_window_event(|window, event| {
             // Gracefully shut down the network task before the window closes,

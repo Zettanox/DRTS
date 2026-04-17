@@ -31,3 +31,5 @@ tauri-plugin-dialog = "2.7.0"
 x25519-dalek = { version = "2", features = ["static_secrets"] }
 aes-gcm = "0.10"
 curve25519-dalek = { version = "4", features = ["digest"] }
+yrs = "0.25.0"
+lazy_static = "1.5.0"

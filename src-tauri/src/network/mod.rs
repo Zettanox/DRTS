@@ -753,6 +753,67 @@ pub fn spawn_network(
                             }
                         }
 
+                        Some(NetworkCommand::OpenGroupSpace { group_id }) => {
+                            println!("[Stoa Space] Opening space for group {}", group_id);
+                            if let Some(group) = local_groups.iter().find(|g| g.id == group_id).cloned() {
+                                if let Ok(sv_bytes) = crate::crdt::encode_state_vector(&group_id).await {
+                                    let sv_b64 = base64::encode(&sv_bytes);
+                                    for mid in &group.members {
+                                        if *mid == our_peer_id_str { continue; }
+                                        if let Ok(target) = PeerId::from_str(mid) {
+                                            let req = StoaRequest::GroupSpaceSync {
+                                                group_id: group_id.clone(),
+                                                state_vector_b64: sv_b64.clone(),
+                                            };
+                                            let encrypted_req = maybe_encrypt_request(mid, req.clone());
+                                            if swarm.is_connected(&target) {
+                                                swarm.behaviour_mut().messaging.send_request(&target, encrypted_req);
+                                            } else {
+                                                handlers::dial_peer(&peers_clone, mid, &mut swarm).await;
+                                                pending_messages.push(PendingMessage {
+                                                    peer_id: target,
+                                                    request: req,
+                                                    peer_id_str: mid.clone(),
+                                                    message_id: None,
+                                                    content: None,
+                                                });
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Some(NetworkCommand::EditGroupSpace { group_id, index, delete_count, insert_text }) => {
+                            if let Ok(update_bytes) = crate::crdt::apply_local_edit(&group_id, index, delete_count, &insert_text).await {
+                                let update_b64 = base64::encode(&update_bytes);
+                                if let Some(group) = local_groups.iter().find(|g| g.id == group_id).cloned() {
+                                    for mid in &group.members {
+                                        if *mid == our_peer_id_str { continue; }
+                                        if let Ok(target) = PeerId::from_str(mid) {
+                                            let req = StoaRequest::GroupSpaceUpdate {
+                                                group_id: group_id.clone(),
+                                                update_b64: update_b64.clone(),
+                                            };
+                                            let encrypted_req = maybe_encrypt_request(mid, req.clone());
+                                            if swarm.is_connected(&target) {
+                                                swarm.behaviour_mut().messaging.send_request(&target, encrypted_req);
+                                            } else {
+                                                handlers::dial_peer(&peers_clone, mid, &mut swarm).await;
+                                                pending_messages.push(PendingMessage {
+                                                    peer_id: target,
+                                                    request: req,
+                                                    peer_id_str: mid.clone(),
+                                                    message_id: None,
+                                                    content: None,
+                                                });
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
                         Some(NetworkCommand::Shutdown) | None => {
                             println!("[Stoa Network] Shutting down network task.");
                             break;
