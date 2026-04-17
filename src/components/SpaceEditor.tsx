@@ -32,6 +32,7 @@ export const SpaceEditor: Component<{ groupId: string }> = (props) => {
   const [errorMsg, setErrorMsg] = createSignal<string | null>(null);
 
   let prevValue = "";
+  let selectNewest = false;
 
   // ─── Data Loading ───────────────────────────────────────────────────────────
 
@@ -41,12 +42,19 @@ export const SpaceEditor: Component<{ groupId: string }> = (props) => {
       const visible = allFiles.filter((f) => !f.deleted);
       setFiles(visible);
 
-      // If active file was deleted or doesn't exist, select first available
-      const currentId = activeFileId();
-      if (currentId && !visible.find((f) => f.id === currentId)) {
-        setActiveFileId(visible.length > 0 ? visible[0].id : null);
-      } else if (!currentId && visible.length > 0) {
-        setActiveFileId(visible[0].id);
+      if (selectNewest && visible.length > 0) {
+        // Auto-select the newest file (last by timestamp)
+        const newest = visible.reduce((a, b) => a.timestamp > b.timestamp ? a : b);
+        setActiveFileId(newest.id);
+        selectNewest = false;
+      } else {
+        // If active file was deleted or doesn't exist, select first available
+        const currentId = activeFileId();
+        if (currentId && !visible.find((f) => f.id === currentId)) {
+          setActiveFileId(visible.length > 0 ? visible[0].id : null);
+        } else if (!currentId && visible.length > 0) {
+          setActiveFileId(visible[0].id);
+        }
       }
     } catch (e) {
       console.error("Failed to list space files", e);
@@ -157,12 +165,13 @@ export const SpaceEditor: Component<{ groupId: string }> = (props) => {
     const name = newFileName().trim();
     if (!name) return;
     try {
-      const fileId = await createSpaceFile(props.groupId, name);
+      selectNewest = true;
+      await createSpaceFile(props.groupId, name);
       setNewFileName("");
       setShowNewInput(false);
-      await loadFiles();
-      setActiveFileId(fileId);
+      // File list will refresh via space-remote-update event
     } catch (e: any) {
+      selectNewest = false;
       setErrorMsg(e?.toString() || "Failed to create file");
       setTimeout(() => setErrorMsg(null), 4000);
     }
@@ -170,10 +179,11 @@ export const SpaceEditor: Component<{ groupId: string }> = (props) => {
 
   const handleImportFile = async () => {
     try {
-      const fileId = await importSpaceFile(props.groupId);
-      await loadFiles();
-      setActiveFileId(fileId);
+      selectNewest = true;
+      await importSpaceFile(props.groupId);
+      // File list will refresh via space-remote-update event
     } catch (e: any) {
+      selectNewest = false;
       const msg = e?.toString() || "Failed to import file";
       if (msg !== "Error: No file selected") {
         setErrorMsg(msg);

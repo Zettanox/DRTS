@@ -558,11 +558,7 @@ async fn create_space_file(
     group_id: String,
     file_name: String,
     state: State<'_, AppState>,
-) -> Result<String, String> {
-    // Create locally first to get the file_id
-    let (file_id, _update) = crate::crdt::create_file(&group_id, &file_name, "local").await?;
-
-    // Broadcast via network
+) -> Result<(), String> {
     let tx = state.network_cmd_tx.lock().await;
     if let Some(tx) = tx.as_ref() {
         let _ = tx.send(NetworkCommand::CreateSpaceFile {
@@ -571,7 +567,7 @@ async fn create_space_file(
             content: None,
         }).await;
     }
-    Ok(file_id)
+    Ok(())
 }
 
 #[tauri::command]
@@ -579,7 +575,7 @@ async fn import_space_file(
     group_id: String,
     file_path: String,
     state: State<'_, AppState>,
-) -> Result<String, String> {
+) -> Result<(), String> {
     let path = std::path::Path::new(&file_path);
 
     // Validate extension
@@ -593,7 +589,7 @@ async fn import_space_file(
         return Err("File type unfit for Shared Spaces! Only text and source code files are supported. Binary files can be shared via group chat.".to_string());
     }
 
-    // Read content
+    // Read content (copy — original file is never touched)
     let content = std::fs::read_to_string(&file_path)
         .map_err(|e| format!("Failed to read file: {}", e))?;
 
@@ -611,15 +607,7 @@ async fn import_space_file(
         .unwrap_or("imported_file")
         .to_string();
 
-    // Create locally with content
-    let (file_id, _update) = crate::crdt::create_file_with_content(
-        &group_id,
-        &file_name,
-        &content,
-        "local",
-    ).await?;
-
-    // Broadcast via network
+    // Send to network handler — it creates and broadcasts
     let tx = state.network_cmd_tx.lock().await;
     if let Some(tx) = tx.as_ref() {
         let _ = tx.send(NetworkCommand::CreateSpaceFile {
@@ -629,7 +617,7 @@ async fn import_space_file(
         }).await;
     }
 
-    Ok(file_id)
+    Ok(())
 }
 
 #[tauri::command]

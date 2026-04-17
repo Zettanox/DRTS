@@ -362,17 +362,17 @@ export async function listSpaceFiles(groupId: string): Promise<SpaceFile[]> {
   return await invoke<SpaceFile[]>("list_space_files", { groupId });
 }
 
-export async function createSpaceFile(groupId: string, fileName: string): Promise<string> {
-  return await invoke<string>("create_space_file", { groupId, fileName });
+export async function createSpaceFile(groupId: string, fileName: string): Promise<void> {
+  await invoke("create_space_file", { groupId, fileName });
 }
 
-export async function importSpaceFile(groupId: string): Promise<string> {
+export async function importSpaceFile(groupId: string): Promise<void> {
   const file = await open({
     multiple: false,
     title: "Select a text file to import into Shared Space",
   });
   if (!file) throw new Error("No file selected");
-  return await invoke<string>("import_space_file", { groupId, filePath: file });
+  await invoke("import_space_file", { groupId, filePath: file });
 }
 
 export async function deleteSpaceFile(groupId: string, fileId: string): Promise<void> {
