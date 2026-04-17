@@ -132,19 +132,19 @@ export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (prop
   return (
     <div class="h-full flex flex-col relative w-full overflow-hidden bg-transparent">
       {/* Header */}
-      <div class="h-16 flex items-center justify-between px-4 md:px-6 bg-primary-50 dark:bg-[#1a1513] border-b-2 border-stone-800 dark:border-stone-700 z-10 shrink-0">
+      <div class="h-16 flex items-center justify-between px-4 md:px-6 bg-primary-50 dark:bg-[#1a1513] border-b-2 border-stone-800 dark:border-stone-700 z-10 shrink-0 min-w-0 overflow-hidden">
         <button 
-          class="flex items-center gap-3 hover:bg-stone-200 dark:hover:bg-stone-800 p-2 -ml-2 rounded-lg transition-colors cursor-pointer text-left focus:outline-none"
+          class="flex items-center gap-3 hover:bg-stone-200 dark:hover:bg-stone-800 p-2 -ml-2 rounded-lg transition-colors cursor-pointer text-left focus:outline-none min-w-0 overflow-hidden shrink"
           onClick={() => setDetailsOpen(true)}
         >
-          <div class="flex items-center justify-center text-stone-700 dark:text-stone-300">
+          <div class="flex items-center justify-center text-stone-700 dark:text-stone-300 shrink-0">
             {isGroup() ? <Users size={22} /> : <div class={`w-3 h-3 rounded-full border border-stone-800 ${contact()?.online ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]' : 'bg-stone-400'}`}></div>}
           </div>
-          <div>
-            <h2 class="font-black text-lg md:text-xl text-stone-900 dark:text-stone-100 leading-tight">
+          <div class="min-w-0 overflow-hidden">
+            <h2 class="font-black text-lg md:text-xl text-stone-900 dark:text-stone-100 leading-tight truncate">
               {currentChat()?.name || "Unknown"}
             </h2>
-            <p class="text-xs md:text-sm font-bold text-stone-500 dark:text-stone-400">
+            <p class="text-xs md:text-sm font-bold text-stone-500 dark:text-stone-400 truncate">
               {isGroup() ? `${currentChat()?.participants.length} peers` : (contact()?.online ? "Online — LAN" : "Offline")}
             </p>
           </div>

@@ -510,19 +510,20 @@ export const SpaceEditor: Component<{ groupId: string }> = (props) => {
                 e.preventDefault();
                 handleCreateFile();
               }}
-              class="flex gap-1"
+              class="flex gap-1 pr-0.5"
             >
               <input
                 type="text"
                 value={newFileName()}
                 onInput={(e) => setNewFileName(e.currentTarget.value)}
                 placeholder="filename.md"
-                class="flex-1 text-xs font-bold px-2 py-1.5 rounded-md bg-white dark:bg-stone-800 border-2 border-stone-300 dark:border-stone-600 text-stone-800 dark:text-stone-200 outline-none focus:border-primary-500 transition-colors"
+                class="flex-1 min-w-0 text-xs font-bold px-2 py-1.5 rounded-md bg-white dark:bg-stone-800 border-2 border-stone-300 dark:border-stone-600 text-stone-800 dark:text-stone-200 outline-none focus:border-primary-500 transition-colors"
                 autofocus
               />
               <button
                 type="submit"
-                class="px-2 py-1.5 text-xs font-black rounded-md bg-primary-500 text-white hover:bg-primary-600 transition-colors"
+                class="shrink-0 w-7 h-7 my-auto flex items-center justify-center text-sm font-black rounded-md bg-primary-500 text-white hover:bg-primary-600 transition-colors"
+                title="Create file"
               >
                 +
               </button>
