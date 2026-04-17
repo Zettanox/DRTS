@@ -1,22 +1,26 @@
 import { Component, createSignal } from "solid-js";
 import { useNavigate } from "@solidjs/router";
-import { setIdentity, setActiveLeftPane } from "../store";
-import { Key, ShieldCheck, Zap } from "lucide-solid";
+import { setActiveLeftPane } from "../store";
+import { generateIdentity, setupNetworkListeners } from "../tauri-bridge";
+import { Key, ShieldCheck, Zap, AlertTriangle } from "lucide-solid";
 
 export const AuthView: Component = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = createSignal(false);
+  const [error, setError] = createSignal<string | null>(null);
 
-  const generateIdentity = () => {
+  const handleGenerate = async () => {
     setLoading(true);
-    setTimeout(() => {
-      setIdentity({
-        name: "Crab_" + Math.floor(Math.random() * 1000),
-        publicKey: "ed25519:mock_pub_key_" + Date.now()
-      });
+    setError(null);
+    try {
+      await generateIdentity();
+      await setupNetworkListeners();
       navigate("/workspace");
-      setActiveLeftPane({ type: 'dm', id: 'dm1' });
-    }, 1200);
+      setActiveLeftPane(null);
+    } catch (e: any) {
+      setError(typeof e === "string" ? e : e?.message || "Identity generation failed");
+      setLoading(false);
+    }
   };
 
   return (
@@ -37,10 +41,17 @@ export const AuthView: Component = () => {
           A secure, local-first collaboration platform. Grounded in Rust, powered by decentralized truth.
         </p>
 
+        {error() && (
+          <div class="w-full mb-4 p-3 rounded-lg bg-red-100 dark:bg-red-900/30 border-2 border-red-800 flex items-center gap-2 text-red-800 dark:text-red-300 text-sm font-bold">
+            <AlertTriangle size={16} />
+            {error()}
+          </div>
+        )}
+
         <div class="flex flex-col gap-4 w-full">
           <button
             class="flat-button py-4 px-6 text-lg flex items-center justify-center gap-3 w-full"
-            onClick={generateIdentity}
+            onClick={handleGenerate}
             disabled={loading()}
           >
             {loading() ? (

@@ -1,6 +1,7 @@
 import { Component } from "solid-js";
 import { Topbar } from "../components/Topbar";
 import { Sidebar } from "../components/Sidebar";
+import { ContactRequestModal } from "../components/ContactRequestModal";
 import { activeLeftPane } from "../store";
 
 export const Layout: Component<{ children: any }> = (props) => {
@@ -13,6 +14,7 @@ export const Layout: Component<{ children: any }> = (props) => {
           {props.children}
         </main>
       </div>
+      <ContactRequestModal />
     </div>
   );
 };

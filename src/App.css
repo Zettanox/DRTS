@@ -42,11 +42,9 @@
   }
 
   .chamfer-shadow, .flat-panel, .flat-panel-all, .flat-button, .flat-button-secondary {
-    transition: transform 0.1s;
-  }
-  .chamfer-shadow::before, .flat-panel::before, .flat-panel-all::before, .flat-button::before, .flat-button-secondary::before {
     filter: drop-shadow(var(--shadow-x) var(--shadow-y) 0px var(--drop-color));
-    transition: filter 0.1s;
+    transition: transform 0.1s, filter 0.1s;
+    will-change: transform;
   }
   
   .chamfer-active:active, .flat-button:active, .flat-button-secondary:active {
