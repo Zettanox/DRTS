@@ -1,4 +1,5 @@
 mod contacts;
+mod crdt;
 mod crypto;
 mod file_transfer;
 mod groups;
@@ -536,6 +537,140 @@ async fn open_file_native(path: String) -> Result<(), String> {
     Ok(())
 }
 
+// ─── Shared Spaces ──────────────────────────────────────────────────────────
+
+#[tauri::command]
+async fn open_group_space(group_id: String, state: State<'_, AppState>) -> Result<(), String> {
+    let tx = state.network_cmd_tx.lock().await;
+    if let Some(tx) = tx.as_ref() {
+        let _ = tx.send(NetworkCommand::OpenGroupSpace { group_id }).await;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn list_space_files(group_id: String) -> Result<Vec<crate::crdt::SpaceFile>, String> {
+    crate::crdt::list_files(&group_id).await
+}
+
+#[tauri::command]
+async fn create_space_file(
+    group_id: String,
+    file_name: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let tx = state.network_cmd_tx.lock().await;
+    if let Some(tx) = tx.as_ref() {
+        let _ = tx.send(NetworkCommand::CreateSpaceFile {
+            group_id,
+            file_name,
+            content: None,
+        }).await;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn import_space_file(
+    group_id: String,
+    file_path: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let path = std::path::Path::new(&file_path);
+
+    // Validate extension
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+
+    if !crate::crdt::ALLOWED_EXTENSIONS.contains(&ext.as_str()) {
+        return Err("File type unfit for Shared Spaces! Only text and source code files are supported. Binary files can be shared via group chat.".to_string());
+    }
+
+    // Read content (copy — original file is never touched)
+    let content = std::fs::read_to_string(&file_path)
+        .map_err(|e| format!("Failed to read file: {}", e))?;
+
+    // Check size limit
+    if content.len() > crate::crdt::MAX_IMPORT_SIZE {
+        return Err(format!(
+            "File too large for Shared Spaces. Maximum size is 1 MB, but this file is {} KB.",
+            content.len() / 1024
+        ));
+    }
+
+    let file_name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("imported_file")
+        .to_string();
+
+    // Send to network handler — it creates and broadcasts
+    let tx = state.network_cmd_tx.lock().await;
+    if let Some(tx) = tx.as_ref() {
+        let _ = tx.send(NetworkCommand::CreateSpaceFile {
+            group_id,
+            file_name,
+            content: Some(content),
+        }).await;
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn delete_space_file(
+    group_id: String,
+    file_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let tx = state.network_cmd_tx.lock().await;
+    if let Some(tx) = tx.as_ref() {
+        let _ = tx.send(NetworkCommand::DeleteSpaceFile { group_id, file_id }).await;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn get_space_file_text(group_id: String, file_id: String) -> Result<String, String> {
+    crate::crdt::get_file_text(&group_id, &file_id).await
+}
+
+#[tauri::command]
+async fn export_space_file(
+    group_id: String,
+    file_id: String,
+    export_path: String,
+) -> Result<(), String> {
+    let content = crate::crdt::get_file_text(&group_id, &file_id).await?;
+    std::fs::write(&export_path, &content)
+        .map_err(|e| format!("Failed to export file: {}", e))
+}
+
+#[tauri::command]
+async fn edit_space_file(
+    group_id: String,
+    file_id: String,
+    index: u32,
+    delete_count: u32,
+    insert_text: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let tx = state.network_cmd_tx.lock().await;
+    if let Some(tx) = tx.as_ref() {
+        let _ = tx.send(NetworkCommand::EditGroupSpace {
+            group_id,
+            file_id,
+            index,
+            delete_count,
+            insert_text,
+        }).await;
+    }
+    Ok(())
+}
+
 // ─── App Entry ────────────────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -583,6 +718,14 @@ pub fn run() {
             remove_group_member,
             disband_group,
             open_file_native,
+            open_group_space,
+            list_space_files,
+            create_space_file,
+            import_space_file,
+            delete_space_file,
+            get_space_file_text,
+            export_space_file,
+            edit_space_file,
         ])
         .on_window_event(|window, event| {
             // Gracefully shut down the network task before the window closes,

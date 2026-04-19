@@ -3,11 +3,13 @@ import { dms, groups, contacts, identity, chatMessages, groupMessages, activeRig
 import { sendMessage as bridgeSendMessage, getChatHistory, sendFile, pauseFileTransfer, resumeFileTransfer, sendGroupMessage, getGroupHistory, sendGroupFile, leaveGroup, removeGroupMember, disbandGroup } from "../tauri-bridge";
 import { Send, Paperclip, Users, Shield, X, MapPin, Columns, Check, CheckCheck, Clock, FileIcon, Download, LogOut, UserMinus, Trash2, Hash, Image as ImageIcon, ExternalLink } from "lucide-solid";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { SpaceEditor } from "../components/SpaceEditor";
 
 export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (props) => {
   const [inputText, setInputText] = createSignal("");
   const [forceNetwork, setForceNetwork] = createSignal<"Auto" | "LAN" | "Internet">("Auto");
   const [detailsOpen, setDetailsOpen] = createSignal(false);
+  const [activeTab, setActiveTab] = createSignal<"chat" | "space">("chat");
   let messagesEndRef: HTMLDivElement | undefined;
   
   const currentChat = createMemo(() => dms.find(c => c.id === props.id) || groups.find(c => c.id === props.id));
@@ -130,25 +132,49 @@ export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (prop
   return (
     <div class="h-full flex flex-col relative w-full overflow-hidden bg-transparent">
       {/* Header */}
-      <div class="h-16 flex items-center justify-between px-4 md:px-6 bg-primary-50 dark:bg-[#1a1513] border-b-2 border-stone-800 dark:border-stone-700 z-10 shrink-0">
+      <div class="h-16 flex items-center justify-between px-4 md:px-6 bg-primary-50 dark:bg-[#1a1513] border-b-2 border-stone-800 dark:border-stone-700 z-10 shrink-0 min-w-0 overflow-hidden">
         <button 
-          class="flex items-center gap-3 hover:bg-stone-200 dark:hover:bg-stone-800 p-2 -ml-2 rounded-lg transition-colors cursor-pointer text-left focus:outline-none"
+          class="flex items-center gap-3 hover:bg-stone-200 dark:hover:bg-stone-800 p-2 -ml-2 rounded-lg transition-colors cursor-pointer text-left focus:outline-none min-w-0 overflow-hidden shrink"
           onClick={() => setDetailsOpen(true)}
         >
-          <div class="flex items-center justify-center text-stone-700 dark:text-stone-300">
+          <div class="flex items-center justify-center text-stone-700 dark:text-stone-300 shrink-0">
             {isGroup() ? <Users size={22} /> : <div class={`w-3 h-3 rounded-full border border-stone-800 ${contact()?.online ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]' : 'bg-stone-400'}`}></div>}
           </div>
-          <div>
-            <h2 class="font-black text-lg md:text-xl text-stone-900 dark:text-stone-100 leading-tight">
+          <div class="min-w-0 overflow-hidden">
+            <h2 class="font-black text-lg md:text-xl text-stone-900 dark:text-stone-100 leading-tight truncate">
               {currentChat()?.name || "Unknown"}
             </h2>
-            <p class="text-xs md:text-sm font-bold text-stone-500 dark:text-stone-400">
+            <p class="text-xs md:text-sm font-bold text-stone-500 dark:text-stone-400 truncate">
               {isGroup() ? `${currentChat()?.participants.length} peers` : (contact()?.online ? "Online — LAN" : "Offline")}
             </p>
           </div>
         </button>
 
         <div class={`flex items-center gap-3 ${props.pane === 'right' ? 'mr-10' : ''}`}>
+          {isGroup() && (
+            <div class="flex bg-stone-200 dark:bg-[#2c2421] rounded-lg border-2 border-stone-800 dark:border-stone-700 p-0.5 mr-2">
+              <button
+                class={`px-3 py-1 text-sm font-bold rounded-md transition-all ${
+                  activeTab() === 'chat'
+                    ? "bg-white dark:bg-[#4a3a33] text-primary-600 dark:text-primary-400 border border-stone-800 shadow-[1px_1px_0px_0px_rgba(41,37,36,1)] dark:shadow-none"
+                    : "text-stone-600 dark:text-stone-400 border border-transparent hover:text-stone-900"
+                }`}
+                onClick={() => setActiveTab('chat')}
+              >
+                Chat
+              </button>
+              <button
+                class={`px-3 py-1 text-sm font-bold rounded-md transition-all ${
+                  activeTab() === 'space'
+                    ? "bg-white dark:bg-[#4a3a33] text-primary-600 dark:text-primary-400 border border-stone-800 shadow-[1px_1px_0px_0px_rgba(41,37,36,1)] dark:shadow-none"
+                    : "text-stone-600 dark:text-stone-400 border border-transparent hover:text-stone-900"
+                }`}
+                onClick={() => setActiveTab('space')}
+              >
+                Space
+              </button>
+            </div>
+          )}
           {props.pane === "left" && !activeRightPane() && (
             <button 
               class="flat-button-secondary py-1.5 px-3 text-xs md:text-sm flex items-center gap-2 mr-2"
@@ -176,7 +202,9 @@ export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (prop
       </div>
 
       <div class="flex-1 flex overflow-hidden w-full relative">
-        {/* Main Chat Pane */}
+        {activeTab() === 'space' && isGroup() ? (
+          <SpaceEditor groupId={groupId()!} />
+        ) : (
         <div class="flex-1 flex flex-col min-w-0 h-full">
           {/* Messages */}
           <div class="flex-1 overflow-y-auto p-4 md:p-6 space-y-5 bg-[#fffdfa] dark:bg-[#241d1a]">
@@ -336,8 +364,9 @@ export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (prop
             </form>
           </div>
         </div>
+        )}
 
-        {/* Profile Details Drawer */}
+        {/* Details Drawer */}
         {detailsOpen() && (
           <div class="w-full md:w-72 lg:w-80 border-l-2 border-stone-800 dark:border-stone-700 bg-primary-50 dark:bg-[#1a1513] shrink-0 absolute md:static inset-0 z-20 flex flex-col h-full animate-in slide-in-from-right-4 duration-200">
             <div class="h-16 flex items-center justify-between px-4 border-b-2 border-stone-800 dark:border-stone-700 bg-white dark:bg-[#2c2421]">

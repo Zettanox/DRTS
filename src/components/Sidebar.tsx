@@ -1,5 +1,5 @@
 import { Component, createSignal, For, Show } from "solid-js";
-import { dms, groups, endboxes, nearbyPeers, contacts, activeLeftPane, setActiveLeftPane, lanVisible } from "../store";
+import { dms, groups, nearbyPeers, contacts, activeLeftPane, setActiveLeftPane, lanVisible } from "../store";
 import { MessageSquare, FileText, Hash, Search, Radio, UserPlus, Plus } from "lucide-solid";
 import { sendContactRequest } from "../tauri-bridge";
 import { CreateGroupModal } from "./CreateGroupModal";
@@ -11,7 +11,7 @@ export const Sidebar: Component = () => {
   const isActive = (type: string, id: string) =>
     activeLeftPane()?.type === type && activeLeftPane()?.id === id;
 
-  const navigate = (type: "dm" | "group" | "endbox", id: string) => {
+  const navigate = (type: "dm" | "group", id: string) => {
     setActiveLeftPane({ type, id });
   };
 
@@ -133,34 +133,6 @@ export const Sidebar: Component = () => {
                 )}
               </For>
             </Show>
-          </div>
-        </div>
-
-        {/* Endboxes Section */}
-        <div>
-          <h2 class="text-xs font-black text-stone-500 dark:text-stone-500 uppercase tracking-widest mb-3 px-2 flex items-center justify-between">
-            Endboxes
-            <button class="hover:bg-stone-200 dark:hover:bg-stone-800 p-1 rounded-md transition-colors text-stone-600">+</button>
-          </h2>
-          <div class="flex flex-col gap-1.5">
-            <For each={endboxes.slice(0, 5)}>
-              {(endbox) => (
-                <button
-                  onClick={() => navigate('endbox', endbox.id)}
-                  class={`flex items-center gap-3 w-full text-left px-3 py-2.5 font-bold transition-colors rounded-xl ${
-                    isActive('endbox', endbox.id)
-                       ? "chamfer-tl-br chamfer-shadow text-stone-900 dark:text-stone-100"
-                      : "text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-100 hover:bg-stone-200/50 dark:hover:bg-stone-800/50"
-                  }`}
-                  style={isActive('endbox', endbox.id) ? { "--chamfer-outer": "8px", "--chamfer-inner": "6px", "--shadow-x": "2px", "--shadow-y": "2px" } : {}}
-                >
-                  <div class="p-1.5 rounded-lg bg-[#669ff4] border-2 border-stone-800 text-stone-900">
-                    <FileText size={16} />
-                  </div>
-                  <div class="flex-1 truncate text-sm">{endbox.name}</div>
-                </button>
-              )}
-            </For>
           </div>
         </div>
 

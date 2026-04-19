@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { open } from "@tauri-apps/plugin-dialog";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import {
   setIdentity,
   setNearbyPeers,
@@ -348,6 +348,58 @@ export async function removeGroupMember(
 export async function disbandGroup(groupId: string): Promise<void> {
   await invoke("disband_group", { groupId });
   setGroups((prev) => prev.filter((g) => g.id !== `group_${groupId}`));
+}
+
+// ─── Group Spaces ─────────────────────────────────────────────────────────────
+
+import type { SpaceFile } from "./store";
+
+export async function openGroupSpace(groupId: string): Promise<void> {
+  await invoke("open_group_space", { groupId });
+}
+
+export async function listSpaceFiles(groupId: string): Promise<SpaceFile[]> {
+  return await invoke<SpaceFile[]>("list_space_files", { groupId });
+}
+
+export async function createSpaceFile(groupId: string, fileName: string): Promise<void> {
+  await invoke("create_space_file", { groupId, fileName });
+}
+
+export async function importSpaceFile(groupId: string): Promise<void> {
+  const file = await open({
+    multiple: false,
+    title: "Select a text file to import into Shared Space",
+  });
+  if (!file) throw new Error("No file selected");
+  await invoke("import_space_file", { groupId, filePath: file });
+}
+
+export async function deleteSpaceFile(groupId: string, fileId: string): Promise<void> {
+  await invoke("delete_space_file", { groupId, fileId });
+}
+
+export async function getSpaceFileText(groupId: string, fileId: string): Promise<string> {
+  return await invoke<string>("get_space_file_text", { groupId, fileId });
+}
+
+export async function exportSpaceFile(groupId: string, fileId: string, fileName: string): Promise<void> {
+  const savePath = await save({
+    title: "Export file from Shared Space",
+    defaultPath: fileName,
+  });
+  if (!savePath) return;
+  await invoke("export_space_file", { groupId, fileId, exportPath: savePath });
+}
+
+export async function editSpaceFile(
+  groupId: string,
+  fileId: string,
+  index: number,
+  deleteCount: number,
+  insertText: string
+): Promise<void> {
+  await invoke("edit_space_file", { groupId, fileId, index, deleteCount, insertText });
 }
 
 // ─── Event Listeners ──────────────────────────────────────────────────────────

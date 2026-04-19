@@ -1,7 +1,6 @@
 import { Component } from 'solid-js';
 import { activeLeftPane, activeRightPane, setActiveRightPane } from '../store';
 import { ChatView } from './ChatView';
-import { EndboxView } from './EndboxView';
 import { X, Columns } from 'lucide-solid';
 
 export const WorkspaceView: Component = () => {
@@ -12,10 +11,10 @@ export const WorkspaceView: Component = () => {
         {!activeLeftPane() ? (
           <div class="text-stone-400 font-black text-xl flex flex-col items-center gap-4 opacity-50">
             <Columns size={48} />
-            <p>Select a Chat or Endbox to connect</p>
+            <p>Select a Chat or Group to connect</p>
           </div>
         ) : (
-          activeLeftPane()?.type === 'endbox' ? <EndboxView pane="left" id={activeLeftPane()!.id} /> : <ChatView pane="left" id={activeLeftPane()!.id} />
+          <ChatView pane="left" id={activeLeftPane()!.id} />
         )}
       </div>
 
@@ -29,7 +28,7 @@ export const WorkspaceView: Component = () => {
            >
              <X size={16} />
            </button>
-           {activeRightPane()?.type === 'endbox' ? <EndboxView pane="right" id={activeRightPane()!.id} /> : <ChatView pane="right" id={activeRightPane()!.id} />}
+           {activeRightPane() && <ChatView pane="right" id={activeRightPane()!.id} />}
         </div>
       )}
     </div>

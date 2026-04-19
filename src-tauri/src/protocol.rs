@@ -84,6 +84,17 @@ pub enum StoaRequest {
     GroupDisbanded {
         group_id: String,
     },
+    // ─── Shared Space Protocol ───────────────────────────────────────────────
+    /// Step 1: Send local StateVector to sync missing updates
+    GroupSpaceSync {
+        group_id: String,
+        state_vector_b64: String,
+    },
+    /// Live incremental updates pushed to peers
+    GroupSpaceUpdate {
+        group_id: String,
+        update_b64: String,
+    },
 }
 
 /// All response types for the `/stoa/msg/1.0.0` protocol.
@@ -119,5 +130,15 @@ pub enum StoaResponse {
     GroupAck {
         group_id: String,
         message_id: String,
+    },
+    // ─── Shared Space Protocol ───────────────────────────────────────────────
+    /// Step 2: Receive the missing updates from peer
+    GroupSpaceSyncReply {
+        group_id: String,
+        update_b64: String,
+    },
+    /// Acknowledgement of an incoming group space update
+    GroupSpaceUpdateAck {
+        group_id: String,
     },
 }
