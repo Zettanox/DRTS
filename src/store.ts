@@ -83,7 +83,15 @@ export const [identity, setIdentity] = createSignal<{
   name: string;
 } | null>(null);
 
-export const [theme, setTheme] = createSignal<"dark" | "light">("dark");
+// Initialise from localStorage; fall back to "dark" if nothing stored yet.
+// Also apply to the DOM immediately so there is no flash on load.
+const _savedTheme = (localStorage.getItem("stoa-theme") as "dark" | "light" | null) ?? "dark";
+if (_savedTheme === "dark") {
+  document.documentElement.classList.add("dark");
+} else {
+  document.documentElement.classList.remove("dark");
+}
+export const [theme, setTheme] = createSignal<"dark" | "light">(_savedTheme);
 export const [globalNetwork, setGlobalNetwork] = createSignal<"Auto" | "LAN-Only" | "Online-Only">("Auto");
 export const [lanVisible, setLanVisible] = createSignal(true);
 
@@ -115,8 +123,10 @@ export const [groupMessages, setGroupMessages] = createStore<Record<string, Mess
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 export function toggleTheme() {
-  setTheme((t) => (t === "dark" ? "light" : "dark"));
-  if (theme() === "dark") {
+  const next = theme() === "dark" ? "light" : "dark";
+  setTheme(next);
+  localStorage.setItem("stoa-theme", next);
+  if (next === "dark") {
     document.documentElement.classList.add("dark");
   } else {
     document.documentElement.classList.remove("dark");
