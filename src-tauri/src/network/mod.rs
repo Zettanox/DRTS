@@ -8,7 +8,7 @@ use futures::StreamExt;
 use libp2p::identity::Keypair;
 use libp2p::request_response::{self, ProtocolSupport};
 use libp2p::swarm::SwarmEvent;
-use libp2p::{mdns, PeerId, StreamProtocol, Swarm, Transport};
+use libp2p::{dcutr, identify, mdns, relay, PeerId, StreamProtocol, Swarm, Transport};
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -20,13 +20,17 @@ use crate::crypto;
 use crate::file_transfer::{self, ActiveTransfer, TransferDirection, TransferStatus};
 use crate::groups::{self, Group};
 use crate::messages::{self, StoredMessage};
+use crate::relay_config::RelayConfig;
 use types::PendingMessage;
 
-/// The combined network behaviour — mDNS + request-response.
+/// The combined network behaviour — mDNS + request-response + relay + dcutr + identify.
 #[derive(libp2p::swarm::NetworkBehaviour)]
 pub struct StoaBehaviour {
     mdns: mdns::tokio::Behaviour,
     pub messaging: request_response::json::Behaviour<StoaRequest, StoaResponse>,
+    relay_client: relay::client::Behaviour,
+    dcutr: dcutr::Behaviour,
+    identify: identify::Behaviour,
 }
 
 /// Spawn the libp2p swarm on a background Tokio task.
@@ -45,7 +49,6 @@ pub fn spawn_network(
         ttl: std::time::Duration::from_secs(10),
         ..Default::default()
     };
-
     let mdns_behaviour = mdns::tokio::Behaviour::new(mdns_config, peer_id)
         .map_err(|e| format!("Failed to create mDNS behaviour: {e}"))?;
 
@@ -55,20 +58,45 @@ pub fn spawn_network(
         request_response::Config::default(),
     );
 
-    let behaviour = StoaBehaviour {
-        mdns: mdns_behaviour,
-        messaging: msg_behaviour,
-    };
+    // Build relay client transport.
+    // The relay::client::Transport wraps plain TCP so that dialing a relay circuit
+    // address (/p2p-circuit/…) is handled transparently by the swarm.
+    let (relay_transport, relay_client) = relay::client::new(peer_id);
 
-    let mut swarm = Swarm::new(
-        libp2p::tcp::tokio::Transport::new(libp2p::tcp::Config::default())
-            .upgrade(libp2p::core::upgrade::Version::V1)
+    let transport = {
+        use libp2p::core::{transport::OrTransport, upgrade};
+        use libp2p::dns;
+
+        let base_tcp = libp2p::tcp::tokio::Transport::new(libp2p::tcp::Config::default());
+        let dns_tcp = dns::tokio::Transport::system(base_tcp)
+            .map_err(|e| format!("DNS transport error: {e}"))?;
+
+        // Combine: relay transport for circuit addresses | DNS/TCP for direct connections
+        OrTransport::new(relay_transport, dns_tcp)
+            .upgrade(upgrade::Version::V1)
             .authenticate(
                 libp2p::noise::Config::new(&keypair)
                     .map_err(|e| format!("Noise config error: {e}"))?,
             )
             .multiplex(libp2p::yamux::Config::default())
-            .boxed(),
+            .boxed()
+    };
+
+    let identify_behaviour = identify::Behaviour::new(
+        identify::Config::new("/stoa/1.0.0".to_string(), keypair.public())
+            .with_push_listen_addr_updates(true),
+    );
+
+    let behaviour = StoaBehaviour {
+        mdns: mdns_behaviour,
+        messaging: msg_behaviour,
+        relay_client,
+        dcutr: dcutr::Behaviour::new(peer_id),
+        identify: identify_behaviour,
+    };
+
+    let mut swarm = Swarm::new(
+        transport,
         behaviour,
         peer_id,
         libp2p::swarm::Config::with_tokio_executor()
@@ -78,6 +106,21 @@ pub fn spawn_network(
     swarm
         .listen_on("/ip4/0.0.0.0/tcp/0".parse().unwrap())
         .map_err(|e| format!("Failed to listen: {e}"))?;
+
+    // Load relay configuration and dial each enabled relay
+    let relay_cfg = RelayConfig::load();
+    let relay_addresses = relay_cfg.enabled_addresses();
+    for addr_str in &relay_addresses {
+        match addr_str.parse::<libp2p::Multiaddr>() {
+            Ok(addr) => {
+                println!("[Stoa Network] Connecting to relay: {addr_str}");
+                let _ = swarm.dial(addr);
+            }
+            Err(e) => {
+                eprintln!("[Stoa Network] Invalid relay address '{addr_str}': {e}");
+            }
+        }
+    }
 
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<NetworkCommand>(64);
     let nearby_peers: NearbyPeersMap = Arc::new(Mutex::new(HashMap::new()));
@@ -207,6 +250,44 @@ pub fn spawn_network(
                                 }
                             }
                         }
+
+                        // ── Relay Client Events ─────────────────────────────
+                        SwarmEvent::Behaviour(StoaBehaviourEvent::RelayClient(
+                            relay::client::Event::ReservationReqAccepted { relay_peer_id, .. },
+                        )) => {
+                            println!("[Stoa Network] Relay reservation accepted from {relay_peer_id}");
+                            let _ = app_handle.emit("relay-connected", relay_peer_id.to_string());
+                        }
+                        SwarmEvent::Behaviour(StoaBehaviourEvent::RelayClient(event)) => {
+                            // covers OutboundCircuitEstablished, InboundCircuitEstablished, etc.
+                            println!("[Stoa Network] Relay client event: {event:?}");
+                        }
+
+                        // ── DCUtR Hole Punching Events ──────────────────────
+                        // dcutr::Event is a struct: { remote_peer_id, result: Result<ConnectionId, Error> }
+                        SwarmEvent::Behaviour(StoaBehaviourEvent::Dcutr(event)) => {
+                            match event.result {
+                                Ok(_) => {
+                                    println!("[Stoa Network] ⚡ Hole punch succeeded with {}", event.remote_peer_id);
+                                    let _ = app_handle.emit("peer-direct-connection", event.remote_peer_id.to_string());
+                                }
+                                Err(e) => {
+                                    println!("[Stoa Network] Hole punch failed with {} ({e:?}) — staying on relay", event.remote_peer_id);
+                                }
+                            }
+                        }
+
+                        // ── Identify Events (required by relay + dcutr) ─────
+                        SwarmEvent::Behaviour(StoaBehaviourEvent::Identify(
+                            identify::Event::Received { peer_id: identified_peer, info, .. },
+                        )) => {
+                            // Add observed external addresses from identify to the swarm's
+                            // address book — required for hole punching to work correctly.
+                            for addr in &info.listen_addrs {
+                                swarm.add_peer_address(identified_peer, addr.clone());
+                            }
+                        }
+                        SwarmEvent::Behaviour(StoaBehaviourEvent::Identify(_)) => {}
 
                         SwarmEvent::NewListenAddr { address, .. } => {
                             println!("[Stoa Network] Listening on {address}");

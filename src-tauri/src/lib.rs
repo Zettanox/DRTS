@@ -7,6 +7,7 @@ mod identity;
 mod messages;
 mod network;
 mod protocol;
+mod relay_config;
 
 use contacts::Contact;
 use identity::IdentityInfo;
@@ -671,6 +672,18 @@ async fn edit_space_file(
     Ok(())
 }
 
+// ─── Relay Config ──────────────────────────────────────────────────────────────
+
+#[tauri::command]
+async fn get_relay_config() -> Result<relay_config::RelayConfig, String> {
+    Ok(relay_config::RelayConfig::load())
+}
+
+#[tauri::command]
+async fn set_relay_config(config: relay_config::RelayConfig) -> Result<(), String> {
+    config.save()
+}
+
 // ─── App Entry ────────────────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -726,6 +739,8 @@ pub fn run() {
             get_space_file_text,
             export_space_file,
             edit_space_file,
+            get_relay_config,
+            set_relay_config,
         ])
         .on_window_event(|window, event| {
             // Gracefully shut down the network task before the window closes,
