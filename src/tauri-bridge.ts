@@ -221,23 +221,56 @@ export async function getChatHistory(peerId: string): Promise<void> {
 }
 
 /** Delete a specific chat message locally. */
-export async function deleteChatMessage(peerId: string, messageId: string): Promise<void> {
-  await invoke("delete_chat_message", { peerId, messageId });
+export async function deleteChatMessage(peerIdOrGroupKey: string, messageId: string): Promise<void> {
+  await invoke("delete_chat_message", { peerId: peerIdOrGroupKey, messageId });
+  
+  // UI update (detect if it's a group or DM)
+  if (peerIdOrGroupKey.startsWith("group_")) {
+    setGroupMessages((prev) => ({
+      ...prev,
+      [peerIdOrGroupKey]: prev[peerIdOrGroupKey]?.filter(m => m.id !== messageId) || []
+    }));
+  } else {
+    setChatMessages((prev) => ({
+      ...prev,
+      [peerIdOrGroupKey]: prev[peerIdOrGroupKey]?.filter(m => m.id !== messageId) || []
+    }));
+  }
+}
+
+/** Delete multiple chat messages locally. */
+export async function deleteChatMessages(peerIdOrGroupKey: string, messageIds: string[]): Promise<void> {
+  await invoke("delete_chat_messages", { peerId: peerIdOrGroupKey, messageIds });
   
   // UI update
-  setChatMessages((prev) => ({
-    ...prev,
-    [peerId]: prev[peerId]?.filter(m => m.id !== messageId) || []
-  }));
+  if (peerIdOrGroupKey.startsWith("group_")) {
+    setGroupMessages((prev) => ({
+      ...prev,
+      [peerIdOrGroupKey]: prev[peerIdOrGroupKey]?.filter(m => !messageIds.includes(m.id)) || []
+    }));
+  } else {
+    setChatMessages((prev) => ({
+      ...prev,
+      [peerIdOrGroupKey]: prev[peerIdOrGroupKey]?.filter(m => !messageIds.includes(m.id)) || []
+    }));
+  }
 }
 
 /** Clear entire chat history for a peer locally. */
-export async function clearChat(peerId: string): Promise<void> {
-  await invoke("clear_chat", { peerId });
-  setChatMessages((prev) => ({
-    ...prev,
-    [peerId]: []
-  }));
+export async function clearChat(peerIdOrGroupKey: string): Promise<void> {
+  await invoke("clear_chat", { peerId: peerIdOrGroupKey });
+  
+  if (peerIdOrGroupKey.startsWith("group_")) {
+    setGroupMessages((prev) => ({
+      ...prev,
+      [peerIdOrGroupKey]: []
+    }));
+  } else {
+    setChatMessages((prev) => ({
+      ...prev,
+      [peerIdOrGroupKey]: []
+    }));
+  }
 }
 
 

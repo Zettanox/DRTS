@@ -1,7 +1,7 @@
 import { Component, createSignal, createMemo, createEffect, For, Show, onMount } from "solid-js";
 import { dms, groups, contacts, identity, chatMessages, groupMessages, activeRightPane, setActiveRightPane, Message } from "../store";
-import { sendMessage as bridgeSendMessage, getChatHistory, sendFile, pauseFileTransfer, resumeFileTransfer, sendGroupMessage, getGroupHistory, sendGroupFile, leaveGroup, removeGroupMember, disbandGroup, deleteChatMessage, clearChat } from "../tauri-bridge";
-import { Send, Paperclip, Users, Shield, X, MapPin, Columns, Check, CheckCheck, Clock, FileIcon, Download, LogOut, UserMinus, Trash2, Hash, Image as ImageIcon, ExternalLink, Trash } from "lucide-solid";
+import { sendMessage as bridgeSendMessage, getChatHistory, sendFile, pauseFileTransfer, resumeFileTransfer, sendGroupMessage, getGroupHistory, sendGroupFile, leaveGroup, removeGroupMember, disbandGroup, deleteChatMessage, deleteChatMessages, clearChat } from "../tauri-bridge";
+import { Send, Paperclip, Users, Shield, X, MapPin, Columns, Check, CheckCheck, Clock, FileIcon, Download, LogOut, UserMinus, Trash2, Hash, Image as ImageIcon, ExternalLink, Trash, CornerUpLeft } from "lucide-solid";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { SpaceEditor } from "../components/SpaceEditor";
 
@@ -9,7 +9,9 @@ export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (prop
   const [inputText, setInputText] = createSignal("");
   const [detailsOpen, setDetailsOpen] = createSignal(false);
   const [activeTab, setActiveTab] = createSignal<"chat" | "space">("chat");
+  const [selectedMessages, setSelectedMessages] = createSignal<string[]>([]);
   let messagesEndRef: HTMLDivElement | undefined;
+  let longPressTimer: number | null = null;
   
   const currentChat = createMemo(() => dms.find(c => c.id === props.id) || groups.find(c => c.id === props.id));
   const isGroup = createMemo(() => !!groups.find(c => c.id === props.id));
@@ -128,77 +130,122 @@ export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (prop
     }
   };
 
+  const toggleMessageSelection = (id: string) => {
+    if (selectedMessages().includes(id)) {
+      setSelectedMessages(prev => prev.filter(mid => mid !== id));
+    } else {
+      setSelectedMessages(prev => [...prev, id]);
+    }
+  };
+
+  const startLongPress = (id: string) => {
+    longPressTimer = window.setTimeout(() => {
+      toggleMessageSelection(id);
+      longPressTimer = null;
+    }, 600); // 600ms long press
+  };
+
+  const cancelLongPress = () => {
+    if (longPressTimer) {
+      clearTimeout(longPressTimer);
+      longPressTimer = null;
+    }
+  };
+
+  const handleDeleteSelected = async () => {
+    const ids = selectedMessages();
+    if (ids.length === 0) return;
+
+    const confirmMsg = ids.length === 1 
+      ? "Delete this message locally?" 
+      : `Delete ${ids.length} messages locally?`;
+
+    if (confirm(confirmMsg)) {
+      const key = isGroup() ? `group_${groupId()}` : peerId()!;
+      await deleteChatMessages(key, ids);
+      setSelectedMessages([]);
+    }
+  };
+
   return (
     <div class="h-full flex flex-col relative w-full overflow-hidden bg-transparent">
       {/* Header */}
-      <div class="h-16 flex items-center justify-between px-4 md:px-6 bg-primary-50 dark:bg-[#1a1513] border-b-2 border-stone-800 dark:border-stone-700 z-10 shrink-0 min-w-0 overflow-hidden">
-        <button 
-          class="flex items-center gap-3 hover:bg-stone-200 dark:hover:bg-stone-800 p-2 -ml-2 rounded-lg transition-colors cursor-pointer text-left focus:outline-none min-w-0 overflow-hidden shrink"
-          onClick={() => setDetailsOpen(true)}
-        >
-          <div class="flex items-center justify-center text-stone-700 dark:text-stone-300 shrink-0">
-            {isGroup() ? <Users size={22} /> : <div class={`w-3 h-3 rounded-full border border-stone-800 ${contact()?.online ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]' : 'bg-stone-400'}`}></div>}
-          </div>
-          <div class="min-w-0 overflow-hidden">
-            <h2 class="font-black text-lg md:text-xl text-stone-900 dark:text-stone-100 leading-tight truncate">
-              {currentChat()?.name || "Unknown"}
-            </h2>
-            <p class="text-xs md:text-sm font-bold text-stone-500 dark:text-stone-400 truncate">
-              {isGroup() ? `${currentChat()?.participants.length} peers` : (contact()?.online ? "Online" : "Offline")}
-            </p>
-          </div>
-        </button>
-
-        <div class={`flex items-center gap-3 ${props.pane === 'right' ? 'mr-10' : ''}`}>
-          {isGroup() && (
-            <div class="flex bg-stone-200 dark:bg-[#2c2421] rounded-lg border-2 border-stone-800 dark:border-stone-700 p-0.5 mr-2">
-              <button
-                class={`px-3 py-1 text-sm font-bold rounded-md transition-all ${
-                  activeTab() === 'chat'
-                    ? "bg-white dark:bg-[#4a3a33] text-primary-600 dark:text-primary-400 border border-stone-800 shadow-[1px_1px_0px_0px_rgba(41,37,36,1)] dark:shadow-none"
-                    : "text-stone-600 dark:text-stone-400 border border-transparent hover:text-stone-900"
-                }`}
-                onClick={() => setActiveTab('chat')}
-              >
-                Chat
-              </button>
-              <button
-                class={`px-3 py-1 text-sm font-bold rounded-md transition-all ${
-                  activeTab() === 'space'
-                    ? "bg-white dark:bg-[#4a3a33] text-primary-600 dark:text-primary-400 border border-stone-800 shadow-[1px_1px_0px_0px_rgba(41,37,36,1)] dark:shadow-none"
-                    : "text-stone-600 dark:text-stone-400 border border-transparent hover:text-stone-900"
-                }`}
-                onClick={() => setActiveTab('space')}
-              >
-                Space
-              </button>
-            </div>
-          )}
-          {props.pane === "left" && !activeRightPane() && (
+      <Show when={selectedMessages().length === 0} fallback={
+        <div class="h-16 flex items-center justify-between px-4 md:px-6 bg-primary-600 dark:bg-primary-900 border-b-2 border-stone-800 dark:border-stone-700 z-10 shrink-0 min-w-0 overflow-hidden text-white animate-in slide-in-from-top-4 duration-200">
+          <div class="flex items-center gap-4">
             <button 
-              class="flat-button-secondary py-1.5 px-3 text-xs md:text-sm flex items-center gap-2 mr-2"
-              onClick={(e) => { e.stopPropagation(); setActiveRightPane({ type: isGroup() ? 'group' : 'dm', id: props.id }); }}
+              onClick={() => setSelectedMessages([])}
+              class="p-2 hover:bg-white/10 rounded-lg transition-colors"
             >
-              <Columns size={16} /> Split
+              <X size={24} />
             </button>
-          )}
-
-          {!isGroup() && (
-            <button
-              class="p-2 text-stone-500 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors border-2 border-transparent hover:border-red-200 dark:hover:border-red-800/30"
-              title="Clear Chat History"
-              onClick={() => {
-                if (confirm("Clear all messages for this chat? This cannot be undone.")) {
-                  const pid = peerId();
-                  if (pid) clearChat(pid);
-                }
-              }}
+            <h2 class="font-black text-lg md:text-xl">{selectedMessages().length} Selected</h2>
+          </div>
+          <div class="flex items-center gap-2">
+             <button 
+              onClick={handleDeleteSelected}
+              class="p-2 hover:bg-white/10 rounded-lg transition-colors flex items-center gap-2 font-bold"
             >
-              <Trash2 size={20} />
+              <Trash2 size={24} />
+              <span class="hidden md:inline">Delete</span>
             </button>
-          )}
+          </div>
         </div>
-      </div>
+      }>
+        <div class="h-16 flex items-center justify-between px-4 md:px-6 bg-primary-50 dark:bg-[#1a1513] border-b-2 border-stone-800 dark:border-stone-700 z-10 shrink-0 min-w-0 overflow-hidden">
+          <button 
+            class="flex items-center gap-3 hover:bg-stone-200 dark:hover:bg-stone-800 p-2 -ml-2 rounded-lg transition-colors cursor-pointer text-left focus:outline-none min-w-0 overflow-hidden shrink"
+            onClick={() => setDetailsOpen(true)}
+          >
+            <div class="flex items-center justify-center text-stone-700 dark:text-stone-300 shrink-0">
+              {isGroup() ? <Users size={22} /> : <div class={`w-3 h-3 rounded-full border border-stone-800 ${contact()?.online ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]' : 'bg-stone-400'}`}></div>}
+            </div>
+            <div class="min-w-0 overflow-hidden">
+              <h2 class="font-black text-lg md:text-xl text-stone-900 dark:text-stone-100 leading-tight truncate">
+                {currentChat()?.name || "Unknown"}
+              </h2>
+              <p class="text-xs md:text-sm font-bold text-stone-500 dark:text-stone-400 truncate">
+                {isGroup() ? `${currentChat()?.participants.length} peers` : (contact()?.online ? "Online" : "Offline")}
+              </p>
+            </div>
+          </button>
+
+          <div class={`flex items-center gap-3 ${props.pane === 'right' ? 'mr-10' : ''}`}>
+            {isGroup() && (
+              <div class="flex bg-stone-200 dark:bg-[#2c2421] rounded-lg border-2 border-stone-800 dark:border-stone-700 p-0.5 mr-2">
+                <button
+                  class={`px-3 py-1 text-sm font-bold rounded-md transition-all ${
+                    activeTab() === 'chat'
+                      ? "bg-white dark:bg-[#4a3a33] text-primary-600 dark:text-primary-400 border border-stone-800 shadow-[1px_1px_0px_0px_rgba(41,37,36,1)] dark:shadow-none"
+                      : "text-stone-600 dark:text-stone-400 border border-transparent hover:text-stone-900"
+                  }`}
+                  onClick={() => setActiveTab('chat')}
+                >
+                  Chat
+                </button>
+                <button
+                  class={`px-3 py-1 text-sm font-bold rounded-md transition-all ${
+                    activeTab() === 'space'
+                      ? "bg-white dark:bg-[#4a3a33] text-primary-600 dark:text-primary-400 border border-stone-800 shadow-[1px_1px_0px_0px_rgba(41,37,36,1)] dark:shadow-none"
+                      : "text-stone-600 dark:text-stone-400 border border-transparent hover:text-stone-900"
+                  }`}
+                  onClick={() => setActiveTab('space')}
+                >
+                  Space
+                </button>
+              </div>
+            )}
+            {props.pane === "left" && !activeRightPane() && (
+              <button 
+                class="flat-button-secondary py-1.5 px-3 text-xs md:text-sm flex items-center gap-2 mr-2"
+                onClick={(e) => { e.stopPropagation(); setActiveRightPane({ type: isGroup() ? 'group' : 'dm', id: props.id }); }}
+              >
+                <Columns size={16} /> Split
+              </button>
+            )}
+          </div>
+        </div>
+      </Show>
 
       <div class="flex-1 flex overflow-hidden w-full relative">
         {activeTab() === 'space' && isGroup() ? (
@@ -215,9 +262,23 @@ export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (prop
             </div>
 
             <For each={messages()}>
-              {(message) => (
-                <div class={`flex w-full ${isMe(message.senderId) ? "justify-end" : "justify-start"}`}>
-                  <div class={`max-w-[85%] md:max-w-[70%] px-5 py-3 relative group font-bold ${
+              {(message) => {
+                const isSelected = createMemo(() => selectedMessages().includes(message.id));
+                return (
+                <div 
+                  class={`flex w-full ${isMe(message.senderId) ? "justify-end" : "justify-start"} px-2 selection-none`}
+                  onPointerDown={() => startLongPress(message.id)}
+                  onPointerUp={() => cancelLongPress()}
+                  onPointerLeave={() => cancelLongPress()}
+                  onClick={() => {
+                    if (selectedMessages().length > 0) {
+                      toggleMessageSelection(message.id);
+                    }
+                  }}
+                >
+                  <div class={`max-w-[85%] md:max-w-[70%] px-5 py-3 relative group font-bold transition-all duration-200 ${
+                    isSelected() ? "bg-primary-500/20 ring-2 ring-primary-500 rounded-xl" : ""
+                  } ${
                     isMe(message.senderId)
                       ? "chamfer-tr-bl chamfer-shadow text-stone-100"
                       : "chamfer-tl-br chamfer-shadow text-stone-800 dark:text-stone-200"
@@ -226,32 +287,6 @@ export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (prop
                       <div class="text-xs font-black mb-1 text-accent-600 dark:text-accent-400">
                         {contacts.find(c => c.peerId === message.senderId)?.petname || message.senderId.slice(0, 12) + '…'}
                       </div>
-                    )}
-
-                    {isMe(message.senderId) && (
-                      <button
-                        class="absolute -left-10 top-1/2 -translate-y-1/2 p-2 text-stone-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
-                        title="Delete Message"
-                        onClick={() => {
-                          const pid = peerId();
-                          if (pid) deleteChatMessage(pid, message.id);
-                        }}
-                      >
-                        <Trash size={14} />
-                      </button>
-                    )}
-
-                    {!isMe(message.senderId) && (
-                      <button
-                        class="absolute -right-10 top-1/2 -translate-y-1/2 p-2 text-stone-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
-                        title="Delete Message"
-                        onClick={() => {
-                          const pid = peerId();
-                          if (pid) deleteChatMessage(pid, message.id);
-                        }}
-                      >
-                        <Trash size={14} />
-                      </button>
                     )}
 
                     {/* File message */}
@@ -269,7 +304,7 @@ export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (prop
                               <img
                                 src={convertFileSrc(fi().filePath!)}
                                 alt={fi().fileName}
-                                class="max-w-full max-h-64 object-contain bg-stone-100 dark:bg-stone-800"
+                                class="max-w-full max-h-[70vh] w-auto h-auto object-cover bg-stone-100 dark:bg-stone-800 block rounded-lg shadow-sm"
                                 loading="lazy"
                               />
                             </div>
@@ -450,45 +485,73 @@ export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (prop
                         );
                       }}
                     </For>
-                  </div>
-                  {/* Group Actions */}
+                     {/* Group Actions */}
                   <div class="space-y-2 mt-4">
                     <button
-                      class="w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm text-amber-700 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900/30 transition-colors"
-                      onClick={() => { const gid = groupId(); if(gid) leaveGroup(gid); }}
+                      class="w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors"
+                      onClick={() => {
+                        const gid = groupId();
+                        if (gid && confirm("Clear all group messages locally? This cannot be undone.")) {
+                          clearChat(`group_${gid}`);
+                        }
+                      }}
                     >
-                      <LogOut size={16} />
-                      Leave Group
+                      <Trash2 size={16} /> Clear Group History
                     </button>
+
+                    <button
+                      class="w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm text-amber-700 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900/30 transition-colors"
+                      onClick={() => { if (confirm("Leave this group?")) { const gid = groupId(); if(gid) leaveGroup(gid); } }}
+                    >
+                      <LogOut size={16} /> Leave Group
+                    </button>
+
                     <Show when={isAdmin()}>
                       <button
                         class="w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm text-red-700 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors"
-                        onClick={() => { const gid = groupId(); if(gid) disbandGroup(gid); }}
+                        onClick={() => { if (confirm("Disband this group? This will remove all members.")) { const gid = groupId(); if(gid) disbandGroup(gid); } }}
                       >
-                        <Trash2 size={16} />
-                        Disband Group
+                        <Trash2 size={16} /> Disband Group
                       </button>
                     </Show>
                   </div>
                 </>
               }>
                 {/* DM Details */}
-                <div class="flat-panel p-4 mb-4 flex flex-col gap-3">
-                   <div class="font-black text-xs uppercase text-stone-500 tracking-wider">Peer ID</div>
-                   <div class="font-mono text-xs text-stone-600 dark:text-stone-400 break-all">{peerId()}</div>
-                </div>
-                {contact() && (
-                  <div class="flat-panel p-4 mb-4 flex flex-col gap-3">
-                    <div class="font-black text-xs uppercase text-stone-500 tracking-wider">Contact Since</div>
-                    <div class="font-bold text-stone-800 dark:text-stone-200">
-                      {new Date((contact()?.addedAt || 0) * 1000).toLocaleDateString()}
-                    </div>
+                <div class="space-y-4">
+                  <div class="flat-panel p-4 flex flex-col gap-3">
+                    <div class="font-black text-xs uppercase text-stone-500 tracking-wider">Peer ID</div>
+                    <div class="font-mono text-xs text-stone-600 dark:text-stone-400 break-all">{peerId()}</div>
                   </div>
-                )}
-                <div class="flat-panel p-4 flex flex-col gap-3">
-                   <div class="font-black text-xs uppercase text-stone-500 tracking-wider">Trust Level</div>
-                   <div class="font-bold text-stone-800 dark:text-stone-200">{contact()?.trustLevel || "Direct"}</div>
+
+                  <Show when={contact()}>
+                    <div class="flat-panel p-4 flex flex-col gap-3">
+                      <div class="font-black text-xs uppercase text-stone-500 tracking-wider">Contact Since</div>
+                      <div class="font-bold text-stone-800 dark:text-stone-200">
+                        {new Date((contact()?.addedAt || 0) * 1000).toLocaleDateString()}
+                      </div>
+                    </div>
+                    <div class="flat-panel p-4 flex flex-col gap-3">
+                      <div class="font-black text-xs uppercase text-stone-500 tracking-wider">Trust Level</div>
+                      <div class="font-bold text-stone-800 dark:text-stone-200">{contact()?.trustLevel || "Direct"}</div>
+                    </div>
+                  </Show>
+
+                  <div class="pt-4 border-t-2 border-stone-800 dark:border-stone-700">
+                    <button
+                      class="w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors"
+                      onClick={() => {
+                        const pid = peerId();
+                        if (pid && confirm("Clear all messages for this contact locally? This cannot be undone.")) {
+                          clearChat(pid);
+                        }
+                      }}
+                    >
+                      <Trash2 size={16} /> Clear Chat history
+                    </button>
+                  </div>
                 </div>
+              </Show>
               </Show>
             </div>
           </div>

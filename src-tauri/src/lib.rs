@@ -331,6 +331,11 @@ async fn delete_chat_message(peer_id: String, message_id: String) -> Result<(), 
 }
 
 #[tauri::command]
+async fn delete_chat_messages(peer_id: String, message_ids: Vec<String>) -> Result<(), String> {
+    messages::delete_messages(&peer_id, &message_ids)
+}
+
+#[tauri::command]
 async fn clear_chat(peer_id: String) -> Result<(), String> {
     messages::clear_chat_history(&peer_id)
 }
@@ -836,6 +841,7 @@ pub fn run() {
             parse_connection_code,
             add_contact_from_code,
             delete_chat_message,
+            delete_chat_messages,
             clear_chat,
         ])
         .on_window_event(|window, event| {

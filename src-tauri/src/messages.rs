@@ -94,9 +94,14 @@ fn write_messages(peer_id: &str, messages: &[StoredMessage]) -> Result<(), Strin
 
 /// Delete a specific message from history.
 pub fn delete_message(peer_id: &str, message_id: &str) -> Result<(), String> {
+    delete_messages(peer_id, &[message_id.to_string()])
+}
+
+/// Delete multiple messages from history.
+pub fn delete_messages(peer_id: &str, message_ids: &[String]) -> Result<(), String> {
     let mut messages = load_messages(peer_id)?;
     let initial_len = messages.len();
-    messages.retain(|m| m.id != message_id);
+    messages.retain(|m| !message_ids.contains(&m.id));
     
     if messages.len() < initial_len {
         write_messages(peer_id, &messages)
