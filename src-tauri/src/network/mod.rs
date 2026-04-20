@@ -247,11 +247,20 @@ pub fn spawn_network(
                                     // A new Relay connection when we already have a connection (Relay or Direct).
                                     // To prevent "Mutual Annihilation" where both peers drop the connection,
                                     // we deterministically assign the "killer" role to the peer with the greater PeerId.
+                                    // The killer keeps the NEW connection and kills ALL OLD relay connections (effectively pruning zombies).
                                     if our_peer_id_str > pid_str {
-                                        println!("[{}] [Stoa Network] Closing redundant relay connection to {pid_str} (Tie-breaker won)",
+                                        println!("[{}] [Stoa Network] Tie-breaker won against {pid_str}: keeping new Relay circuit and closing old zombies.",
                                             chrono::Local::now().format("%H:%M:%S"));
-                                        swarm.close_connection(connection_id);
-                                        continue;
+                                        for (old_ep, old_id) in entry.iter() {
+                                            let old_is_relay = match old_ep {
+                                                libp2p::core::ConnectedPoint::Dialer { address, .. } => address.to_string().contains("p2p-circuit"),
+                                                libp2p::core::ConnectedPoint::Listener { local_addr, send_back_addr } => local_addr.to_string().contains("p2p-circuit") || send_back_addr.to_string().contains("p2p-circuit"),
+                                            };
+                                            if old_is_relay {
+                                                swarm.close_connection(*old_id);
+                                            }
+                                        }
+                                        // We let the logic proceed to push the NEW connection_id to the entry list!
                                     }
                                 }
                             }
