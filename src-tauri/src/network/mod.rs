@@ -139,6 +139,7 @@ pub fn spawn_network(
     let cmd_tx_for_loop = cmd_tx.clone();
     let handle = tokio::spawn(async move {
         let mut pending_messages: Vec<PendingMessage> = vec![];
+        let mut active_connections: HashMap<String, Vec<(libp2p::core::ConnectedPoint, libp2p::swarm::ConnectionId)>> = HashMap::new();
         let mut lan_visible = true;
         let mut active_transfers: HashMap<String, ActiveTransfer> = HashMap::new();
         let mut local_groups: Vec<Group> = groups::load_groups().unwrap_or_default();
@@ -196,21 +197,67 @@ pub fn spawn_network(
                         }
 
                         // ── Connection Events (always active) ───────────────
-                        SwarmEvent::ConnectionEstablished { peer_id: connected_peer, endpoint, .. } => {
-                            // Classify connection type: LAN if mDNS-discovered, Relay otherwise.
-                            // We use peers_map (mDNS) as ground truth — endpoint address is unreliable
-                            // for inbound relay connections (send_back_addr may lack p2p-circuit).
+                        SwarmEvent::ConnectionEstablished {
+                            peer_id: connected_peer,
+                            connection_id,
+                            endpoint,
+                            num_established,
+                            ..
+                        } => {
                             let pid_str = connected_peer.to_string();
                             let is_relay = match &endpoint {
                                 libp2p::core::ConnectedPoint::Dialer { address, .. } => {
                                     address.to_string().contains("p2p-circuit")
                                 }
                                 libp2p::core::ConnectedPoint::Listener { local_addr, send_back_addr } => {
-                                    local_addr.to_string().contains("p2p-circuit") || send_back_addr.to_string().contains("p2p-circuit")
+                                    local_addr.to_string().contains("p2p-circuit")
+                                        || send_back_addr.to_string().contains("p2p-circuit")
                                 }
                             };
                             let conn_type = if is_relay { PeerConnectionType::Relay } else { PeerConnectionType::Lan };
-                            println!("[{}] [Stoa Network] Connection established with {pid_str} ({})", chrono::Local::now().format("%H:%M:%S"),
+
+                            // ── Dual-connection guard ──────────────────────────
+                            // libp2p round-robins requests across ALL connections to a peer.
+                            // dcutr creates a second (direct) connection while the relay one
+                            // is still open — this causes every-other-message to be sent on
+                            // the in-progress direct connection which hasn't negotiated our
+                            // messaging protocol yet → UnsupportedProtocols → silent drop.
+                            //
+                            // Fix: keep exactly ONE connection per peer.
+                            //  • New connection is relay  + already have relay/direct → close NEW one
+                            //  • New connection is direct + only relay exists        → close OLD relay
+                            let entry = active_connections.entry(pid_str.clone()).or_insert_with(Vec::new);
+
+                            if num_established.get() > 1 {
+                                if is_relay {
+                                    // We already have at least one connection (relay or direct).
+                                    // A new relay connection is redundant — close it immediately.
+                                    println!("[{}] [Stoa Network] Closing redundant relay connection to {pid_str}",
+                                        chrono::Local::now().format("%H:%M:%S"));
+                                    swarm.close_connection(connection_id);
+                                    // Don't re-run the connection setup logic
+                                    continue;
+                                } else {
+                                    // New direct (LAN / hole-punched) connection while relay exists.
+                                    // Close all OTHER connections to this peer that are relays; keep this direct one.
+                                    println!("[{}] [Stoa Network] ⚡ Direct connection to {pid_str} — closing any prior relay circuits",
+                                        chrono::Local::now().format("%H:%M:%S"));
+                                    for (old_ep, old_id) in entry.iter() {
+                                        let old_is_relay = match old_ep {
+                                            libp2p::core::ConnectedPoint::Dialer { address, .. } => address.to_string().contains("p2p-circuit"),
+                                            libp2p::core::ConnectedPoint::Listener { local_addr, send_back_addr } => local_addr.to_string().contains("p2p-circuit") || send_back_addr.to_string().contains("p2p-circuit"),
+                                        };
+                                        if old_is_relay {
+                                            swarm.close_connection(*old_id);
+                                        }
+                                    }
+                                }
+                            }
+
+                            entry.push((endpoint.clone(), connection_id));
+
+                            println!("[{}] [Stoa Network] Connection established with {pid_str} ({})",
+                                chrono::Local::now().format("%H:%M:%S"),
                                 if !is_relay { "LAN" } else { "Relay" });
                             conn_types.lock().await.insert(pid_str, conn_type);
 
@@ -240,13 +287,24 @@ pub fn spawn_network(
                             }
                         }
 
-                        SwarmEvent::ConnectionClosed { peer_id: disconnected_peer, .. } => {
-                            conn_types.lock().await.remove(&disconnected_peer.to_string());
-                            handlers::handle_connection_closed(
-                                disconnected_peer,
-                                &contacts,
-                                &app_handle,
-                            ).await;
+
+                        SwarmEvent::ConnectionClosed { peer_id: disconnected_peer, connection_id, endpoint, num_established, cause } => {
+                            let pid_str = disconnected_peer.to_string();
+                            if let Some(conns) = active_connections.get_mut(&pid_str) {
+                                conns.retain(|(_, id)| *id != connection_id);
+                                if conns.is_empty() {
+                                    active_connections.remove(&pid_str);
+                                }
+                            }
+
+                            if num_established == 0 {
+                                conn_types.lock().await.remove(&pid_str);
+                                handlers::handle_connection_closed(
+                                    disconnected_peer,
+                                    &contacts,
+                                    &app_handle,
+                                ).await;
+                            }
                         }
 
                         // ── Messaging (always active) ───────────────────────
