@@ -1070,12 +1070,14 @@ pub async fn handle_incoming_response(
 
 // ─── Utility ─────────────────────────────────────────────────────────────────
 
-/// Dial a peer using its known addresses from the nearby peers map.
+/// Dial a peer using its known LAN and Internet Relay addresses.
 pub async fn dial_peer(
     peers_map: &NearbyPeersMap,
+    contacts: &super::types::ContactsList,
     peer_id_str: &str,
     swarm: &mut Swarm<StoaBehaviour>,
 ) {
+    // 1. Dial local LAN addresses
     let peers = peers_map.lock().await;
     if let Some(peer_info) = peers.get(peer_id_str) {
         for addr_str in &peer_info.addresses {
@@ -1085,4 +1087,18 @@ pub async fn dial_peer(
         }
     }
     drop(peers);
+
+    // 2. Dial known Internet Relay addresses
+    let cts = contacts.lock().await;
+    if let Some(contact) = cts.iter().find(|c| c.peer_id == peer_id_str) {
+        if let Some(addrs) = &contact.known_addrs {
+            for addr_str in addrs {
+                let circuit_addr = format!("{}/p2p-circuit/p2p/{}", addr_str, peer_id_str);
+                if let Ok(maddr) = circuit_addr.parse::<libp2p::Multiaddr>() {
+                    let _ = swarm.dial(maddr);
+                }
+            }
+        }
+    }
+    drop(cts);
 }

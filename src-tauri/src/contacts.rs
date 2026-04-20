@@ -47,11 +47,17 @@ pub fn save_contacts(contacts: &[Contact]) -> Result<(), String> {
         .map_err(|e| format!("Failed to write contacts: {e}"))
 }
 
-/// Add a new contact. Returns Err if already exists.
+/// Add a new contact or update existing one with new connection code. Returns Err on disk failure.
 pub fn add_contact(contacts: &mut Vec<Contact>, peer_id: String, petname: String, known_addrs: Option<Vec<String>>) -> Result<(), String> {
-    if contacts.iter().any(|c| c.peer_id == peer_id) {
-        return Err("Contact already exists".into());
+    if let Some(existing) = contacts.iter_mut().find(|c| c.peer_id == peer_id) {
+        // Update existing contact metadata
+        existing.petname = petname;
+        if known_addrs.is_some() {
+            existing.known_addrs = known_addrs;
+        }
+        return save_contacts(contacts);
     }
+    
     contacts.push(Contact {
         peer_id,
         petname,

@@ -377,7 +377,7 @@ pub fn spawn_network(
                                     swarm.behaviour_mut().messaging.send_request(&target, req);
                                     println!("[Stoa Network] Sent contact request to {peer_id}");
                                 } else {
-                                    handlers::dial_peer(&peers_clone, &peer_id, &mut swarm).await;
+                                    handlers::dial_peer(&peers_clone, &contacts, &peer_id, &mut swarm).await;
                                     pending_messages.push(PendingMessage {
                                         peer_id: target,
                                         request: req,
@@ -420,7 +420,7 @@ pub fn spawn_network(
                                     let encrypted_req = maybe_encrypt_request(&peer_id, req);
                                     swarm.behaviour_mut().messaging.send_request(&target, encrypted_req);
                                 } else {
-                                    handlers::dial_peer(&peers_clone, &peer_id, &mut swarm).await;
+                                    handlers::dial_peer(&peers_clone, &contacts, &peer_id, &mut swarm).await;
                                     pending_messages.push(PendingMessage {
                                         peer_id: target,
                                         request: req,
@@ -509,7 +509,7 @@ pub fn spawn_network(
                                     let encrypted_offer = maybe_encrypt_request(&peer_id, offer);
                                     swarm.behaviour_mut().messaging.send_request(&target, encrypted_offer);
                                 } else {
-                                    handlers::dial_peer(&peers_clone, &peer_id, &mut swarm).await;
+                                    handlers::dial_peer(&peers_clone, &contacts, &peer_id, &mut swarm).await;
                                     pending_messages.push(PendingMessage {
                                         peer_id: target,
                                         request: offer,
@@ -602,7 +602,7 @@ pub fn spawn_network(
                                                 swarm.behaviour_mut().messaging.send_request(&target, encrypted_invite);
                                             } else {
                                                 println!("[Stoa Group] Member {mid} offline, queueing invite and dialing...");
-                                                handlers::dial_peer(&peers_clone, mid, &mut swarm).await;
+                                                handlers::dial_peer(&peers_clone, &contacts, mid, &mut swarm).await;
                                                 pending_messages.push(PendingMessage {
                                                     peer_id: target,
                                                     request: invite,
@@ -664,7 +664,7 @@ pub fn spawn_network(
                                         if swarm.is_connected(&target) {
                                             swarm.behaviour_mut().messaging.send_request(&target, encrypted_req);
                                         } else {
-                                            handlers::dial_peer(&peers_clone, mid, &mut swarm).await;
+                                            handlers::dial_peer(&peers_clone, &contacts, mid, &mut swarm).await;
                                             pending_messages.push(PendingMessage {
                                                 peer_id: target,
                                                 request: req,
@@ -746,7 +746,7 @@ pub fn spawn_network(
                                                 if swarm.is_connected(&target) {
                                                     swarm.behaviour_mut().messaging.send_request(&target, encrypted_offer);
                                                 } else {
-                                                    handlers::dial_peer(&peers_clone, mid, &mut swarm).await;
+                                                    handlers::dial_peer(&peers_clone, &contacts, mid, &mut swarm).await;
                                                     pending_messages.push(PendingMessage {
                                                         peer_id: target,
                                                         request: offer_clone,
@@ -777,7 +777,7 @@ pub fn spawn_network(
                                         if swarm.is_connected(&target) {
                                             swarm.behaviour_mut().messaging.send_request(&target, encrypted_req);
                                         } else {
-                                            handlers::dial_peer(&peers_clone, mid, &mut swarm).await;
+                                            handlers::dial_peer(&peers_clone, &contacts, mid, &mut swarm).await;
                                             pending_messages.push(PendingMessage {
                                                 peer_id: target,
                                                 request: req,
@@ -810,7 +810,7 @@ pub fn spawn_network(
                                         if swarm.is_connected(&target) {
                                             swarm.behaviour_mut().messaging.send_request(&target, encrypted_req);
                                         } else {
-                                            handlers::dial_peer(&peers_clone, mid, &mut swarm).await;
+                                            handlers::dial_peer(&peers_clone, &contacts, mid, &mut swarm).await;
                                             pending_messages.push(PendingMessage {
                                                 peer_id: target,
                                                 request: req,
@@ -842,7 +842,7 @@ pub fn spawn_network(
                                         if swarm.is_connected(&target) {
                                             swarm.behaviour_mut().messaging.send_request(&target, encrypted_req);
                                         } else {
-                                            handlers::dial_peer(&peers_clone, mid, &mut swarm).await;
+                                            handlers::dial_peer(&peers_clone, &contacts, mid, &mut swarm).await;
                                             pending_messages.push(PendingMessage {
                                                 peer_id: target,
                                                 request: req,
@@ -873,7 +873,7 @@ pub fn spawn_network(
                                             if swarm.is_connected(&target) {
                                                 swarm.behaviour_mut().messaging.send_request(&target, encrypted_req);
                                             } else {
-                                                handlers::dial_peer(&peers_clone, mid, &mut swarm).await;
+                                                handlers::dial_peer(&peers_clone, &contacts, mid, &mut swarm).await;
                                                 pending_messages.push(PendingMessage {
                                                     peer_id: target,
                                                     request: req,
@@ -903,7 +903,7 @@ pub fn spawn_network(
                                             if swarm.is_connected(&target) {
                                                 swarm.behaviour_mut().messaging.send_request(&target, encrypted_req);
                                             } else {
-                                                handlers::dial_peer(&peers_clone, mid, &mut swarm).await;
+                                                handlers::dial_peer(&peers_clone, &contacts, mid, &mut swarm).await;
                                                 pending_messages.push(PendingMessage {
                                                     peer_id: target,
                                                     request: req,
@@ -939,7 +939,7 @@ pub fn spawn_network(
                                             if swarm.is_connected(&target) {
                                                 swarm.behaviour_mut().messaging.send_request(&target, encrypted_req);
                                             } else {
-                                                handlers::dial_peer(&peers_clone, mid, &mut swarm).await;
+                                                handlers::dial_peer(&peers_clone, &contacts, mid, &mut swarm).await;
                                                 pending_messages.push(PendingMessage {
                                                     peer_id: target,
                                                     request: req,
@@ -974,7 +974,7 @@ pub fn spawn_network(
                                             if swarm.is_connected(&target) {
                                                 swarm.behaviour_mut().messaging.send_request(&target, encrypted_req);
                                             } else {
-                                                handlers::dial_peer(&peers_clone, mid, &mut swarm).await;
+                                                handlers::dial_peer(&peers_clone, &contacts, mid, &mut swarm).await;
                                                 pending_messages.push(PendingMessage {
                                                     peer_id: target,
                                                     request: req,
@@ -1003,28 +1003,13 @@ pub fn spawn_network(
                 // ── Reconnection Sweep ──────────────────────────────────
                 _ = reconnect_interval.tick() => {
                     let cts = contacts.lock().await;
-                    // We clone the necessary data so we can drop the lock quickly
-                    let contact_data: Vec<(String, Option<Vec<String>>)> = cts
-                        .iter()
-                        .map(|c| (c.peer_id.clone(), c.known_addrs.clone()))
-                        .collect();
+                    let contact_ids: Vec<String> = cts.iter().map(|c| c.peer_id.clone()).collect();
                     drop(cts);
 
-                    for (pid, known_addrs) in contact_data {
+                    for pid in contact_ids {
                         if let Ok(target) = PeerId::from_str(&pid) {
                             if !swarm.is_connected(&target) {
-                                // 1. Try cached LAN addresses if any
-                                handlers::dial_peer(&peers_clone, &pid, &mut swarm).await;
-                                
-                                // 2. Try known Internet Relay addresses
-                                if let Some(addrs) = known_addrs {
-                                    for addr_str in addrs {
-                                        let circuit_addr = format!("{}/p2p-circuit/p2p/{}", addr_str, pid);
-                                        if let Ok(maddr) = circuit_addr.parse::<libp2p::Multiaddr>() {
-                                            let _ = swarm.dial(maddr);
-                                        }
-                                    }
-                                }
+                                handlers::dial_peer(&peers_clone, &contacts, &pid, &mut swarm).await;
                             }
                         }
                     }
