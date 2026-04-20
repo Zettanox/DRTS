@@ -302,6 +302,21 @@ pub fn spawn_network(
                         SwarmEvent::NewListenAddr { address, .. } => {
                             println!("[Stoa Network] Listening on {address}");
                         }
+                        SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
+                            eprintln!("[Stoa Network] ❌ Outgoing connection error to {:?}: {error}", peer_id);
+                        }
+                        SwarmEvent::IncomingConnectionError { error, .. } => {
+                            eprintln!("[Stoa Network] ❌ Incoming connection error: {error}");
+                        }
+                        SwarmEvent::ListenerError { listener_id, error } => {
+                            eprintln!("[Stoa Network] ❌ Listener {listener_id:?} error: {error}");
+                        }
+                        SwarmEvent::ListenerClosed { listener_id, reason, .. } => {
+                            eprintln!("[Stoa Network] ⚠ Listener {listener_id:?} closed: {reason:?}");
+                        }
+                        SwarmEvent::Dialing { peer_id, .. } => {
+                            println!("[Stoa Network] 📡 Dialing {:?}...", peer_id);
+                        }
                         _ => {}
                     }
                 }
