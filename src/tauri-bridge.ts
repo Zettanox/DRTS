@@ -756,3 +756,48 @@ export async function setupNetworkListeners(): Promise<void> {
   // Load groups
   await getGroups();
 }
+
+// ─── Relay Config ─────────────────────────────────────────────────────────────
+
+export interface RelayEntry {
+  label: string;
+  address: string;
+  enabled: boolean;
+}
+
+export interface RelayConfig {
+  relays: RelayEntry[];
+}
+
+export async function getRelayConfig(): Promise<RelayConfig> {
+  return invoke<RelayConfig>("get_relay_config");
+}
+
+export async function setRelayConfig(config: RelayConfig): Promise<void> {
+  return invoke("set_relay_config", { config });
+}
+
+// ─── Connection Codes ─────────────────────────────────────────────────────────
+
+export interface MyConnectionCode {
+  code: string;
+  /** Base64-encoded SVG string */
+  qr_svg_b64: string;
+}
+
+export async function getMyConnectionCode(): Promise<MyConnectionCode> {
+  return invoke<MyConnectionCode>("get_my_connection_code");
+}
+
+export async function parseConnectionCode(
+  code: string
+): Promise<{ peer_id: string; relay_addrs: string[] }> {
+  return invoke("parse_connection_code", { code });
+}
+
+export async function addContactFromCode(
+  code: string,
+  petname: string
+): Promise<void> {
+  return invoke("add_contact_from_code", { code, petname });
+}

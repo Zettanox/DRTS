@@ -53,14 +53,14 @@ export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (prop
     return chatMessages[pid] || [];
   });
 
-  // Load chat history on mount
-  onMount(async () => {
+  // Load chat history when the active chat changes
+  createEffect(() => {
     if (isGroup()) {
       const gid = groupId();
-      if (gid) await getGroupHistory(gid);
+      if (gid) getGroupHistory(gid);
     } else {
       const pid = peerId();
-      if (pid) await getChatHistory(pid);
+      if (pid) getChatHistory(pid);
     }
   });
 
