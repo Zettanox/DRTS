@@ -381,10 +381,12 @@ export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (prop
                       {formatTime(message.timestamp)}
                       {deliveryIcon(message)}
                     </div>
+                    </div>
                   </div>
-                </div>
-              )}
+                );
+              }}
             </For>
+
             <div ref={messagesEndRef} />
           </div>
 
@@ -551,7 +553,6 @@ export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (prop
                     </button>
                   </div>
                 </div>
-              </Show>
               </Show>
             </div>
           </div>
