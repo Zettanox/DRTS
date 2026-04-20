@@ -123,7 +123,7 @@ pub enum NetworkCommand {
 }
 
 /// A message waiting for a connection to be established.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PendingMessage {
     pub peer_id: PeerId,
     pub request: StoaRequest,

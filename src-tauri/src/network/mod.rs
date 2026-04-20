@@ -153,6 +153,7 @@ pub fn spawn_network(
     let cmd_tx_for_loop = cmd_tx.clone();
     let handle = tokio::spawn(async move {
         let mut pending_messages: Vec<PendingMessage> = vec![];
+        let mut inflight_messages: HashMap<libp2p::request_response::OutboundRequestId, PendingMessage> = HashMap::new();
         let mut active_connections: HashMap<String, Vec<(libp2p::core::ConnectedPoint, libp2p::swarm::ConnectionId)>> = HashMap::new();
         let mut lan_visible = true;
         let mut active_transfers: HashMap<String, ActiveTransfer> = HashMap::new();
@@ -293,6 +294,7 @@ pub fn spawn_network(
                                 &mut swarm,
                                 &app_handle,
                                 &mut pending_messages,
+                                &mut inflight_messages,
                             ).await;
 
                             // Auto-initiate E2E key exchange for contacts without a session
@@ -385,19 +387,29 @@ pub fn spawn_network(
 
                         // ── Request/Response Failures ───────────────────────
                         // OutboundFailure: a request WE SENT failed to deliver.
-                        // This is the root cause of stalled file transfers:
-                        // FetchChunk requests sent by the receiver can fail silently
-                        // over relay substreams, causing the sender to never respond.
                         SwarmEvent::Behaviour(StoaBehaviourEvent::Messaging(
-                            request_response::Event::OutboundFailure { peer, error, .. },
+                            request_response::Event::OutboundFailure { peer, request_id, error, .. },
                         )) => {
-                            eprintln!("[{}] [Stoa Network] ⚠ Outbound request to {} failed ({error:?}) — checking for stalled transfers",
-                                chrono::Local::now().format("%H:%M:%S"), peer);
-                            handlers::handle_outbound_failure(
-                                &peer,
-                                &mut active_transfers,
-                                &mut swarm,
-                            ).await;
+                            eprintln!("[{}] [Stoa Network] ⚠ Outbound request to {peer} failed ({error:?}) — checking for stalled transfers", chrono::Local::now().format("%H:%M:%S"));
+                            
+                            // If this was a chat message that failed in-flight, it's highly likely
+                            // the connection it was racing on (e.g., dual relay circuits) was closed.
+                            // We immediately pop it from inflight and requeue it so it gets sent via the surviving connection!
+                            if let Some(pending) = inflight_messages.remove(&request_id) {
+                                if swarm.is_connected(&peer) {
+                                    let req_clone = pending.clone();
+                                    let encrypted_req = maybe_encrypt_request(&req_clone.peer_id_str, req_clone.request);
+                                    let new_req_id = swarm.behaviour_mut().messaging.send_request(&peer, encrypted_req);
+                                    inflight_messages.insert(new_req_id, pending);
+                                    println!("[{}] [Stoa Network] 🔄 Automatically retrying dropped chat message to {}", chrono::Local::now().format("%H:%M:%S"), peer);
+                                } else {
+                                    println!("[{}] [Stoa Network] 🔄 Peer {} disconnected, returning chat message to pending queue", chrono::Local::now().format("%H:%M:%S"), peer);
+                                    handlers::dial_peer(&peers_clone, &contacts, &pending.peer_id_str, &mut swarm).await;
+                                    pending_messages.push(pending);
+                                }
+                            }
+                            
+                            handlers::handle_outbound_failure(&peer, &mut active_transfers, &mut swarm).await;
                         }
 
                         // InboundFailure: a response WE SENT back failed to reach the requester.
@@ -599,8 +611,16 @@ pub fn spawn_network(
                                 let _ = messages::save_message(&peer_id, &msg);
 
                                 if swarm.is_connected(&target) {
+                                    let req_clone = req.clone();
                                     let encrypted_req = maybe_encrypt_request(&peer_id, req);
-                                    swarm.behaviour_mut().messaging.send_request(&target, encrypted_req);
+                                    let req_id = swarm.behaviour_mut().messaging.send_request(&target, encrypted_req);
+                                    inflight_messages.insert(req_id, PendingMessage {
+                                        peer_id: target,
+                                        request: req_clone,
+                                        peer_id_str: peer_id.clone(),
+                                        message_id: Some(message_id),
+                                        content: Some(content),
+                                    });
                                 } else {
                                     handlers::dial_peer(&peers_clone, &contacts, &peer_id, &mut swarm).await;
                                     pending_messages.push(PendingMessage {

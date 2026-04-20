@@ -10,10 +10,10 @@ export const Topbar: Component = () => {
         {activeLeftPane() && (
           <button 
             onClick={(e) => { e.preventDefault(); setActiveLeftPane(null); }}
-            onTouchStart={(e) => { e.preventDefault(); setActiveLeftPane(null); }}
-            class="md:hidden p-2 text-stone-600 hover:bg-stone-200 rounded-lg -ml-2"
+            class="md:hidden w-12 h-12 flex items-center justify-center text-stone-600 hover:bg-stone-200 rounded-lg -ml-3"
+            aria-label="Back to chat list"
           >
-            <ChevronLeft size={24} />
+            <ChevronLeft size={28} />
           </button>
         )}
         <div class="w-8 h-8 md:w-9 md:h-9 chamfer-all chamfer-shadow flex items-center justify-center text-white font-black text-lg md:text-xl" style="--bg-color: var(--color-primary-500); --chamfer-outer: 6px; --chamfer-inner: 4px; --shadow-x: 2px; --shadow-y: 2px;">

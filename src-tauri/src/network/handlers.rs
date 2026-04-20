@@ -76,6 +76,7 @@ pub async fn handle_connection_established(
     swarm: &mut Swarm<StoaBehaviour>,
     app_handle: &AppHandle,
     pending_messages: &mut Vec<super::types::PendingMessage>,
+    inflight_messages: &mut std::collections::HashMap<libp2p::request_response::OutboundRequestId, super::types::PendingMessage>,
 ) {
     let pid = connected_peer.to_string();
     // Note: the caller already logs the connection with its type (LAN/Relay)
@@ -99,12 +100,14 @@ pub async fn handle_connection_established(
     for pm in pending_messages.drain(..) {
         if pm.peer_id == connected_peer {
             // E2E Encrypt the queued message if a session exists (or wait if we just asked for KeyExchange)
+            let pm_clone = pm.clone();
             let encrypted_req = super::maybe_encrypt_request(&pid, pm.request);
 
-            swarm
+            let req_id = swarm
                 .behaviour_mut()
                 .messaging
-                .send_request(&pm.peer_id, encrypted_req);
+                .send_request(&pm_clone.peer_id, encrypted_req);
+            inflight_messages.insert(req_id, pm_clone);
             println!("[{}] [Stoa Network] Flushed queued message to {pid}", chrono::Local::now().format("%H:%M:%S"));
         } else {
             remaining.push(pm);
