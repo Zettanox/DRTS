@@ -381,11 +381,11 @@ export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (prop
                       {formatTime(message.timestamp)}
                       {deliveryIcon(message)}
                     </div>
-                    </div>
                   </div>
-                );
-              }}
-            </For>
+                </div>
+              );
+            }}
+          </For>
 
             <div ref={messagesEndRef} />
           </div>
@@ -487,7 +487,8 @@ export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (prop
                         );
                       }}
                     </For>
-                     {/* Group Actions */}
+                  </div>
+                  {/* Group Actions */}
                   <div class="space-y-2 mt-4">
                     <button
                       class="w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors"
