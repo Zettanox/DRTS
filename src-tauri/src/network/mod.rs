@@ -144,7 +144,7 @@ pub fn spawn_network(
         let our_peer_id_str = peer_id.to_string();
 
         // Reconnection sweep interval — retries cached addresses for offline contacts
-        let mut reconnect_interval = tokio::time::interval(std::time::Duration::from_secs(10));
+        let mut reconnect_interval = tokio::time::interval(std::time::Duration::from_secs(60));
         reconnect_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
         loop {
@@ -290,10 +290,14 @@ pub fn spawn_network(
                         SwarmEvent::Behaviour(StoaBehaviourEvent::Identify(
                             identify::Event::Received { peer_id: identified_peer, info, .. },
                         )) => {
-                            // Add observed external addresses from identify to the swarm's
-                            // address book — required for hole punching to work correctly.
+                            // Only add relay-circuit addresses to the address book.
+                            // Adding raw NAT'd IPs (e.g. /ip4/152.x.x.x/tcp/...) causes
+                            // futile direct-dial attempts that always time out.
                             for addr in &info.listen_addrs {
-                                swarm.add_peer_address(identified_peer, addr.clone());
+                                let addr_str = addr.to_string();
+                                if addr_str.contains("p2p-circuit") || addr_str.starts_with("/ip4/192.168.") || addr_str.starts_with("/ip4/10.") || addr_str.starts_with("/ip4/127.") {
+                                    swarm.add_peer_address(identified_peer, addr.clone());
+                                }
                             }
                         }
                         SwarmEvent::Behaviour(StoaBehaviourEvent::Identify(_)) => {}

@@ -61,11 +61,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
     println!("║  ExtIP  : {}", args.external_ip);
     println!("╚══════════════════════════════════════════════════╝");
 
-    // Generous limits for a hosted relay; tune to your VPS resources
+    // Generous limits for a personal relay — long-lived circuits for chat + file transfer
     let relay_config = relay::Config {
         max_reservations: 1024,
         max_circuits: 256,
-        max_circuit_bytes: 64 * 1024 * 1024, // 64 MiB per circuit
+        max_circuit_duration: std::time::Duration::from_secs(3600),  // 1 hour per circuit (default: 2 min!)
+        max_circuit_bytes: 512 * 1024 * 1024,                       // 512 MiB per circuit
+        reservation_duration: std::time::Duration::from_secs(3600),  // 1 hour reservations
         ..Default::default()
     };
 

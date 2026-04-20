@@ -145,7 +145,7 @@ export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (prop
               {currentChat()?.name || "Unknown"}
             </h2>
             <p class="text-xs md:text-sm font-bold text-stone-500 dark:text-stone-400 truncate">
-              {isGroup() ? `${currentChat()?.participants.length} peers` : (contact()?.online ? "Online — LAN" : "Offline")}
+              {isGroup() ? `${currentChat()?.participants.length} peers` : (contact()?.online ? "Online" : "Offline")}
             </p>
           </div>
         </button>
@@ -382,7 +382,7 @@ export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (prop
               <h2 class="text-2xl font-black text-stone-900 dark:text-stone-100 text-center">{currentChat()?.name}</h2>
               {!isGroup() && (
                 <div class="flex items-center gap-2 text-stone-500 dark:text-stone-400 font-bold text-sm">
-                  <MapPin size={16} /> {contact()?.online ? "Online — LAN Direct" : "Offline"}
+                  <MapPin size={16} /> {contact()?.online ? "Online" : "Offline"}
                 </div>
               )}
             </div>
