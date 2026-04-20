@@ -98,11 +98,14 @@ pub async fn handle_connection_established(
     let mut remaining = vec![];
     for pm in pending_messages.drain(..) {
         if pm.peer_id == connected_peer {
+            // E2E Encrypt the queued message if a session exists (or wait if we just asked for KeyExchange)
+            let encrypted_req = super::maybe_encrypt_request(&pid, pm.request);
+
             swarm
                 .behaviour_mut()
                 .messaging
-                .send_request(&pm.peer_id, pm.request);
-            println!("[Stoa Network] Flushed queued message to {pid}");
+                .send_request(&pm.peer_id, encrypted_req);
+            println!("[{}] [Stoa Network] Flushed queued message to {pid}", chrono::Local::now().format("%H:%M:%S"));
         } else {
             remaining.push(pm);
         }
@@ -117,7 +120,7 @@ pub async fn handle_connection_closed(
     app_handle: &AppHandle,
 ) {
     let pid = disconnected_peer.to_string();
-    println!("[Stoa Network] Connection closed with {pid}");
+    println!("[{}] [Stoa Network] Connection closed with {pid}", chrono::Local::now().format("%H:%M:%S"));
 
     let cts = contacts.lock().await;
     let is_contact = cts.iter().any(|c| c.peer_id == pid);
@@ -145,7 +148,7 @@ pub async fn handle_incoming_request(
     match request {
         StoaRequest::WhoAreYou => {
             let pid = peer.to_string();
-            println!("[Stoa Network] WhoAreYou from {pid} — replying with '{our_name}'");
+            println!("[{}] [Stoa Network] WhoAreYou from {pid} — replying with '{our_name}'", chrono::Local::now().format("%H:%M:%S"));
             let response = StoaResponse::PeerIdentity {
                 name: our_name.to_string(),
             };
@@ -158,7 +161,7 @@ pub async fn handle_incoming_request(
             from_peer_id,
             from_name,
         } => {
-            println!("[Stoa Network] Contact request from {from_name} ({from_peer_id})");
+            println!("[{}] [Stoa Network] Contact request from {from_name} ({from_peer_id})", chrono::Local::now().format("%H:%M:%S"));
 
             #[derive(Serialize, Clone)]
             struct ContactRequestEvent {
@@ -190,7 +193,7 @@ pub async fn handle_incoming_request(
             sender_name,
         } => {
             let sender_id = peer.to_string();
-            println!("[Stoa Network] Message from {sender_name}: {content}");
+            println!("[{}] [Stoa Network] Message from {sender_name}: {content}", chrono::Local::now().format("%H:%M:%S"));
 
             // Persist incoming message
             let msg = StoredMessage {
@@ -450,7 +453,7 @@ pub async fn handle_incoming_request(
                             active_transfers.remove(&transfer_id);
                         }
                     } else {
-                        eprintln!("[Stoa File] Failed to read chunk {chunk_index} for {}", transfer_id);
+                        eprintln!("[{}] [Stoa File] Failed to read chunk {chunk_index} for {}", chrono::Local::now().format("%H:%M:%S"), transfer_id);
                     }
                 }
             }
@@ -459,14 +462,14 @@ pub async fn handle_incoming_request(
             x25519_public_key_hex,
         } => {
             let pid = peer.to_string();
-            println!("[Stoa Crypto] KeyExchange from {pid}");
+            println!("[{}] [Stoa Crypto] KeyExchange from {pid}", chrono::Local::now().format("%H:%M:%S"));
 
             match crypto::compute_shared_secret(our_keypair, &x25519_public_key_hex) {
                 Ok(shared_secret) => {
                     if let Err(e) = crypto::save_session(&pid, &shared_secret) {
-                        eprintln!("[Stoa Crypto] Failed to save session: {e}");
+                        eprintln!("[{}] [Stoa Crypto] Failed to save session: {e}", chrono::Local::now().format("%H:%M:%S"));
                     } else {
-                        println!("[Stoa Crypto] Session established with {pid}");
+                        println!("[{}] [Stoa Crypto] Session established with {pid}", chrono::Local::now().format("%H:%M:%S"));
                     }
 
                     // Respond with our X25519 public key
@@ -480,10 +483,10 @@ pub async fn handle_incoming_request(
                                 .messaging
                                 .send_response(channel, response);
                         }
-                        Err(e) => eprintln!("[Stoa Crypto] Failed to derive our X25519 key: {e}"),
+                        Err(e) => eprintln!("[{}] [Stoa Crypto] Failed to derive our X25519 key: {e}", chrono::Local::now().format("%H:%M:%S")),
                     }
                 }
-                Err(e) => eprintln!("[Stoa Crypto] ECDH failed: {e}"),
+                Err(e) => eprintln!("[{}] [Stoa Crypto] ECDH failed: {e}", chrono::Local::now().format("%H:%M:%S")),
             }
         }
         StoaRequest::EncryptedEnvelope {
@@ -497,7 +500,7 @@ pub async fn handle_incoming_request(
                     // Deserialize the inner message and dispatch
                     match serde_json::from_slice::<StoaRequest>(&plaintext) {
                         Ok(inner_request) => {
-                            println!("[Stoa Crypto] Decrypted envelope from {pid}");
+                            println!("[{}] [Stoa Crypto] Decrypted envelope from {pid}", chrono::Local::now().format("%H:%M:%S"));
                             // Recursively handle the decrypted inner request.
                             // We create a dummy channel situation — the inner request
                             // should use the original channel for its response.
@@ -517,15 +520,15 @@ pub async fn handle_incoming_request(
                             .await;
                         }
                         Err(e) => {
-                            eprintln!("[Stoa Crypto] Failed to deserialize decrypted payload: {e}");
+                            eprintln!("[{}] [Stoa Crypto] Failed to deserialize decrypted payload: {e}", chrono::Local::now().format("%H:%M:%S"));
                         }
                     }
                 }
                 Ok(None) => {
-                    eprintln!("[Stoa Crypto] No session for {pid} — cannot decrypt envelope");
+                    eprintln!("[{}] [Stoa Crypto] No session for {pid} — cannot decrypt envelope", chrono::Local::now().format("%H:%M:%S"));
                 }
                 Err(e) => {
-                    eprintln!("[Stoa Crypto] Decryption failed from {pid}: {e}");
+                    eprintln!("[{}] [Stoa Crypto] Decryption failed from {pid}: {e}", chrono::Local::now().format("%H:%M:%S"));
                 }
             }
         }
@@ -538,7 +541,7 @@ pub async fn handle_incoming_request(
             inviter_name,
         } => {
             let pid = peer.to_string();
-            println!("[Stoa Group] GroupInvite from {inviter_name}: '{group_name}' ({group_id})");
+            println!("[{}] [Stoa Group] GroupInvite from {inviter_name}: '{group_name}' ({group_id})", chrono::Local::now().format("%H:%M:%S"));
 
             let group = Group {
                 id: group_id.clone(),
@@ -549,7 +552,7 @@ pub async fn handle_incoming_request(
             };
 
             if let Err(e) = groups::add_group_from_invite(groups, group) {
-                eprintln!("[Stoa Group] Failed to save group: {e}");
+                eprintln!("[{}] [Stoa Group] Failed to save group: {e}", chrono::Local::now().format("%H:%M:%S"));
             }
 
             // Notify frontend
@@ -589,12 +592,12 @@ pub async fn handle_incoming_request(
             sender_name,
         } => {
             let sender_id = peer.to_string();
-            println!("[Stoa Group] Message in '{group_id}' from {sender_name}: {content}");
+            println!("[{}] [Stoa Group] Message in '{group_id}' from {sender_name}: {content}", chrono::Local::now().format("%H:%M:%S"));
 
             // Check if we know this group; if not, it may be stale
             let known = groups.iter().any(|g| g.id == group_id);
             if !known {
-                println!("[Stoa Group] Unknown group {group_id} — ignoring");
+                println!("[{}] [Stoa Group] Unknown group {group_id} — ignoring", chrono::Local::now().format("%H:%M:%S"));
                 let response = StoaResponse::MessageAck { id };
                 let _ = swarm
                     .behaviour_mut()
@@ -749,7 +752,7 @@ pub async fn handle_incoming_request(
             group_id,
             removed_peer_id,
         } => {
-            println!("[Stoa Group] MemberRemoved: {removed_peer_id} from {group_id}");
+            println!("[{}] [Stoa Group] MemberRemoved: {removed_peer_id} from {group_id}", chrono::Local::now().format("%H:%M:%S"));
             if removed_peer_id == our_peer_id {
                 // We were removed
                 let _ = groups::remove_group(groups, &group_id);
@@ -771,7 +774,7 @@ pub async fn handle_incoming_request(
             group_id,
             peer_id,
         } => {
-            println!("[Stoa Group] MemberLeft: {peer_id} from {group_id}");
+            println!("[{}] [Stoa Group] MemberLeft: {peer_id} from {group_id}", chrono::Local::now().format("%H:%M:%S"));
             let _ = groups::remove_member(groups, &group_id, &peer_id);
             let _ = app_handle.emit("group-member-update", &serde_json::json!({
                 "group_id": group_id,
@@ -781,7 +784,7 @@ pub async fn handle_incoming_request(
             let _ = swarm.behaviour_mut().messaging.send_response(channel, response);
         }
         StoaRequest::GroupDisbanded { group_id } => {
-            println!("[Stoa Group] GroupDisbanded: {group_id}");
+            println!("[{}] [Stoa Group] GroupDisbanded: {group_id}", chrono::Local::now().format("%H:%M:%S"));
             let _ = groups::remove_group(groups, &group_id);
             let _ = app_handle.emit("group-removed", &serde_json::json!({
                 "group_id": group_id,
@@ -791,7 +794,7 @@ pub async fn handle_incoming_request(
             let _ = swarm.behaviour_mut().messaging.send_response(channel, response);
         }
         StoaRequest::GroupSpaceSync { group_id, state_vector_b64 } => {
-            println!("[Stoa Space] Sync request from {} for {}", peer.to_string(), group_id);
+            println!("[{}] [Stoa Space] Sync request from {} for {}", chrono::Local::now().format("%H:%M:%S"), peer.to_string(), group_id);
             if let Ok(sv_bytes) = base64::decode(&state_vector_b64) {
                 if let Ok(update_bytes) = crate::crdt::encode_diff(&group_id, &sv_bytes).await {
                     let response = StoaResponse::GroupSpaceSyncReply {
@@ -803,7 +806,7 @@ pub async fn handle_incoming_request(
             }
         }
         StoaRequest::GroupSpaceUpdate { group_id, update_b64 } => {
-            println!("[Stoa Space] Live update from {} for {}", peer.to_string(), group_id);
+            println!("[{}] [Stoa Space] Live update from {} for {}", chrono::Local::now().format("%H:%M:%S"), peer.to_string(), group_id);
             if let Ok(update_bytes) = base64::decode(&update_b64) {
                 if let Ok(_) = crate::crdt::apply_remote_update(&group_id, &update_bytes).await {
                     let _ = app_handle.emit("space-remote-update", &serde_json::json!({
@@ -835,7 +838,7 @@ pub async fn handle_incoming_response(
     match response {
         StoaResponse::PeerIdentity { name } => {
             let pid = peer.to_string();
-            println!("[Stoa Network] Peer {pid} identified as '{name}'");
+            println!("[{}] [Stoa Network] Peer {pid} identified as '{name}'", chrono::Local::now().format("%H:%M:%S"));
 
             let mut peers = peers_map.lock().await;
             let entry = peers
@@ -852,7 +855,7 @@ pub async fn handle_incoming_response(
         }
         StoaResponse::ContactAccepted { name } => {
             let pid = peer.to_string();
-            println!("[Stoa Network] Contact accepted by {name} ({pid})");
+            println!("[{}] [Stoa Network] Contact accepted by {name} ({pid})", chrono::Local::now().format("%H:%M:%S"));
 
             #[derive(Serialize, Clone)]
             struct ContactAcceptedEvent {
@@ -870,7 +873,7 @@ pub async fn handle_incoming_response(
         }
         StoaResponse::ContactRejected => {
             let pid = peer.to_string();
-            println!("[Stoa Network] Contact rejected by {pid}");
+            println!("[{}] [Stoa Network] Contact rejected by {pid}", chrono::Local::now().format("%H:%M:%S"));
             let _ = app_handle.emit("contact-rejected", &pid);
         }
         StoaResponse::MessageAck { id } => {
@@ -892,13 +895,13 @@ pub async fn handle_incoming_response(
             );
         }
         StoaResponse::FileAccepted { transfer_id } => {
-            println!("[Stoa File] FileAccepted for {transfer_id} — awaiting Fetch requests");
+            println!("[{}] [Stoa File] FileAccepted for {transfer_id} — awaiting Fetch requests", chrono::Local::now().format("%H:%M:%S"));
             if let Some(transfer) = active_transfers.get_mut(&transfer_id) {
                 transfer.status = TransferStatus::Transferring;
             }
         }
         StoaResponse::FileRejected { transfer_id } => {
-            println!("[Stoa File] FileRejected for {transfer_id}");
+            println!("[{}] [Stoa File] FileRejected for {transfer_id}", chrono::Local::now().format("%H:%M:%S"));
             if let Some(transfer) = active_transfers.get_mut(&transfer_id) {
                 transfer.status = TransferStatus::Cancelled;
             }
@@ -921,11 +924,11 @@ pub async fn handle_incoming_response(
                             String::from_utf8(decrypted_bytes).unwrap_or_else(|_| data_b64.clone())
                         }
                         Ok(None) => {
-                            eprintln!("[Stoa Crypto] No session to decrypt chunk from {sender_id}");
+                            eprintln!("[{}] [Stoa Crypto] No session to decrypt chunk from {sender_id}", chrono::Local::now().format("%H:%M:%S"));
                             data_b64.clone()
                         }
                         Err(e) => {
-                            eprintln!("[Stoa Crypto] Chunk decryption failed: {e}");
+                            eprintln!("[{}] [Stoa Crypto] Chunk decryption failed: {e}", chrono::Local::now().format("%H:%M:%S"));
                             transfer.status = TransferStatus::Failed;
                             return;
                         }
@@ -936,7 +939,7 @@ pub async fn handle_incoming_response(
 
                 let cs = transfer.chunk_size;
                 if let Err(e) = file_transfer::write_chunk(&transfer.file_path, chunk_index, &actual_data_b64, cs) {
-                    eprintln!("[Stoa File] Failed to write chunk: {e}");
+                    eprintln!("[{}] [Stoa File] Failed to write chunk: {e}", chrono::Local::now().format("%H:%M:%S"));
                     transfer.status = TransferStatus::Failed;
                     return;
                 }
@@ -973,13 +976,13 @@ pub async fn handle_incoming_response(
                     let transfer_id_clone = transfer_id.clone();
                     let transfer_group_id = transfer.group_id.clone();
                     
-                    println!("[Stoa File] All chunks received for {}. Verifying...", file_name);
+                    println!("[{}] [Stoa File] All chunks received for {}. Verifying...", chrono::Local::now().format("%H:%M:%S"), file_name);
                     
                     let app_handle_clone = app_handle.clone();
                     tokio::spawn(async move {
                         match file_transfer::verify_file_off_thread(path.clone(), expected_checksum).await {
                             Ok(true) => {
-                                println!("[Stoa File] Transfer complete and verified: {} -> {:?}", file_name, path);
+                                println!("[{}] [Stoa File] Transfer complete and verified: {} -> {:?}", chrono::Local::now().format("%H:%M:%S"), file_name, path);
 
                                 // Persist file message — use group key if this is a group transfer
                                 let persist_key = if let Some(ref gid) = transfer_group_id {
@@ -1016,8 +1019,8 @@ pub async fn handle_incoming_response(
                                     }),
                                 );
                             }
-                            Ok(false) => eprintln!("[Stoa File] Checksum mismatch for {}", file_name),
-                            Err(e) => eprintln!("[Stoa File] Verification failed: {e}"),
+                            Ok(false) => eprintln!("[{}] [Stoa File] Checksum mismatch for {}", chrono::Local::now().format("%H:%M:%S"), file_name),
+                            Err(e) => eprintln!("[{}] [Stoa File] Verification failed: {e}", chrono::Local::now().format("%H:%M:%S")),
                         }
                     });
                     
@@ -1044,31 +1047,31 @@ pub async fn handle_incoming_response(
             x25519_public_key_hex,
         } => {
             let pid = peer.to_string();
-            println!("[Stoa Crypto] KeyExchangeAck from {pid}");
+            println!("[{}] [Stoa Crypto] KeyExchangeAck from {pid}", chrono::Local::now().format("%H:%M:%S"));
 
             match crypto::compute_shared_secret(our_keypair, &x25519_public_key_hex) {
                 Ok(shared_secret) => {
                     if let Err(e) = crypto::save_session(&pid, &shared_secret) {
-                        eprintln!("[Stoa Crypto] Failed to save session: {e}");
+                        eprintln!("[{}] [Stoa Crypto] Failed to save session: {e}", chrono::Local::now().format("%H:%M:%S"));
                     } else {
-                        println!("[Stoa Crypto] Session established with {pid} (via ack)");
+                        println!("[{}] [Stoa Crypto] Session established with {pid} (via ack)", chrono::Local::now().format("%H:%M:%S"));
                         let _ = app_handle.emit(
                             "e2e-session-established",
                             &serde_json::json!({ "peer_id": pid }),
                         );
                     }
                 }
-                Err(e) => eprintln!("[Stoa Crypto] ECDH failed: {e}"),
+                Err(e) => eprintln!("[{}] [Stoa Crypto] ECDH failed: {e}", chrono::Local::now().format("%H:%M:%S")),
             }
         }
         StoaResponse::GroupAck {
             group_id,
             message_id,
         } => {
-            println!("[Stoa Group] GroupAck for message {message_id} in {group_id}");
+            println!("[{}] [Stoa Group] GroupAck for message {message_id} in {group_id}", chrono::Local::now().format("%H:%M:%S"));
         }
         StoaResponse::GroupSpaceSyncReply { group_id, update_b64 } => {
-            println!("[Stoa Space] Sync reply from {} for {}", peer.to_string(), group_id);
+            println!("[{}] [Stoa Space] Sync reply from {} for {}", chrono::Local::now().format("%H:%M:%S"), peer.to_string(), group_id);
             if let Ok(update_bytes) = base64::decode(&update_b64) {
                 if let Ok(_) = crate::crdt::apply_remote_update(&group_id, &update_bytes).await {
                     let _ = app_handle.emit("space-remote-update", &serde_json::json!({

@@ -62,7 +62,7 @@ pub async fn load_or_create_doc(group_id: &str) -> Result<Arc<Mutex<Doc>>, Strin
                 let _ = txn.apply_update(update);
                 drop(txn);
             } else {
-                eprintln!("[Stoa CRDT] Failed to decode existing doc for group {}", group_id);
+                eprintln!("[{}] [Stoa CRDT] Failed to decode existing doc for group {}", chrono::Local::now().format("%H:%M:%S"), group_id);
             }
         }
 
@@ -160,7 +160,7 @@ fn migrate_legacy_doc(doc: &Doc, group_id: &str) {
     }
 
     save_snapshot_sync(doc, group_id);
-    println!("[Stoa CRDT] Migrated legacy doc for group {} to multi-file format", group_id);
+    println!("[{}] [Stoa CRDT] Migrated legacy doc for group {} to multi-file format", chrono::Local::now().format("%H:%M:%S"), group_id);
 }
 
 fn save_snapshot_sync(doc: &Doc, group_id: &str) {
@@ -169,7 +169,7 @@ fn save_snapshot_sync(doc: &Doc, group_id: &str) {
     let sv = StateVector::default(); // empty sv returns full document
     let data = txn.encode_diff_v1(&sv);
     if let Err(e) = fs::write(&path, data) {
-        eprintln!("[Stoa CRDT] Failed to save snapshot for {}: {}", group_id, e);
+        eprintln!("[{}] [Stoa CRDT] Failed to save snapshot for {}: {}", chrono::Local::now().format("%H:%M:%S"), group_id, e);
     }
 }
 

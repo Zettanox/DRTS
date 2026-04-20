@@ -144,7 +144,7 @@ pub fn save_session(peer_id: &str, shared_secret: &[u8; 32]) -> Result<(), Strin
     let path = session_path(peer_id)?;
     std::fs::write(&path, hex::encode(shared_secret))
         .map_err(|e| format!("Failed to save session: {e}"))?;
-    println!("[Stoa Crypto] Session saved for {peer_id}");
+    println!("[{}] [Stoa Crypto] Session saved for {peer_id}", chrono::Local::now().format("%H:%M:%S"));
     Ok(())
 }
 
