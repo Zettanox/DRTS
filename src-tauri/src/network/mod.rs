@@ -196,15 +196,22 @@ pub fn spawn_network(
                         }
 
                         // ── Connection Events (always active) ───────────────
-                        SwarmEvent::ConnectionEstablished { peer_id: connected_peer, .. } => {
+                        SwarmEvent::ConnectionEstablished { peer_id: connected_peer, endpoint, .. } => {
                             // Classify connection type: LAN if mDNS-discovered, Relay otherwise.
                             // We use peers_map (mDNS) as ground truth — endpoint address is unreliable
                             // for inbound relay connections (send_back_addr may lack p2p-circuit).
                             let pid_str = connected_peer.to_string();
-                            let is_lan = peers_clone.lock().await.contains_key(&pid_str);
-                            let conn_type = if is_lan { PeerConnectionType::Lan } else { PeerConnectionType::Relay };
+                            let is_relay = match &endpoint {
+                                libp2p::core::ConnectedPoint::Dialer { address, .. } => {
+                                    address.to_string().contains("p2p-circuit")
+                                }
+                                libp2p::core::ConnectedPoint::Listener { local_addr, send_back_addr } => {
+                                    local_addr.to_string().contains("p2p-circuit") || send_back_addr.to_string().contains("p2p-circuit")
+                                }
+                            };
+                            let conn_type = if is_relay { PeerConnectionType::Relay } else { PeerConnectionType::Lan };
                             println!("[{}] [Stoa Network] Connection established with {pid_str} ({})", chrono::Local::now().format("%H:%M:%S"),
-                                if is_lan { "LAN" } else { "Relay" });
+                                if !is_relay { "LAN" } else { "Relay" });
                             conn_types.lock().await.insert(pid_str, conn_type);
 
                             handlers::handle_connection_established(
@@ -282,6 +289,32 @@ pub fn spawn_network(
                             }
                         }
 
+                        // ── Request/Response Failures ───────────────────────
+                        // OutboundFailure: a request WE SENT failed to deliver.
+                        // This is the root cause of stalled file transfers:
+                        // FetchChunk requests sent by the receiver can fail silently
+                        // over relay substreams, causing the sender to never respond.
+                        SwarmEvent::Behaviour(StoaBehaviourEvent::Messaging(
+                            request_response::Event::OutboundFailure { peer, error, .. },
+                        )) => {
+                            eprintln!("[{}] [Stoa Network] ⚠ Outbound request to {} failed ({error:?}) — checking for stalled transfers",
+                                chrono::Local::now().format("%H:%M:%S"), peer);
+                            handlers::handle_outbound_failure(
+                                &peer,
+                                &mut active_transfers,
+                                &mut swarm,
+                            ).await;
+                        }
+
+                        // InboundFailure: a response WE SENT back failed to reach the requester.
+                        // Log only — the requester's OutboundFailure will handle retry.
+                        SwarmEvent::Behaviour(StoaBehaviourEvent::Messaging(
+                            request_response::Event::InboundFailure { peer, error, .. },
+                        )) => {
+                            eprintln!("[{}] [Stoa Network] ⚠ Inbound request from {} failed ({error:?})",
+                                chrono::Local::now().format("%H:%M:%S"), peer);
+                        }
+
                         // ── Relay Client Events ─────────────────────────────
                         SwarmEvent::Behaviour(StoaBehaviourEvent::RelayClient(
                             relay::client::Event::ReservationReqAccepted { relay_peer_id, .. },
@@ -328,7 +361,15 @@ pub fn spawn_network(
                             println!("[{}] [Stoa Network] Listening on {address}", chrono::Local::now().format("%H:%M:%S"));
                         }
                         SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
-                            eprintln!("[{}] [Stoa Network] ❌ Outgoing connection error to {:?}: {error}", chrono::Local::now().format("%H:%M:%S"), peer_id);
+                            // Suppress hole-punch failures for already-connected peers — dcutr
+                            // automatically tries to upgrade relay→direct and failing is normal.
+                            let is_connected = peer_id
+                                .and_then(|p| if swarm.is_connected(&p) { Some(()) } else { None })
+                                .is_some();
+                            if !is_connected {
+                                eprintln!("[{}] [Stoa Network] ❌ Connection failed to {:?}: {error}",
+                                    chrono::Local::now().format("%H:%M:%S"), peer_id);
+                            }
                         }
                         SwarmEvent::IncomingConnectionError { error, .. } => {
                             eprintln!("[{}] [Stoa Network] ❌ Incoming connection error: {error}", chrono::Local::now().format("%H:%M:%S"));

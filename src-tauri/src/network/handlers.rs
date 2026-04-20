@@ -1128,3 +1128,67 @@ pub async fn dial_peer(
         drop(cts);
     }
 }
+
+/// Handle an outbound request failure.
+///
+/// When the request-response layer fails to deliver a request we sent
+/// (e.g. a FetchChunk from the receiver side), the pipeline stalls because
+/// the sender never receives the request and never sends that chunk back.
+///
+/// This re-issues the first missing chunk window to restart the pipeline.
+pub async fn handle_outbound_failure(
+    peer: &PeerId,
+    active_transfers: &mut HashMap<String, ActiveTransfer>,
+    swarm: &mut Swarm<StoaBehaviour>,
+) {
+    let pid = peer.to_string();
+
+    // Collect stalled download transfer IDs (avoid borrow conflicts on active_transfers)
+    let stalled: Vec<String> = active_transfers
+        .iter()
+        .filter(|(_, t)| {
+            t.peer_id == pid
+                && t.direction == file_transfer::TransferDirection::Download
+                && (t.status == file_transfer::TransferStatus::Transferring
+                    || t.status == file_transfer::TransferStatus::Offering)
+        })
+        .map(|(id, _)| id.clone())
+        .collect();
+
+    for transfer_id in stalled {
+        if let Some(transfer) = active_transfers.get_mut(&transfer_id) {
+            // Find first missing chunk and re-open the pipeline window
+            if let Some(first_missing) = (0..transfer.chunk_count)
+                .find(|i| !transfer.received_chunks_set.contains(i))
+            {
+                if let Ok(target) = PeerId::from_str(&transfer.peer_id) {
+                    let window_size = if transfer.chunk_size >= file_transfer::LAN_CHUNK_SIZE {
+                        file_transfer::LAN_WINDOW_SIZE
+                    } else {
+                        file_transfer::RELAY_WINDOW_SIZE
+                    };
+
+                    let mut sent = 0u32;
+                    let mut last_sent = first_missing;
+                    for i in first_missing..transfer.chunk_count {
+                        if sent >= window_size { break; }
+                        if !transfer.received_chunks_set.contains(&i) {
+                            swarm.behaviour_mut().messaging.send_request(
+                                &target,
+                                crate::protocol::StoaRequest::FetchChunk {
+                                    transfer_id: transfer_id.clone(),
+                                    chunk_index: i,
+                                },
+                            );
+                            last_sent = i;
+                            sent += 1;
+                        }
+                    }
+                    transfer.last_requested_chunk = Some(last_sent);
+                    eprintln!("[{}] [Stoa File] ↺ Re-requesting {} chunks for stalled transfer {} (from chunk {})",
+                        chrono::Local::now().format("%H:%M:%S"), sent, &transfer_id[..8], first_missing);
+                }
+            }
+        }
+    }
+}
