@@ -148,7 +148,7 @@ pub fn spawn_network(
 
         // Reconnection sweep — retries disconnected contacts every 60s.
         let reconnect_start = tokio::time::Instant::now() + std::time::Duration::from_secs(15);
-        let mut reconnect_interval = tokio::time::interval_at(reconnect_start, std::time::Duration::from_secs(60));
+        let mut reconnect_interval = tokio::time::interval_at(reconnect_start, std::time::Duration::from_secs(10));
         reconnect_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
         loop {
