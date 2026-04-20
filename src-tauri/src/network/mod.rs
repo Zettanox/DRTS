@@ -118,9 +118,12 @@ pub fn spawn_network(
     let relay_addresses = relay_cfg.enabled_addresses();
     for addr_str in &relay_addresses {
         match addr_str.parse::<libp2p::Multiaddr>() {
-            Ok(addr) => {
-                println!("[Stoa Network] Connecting to relay: {addr_str}");
-                let _ = swarm.dial(addr);
+            Ok(mut addr) => {
+                println!("[Stoa Network] Requesting relay reservation: {addr}");
+                addr.push(libp2p::multiaddr::Protocol::P2pCircuit);
+                if let Err(e) = swarm.listen_on(addr) {
+                    eprintln!("[Stoa Network] Failed to request relay reservation: {e}");
+                }
             }
             Err(e) => {
                 eprintln!("[Stoa Network] Invalid relay address '{addr_str}': {e}");
