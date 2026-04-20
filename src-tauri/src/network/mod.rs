@@ -144,8 +144,10 @@ pub fn spawn_network(
         let mut local_groups: Vec<Group> = groups::load_groups().unwrap_or_default();
         let our_peer_id_str = peer_id.to_string();
 
-        // Reconnection sweep interval — retries cached addresses for offline contacts
-        let mut reconnect_interval = tokio::time::interval(std::time::Duration::from_secs(60));
+        // Reconnection sweep interval — retries cached addresses for offline contacts.
+        // Delay the first tick by 15s to let the relay reservation establish first.
+        let reconnect_start = tokio::time::Instant::now() + std::time::Duration::from_secs(15);
+        let mut reconnect_interval = tokio::time::interval_at(reconnect_start, std::time::Duration::from_secs(60));
         reconnect_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
         loop {
@@ -310,7 +312,8 @@ pub fn spawn_network(
                         SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
                             let err_str = format!("{error}");
                             // Suppress noisy timeout errors from hole-punch attempts
-                            if !err_str.contains("timed out") && !err_str.contains("Unsupported resolved address") {
+                            // (Linux: "timed out", Windows: "did not properly respond")
+                            if !err_str.contains("timed out") && !err_str.contains("Unsupported resolved address") && !err_str.contains("did not properly respond") && !err_str.contains("oneshot canceled") {
                                 eprintln!("[Stoa Network] ❌ Connection error to {:?}: {error}", peer_id);
                             }
                         }
