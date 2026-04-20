@@ -435,9 +435,13 @@ pub fn spawn_network(
                             let is_connected = peer_id
                                 .and_then(|p| if swarm.is_connected(&p) { Some(()) } else { None })
                                 .is_some();
-                            if !is_connected {
-                                eprintln!("[{}] [Stoa Network] ❌ Connection failed to {:?}: {error}",
-                                    chrono::Local::now().format("%H:%M:%S"), peer_id);
+                            
+                            let err_str = error.to_string();
+                            let is_network_transition_noise = err_str.contains("os error 10048") || err_str.contains("oneshot canceled") || err_str.contains("os error 10060");
+
+                            if !is_connected && !is_network_transition_noise {
+                                eprintln!("[{}] [Stoa Network] ❌ Connection failed to {:?}: {}",
+                                    chrono::Local::now().format("%H:%M:%S"), peer_id, err_str);
                             }
                         }
                         SwarmEvent::IncomingConnectionError { error, .. } => {
