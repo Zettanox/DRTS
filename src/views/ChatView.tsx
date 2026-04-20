@@ -1,8 +1,9 @@
 import { Component, createSignal, createMemo, createEffect, For, Show, onMount } from "solid-js";
 import { dms, groups, contacts, identity, chatMessages, groupMessages, activeRightPane, setActiveRightPane, Message } from "../store";
 import { sendMessage as bridgeSendMessage, getChatHistory, sendFile, pauseFileTransfer, resumeFileTransfer, sendGroupMessage, getGroupHistory, sendGroupFile, leaveGroup, removeGroupMember, disbandGroup, deleteChatMessage, deleteChatMessages, clearChat } from "../tauri-bridge";
-import { Send, Paperclip, Users, Shield, X, MapPin, Columns, Check, CheckCheck, Clock, FileIcon, Download, LogOut, UserMinus, Trash2, Hash, Image as ImageIcon, ExternalLink, Trash, CornerUpLeft } from "lucide-solid";
+import { Send, Paperclip, Users, Shield, X, MapPin, Columns, Check, CheckCheck, Clock, FileIcon, Download, LogOut, UserMinus, Trash2, Hash, Image as ImageIcon, ExternalLink, Trash, CornerUpLeft, Square, CheckSquare } from "lucide-solid";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { confirm } from "@tauri-apps/plugin-dialog";
 import { SpaceEditor } from "../components/SpaceEditor";
 
 export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (props) => {
@@ -11,7 +12,6 @@ export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (prop
   const [activeTab, setActiveTab] = createSignal<"chat" | "space">("chat");
   const [selectedMessages, setSelectedMessages] = createSignal<string[]>([]);
   let messagesEndRef: HTMLDivElement | undefined;
-  let longPressTimer: number | null = null;
   
   const currentChat = createMemo(() => dms.find(c => c.id === props.id) || groups.find(c => c.id === props.id));
   const isGroup = createMemo(() => !!groups.find(c => c.id === props.id));
@@ -138,20 +138,6 @@ export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (prop
     }
   };
 
-  const startLongPress = (id: string) => {
-    longPressTimer = window.setTimeout(() => {
-      toggleMessageSelection(id);
-      longPressTimer = null;
-    }, 600); // 600ms long press
-  };
-
-  const cancelLongPress = () => {
-    if (longPressTimer) {
-      clearTimeout(longPressTimer);
-      longPressTimer = null;
-    }
-  };
-
   const handleDeleteSelected = async () => {
     const ids = selectedMessages();
     if (ids.length === 0) return;
@@ -160,7 +146,8 @@ export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (prop
       ? "Delete this message locally?" 
       : `Delete ${ids.length} messages locally?`;
 
-    if (confirm(confirmMsg)) {
+    const yes = await confirm(confirmMsg, { title: "Confirm Deletion", kind: "warning" });
+    if (yes) {
       const key = isGroup() ? `group_${groupId()}` : peerId()!;
       await deleteChatMessages(key, ids);
       setSelectedMessages([]);
@@ -266,23 +253,32 @@ export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (prop
                 const isSelected = createMemo(() => selectedMessages().includes(message.id));
                 return (
                 <div 
-                  class={`flex w-full ${isMe(message.senderId) ? "justify-end" : "justify-start"} px-2 selection-none`}
-                  onPointerDown={() => startLongPress(message.id)}
-                  onPointerUp={() => cancelLongPress()}
-                  onPointerLeave={() => cancelLongPress()}
-                  onClick={() => {
-                    if (selectedMessages().length > 0) {
-                      toggleMessageSelection(message.id);
-                    }
-                  }}
+                  class={`flex w-full ${isMe(message.senderId) ? "justify-end" : "justify-start"} px-2 selection-none group/message items-center gap-2`}
                 >
-                  <div class={`max-w-[85%] md:max-w-[70%] px-5 py-3 relative group font-bold transition-all duration-200 ${
-                    isSelected() ? "bg-primary-500/20 ring-2 ring-primary-500 rounded-xl" : ""
-                  } ${
-                    isMe(message.senderId)
-                      ? "chamfer-tr-bl chamfer-shadow text-stone-100"
-                      : "chamfer-tl-br chamfer-shadow text-stone-800 dark:text-stone-200"
-                  }`} style={{ "--bg-color": isMe(message.senderId) ? "var(--color-primary-500)" : "" }}>
+                  <Show when={!isMe(message.senderId)}>
+                    <button
+                      class={`p-1.5 text-stone-400 hover:text-stone-600 dark:hover:text-stone-300 transition-opacity ${selectedMessages().length > 0 ? "opacity-100" : "opacity-0 group-hover/message:opacity-100"}`}
+                      onClick={() => toggleMessageSelection(message.id)}
+                    >
+                      {isSelected() ? <CheckSquare size={18} class="text-primary-500" /> : <Square size={18} />}
+                    </button>
+                  </Show>
+
+                  <div 
+                    class={`max-w-[85%] md:max-w-[70%] px-5 py-3 relative group font-bold transition-all duration-200 cursor-default ${
+                      isSelected() ? "bg-primary-500/20 ring-2 ring-primary-500 rounded-xl" : ""
+                    } ${
+                      isMe(message.senderId)
+                        ? "chamfer-tr-bl chamfer-shadow text-stone-100"
+                        : "chamfer-tl-br chamfer-shadow text-stone-800 dark:text-stone-200"
+                    }`} 
+                    style={{ "--bg-color": isMe(message.senderId) ? "var(--color-primary-500)" : "" }}
+                    onClick={() => {
+                      if (selectedMessages().length > 0) {
+                        toggleMessageSelection(message.id);
+                      }
+                    }}
+                  >
                     {!isMe(message.senderId) && isGroup() && (
                       <div class="text-xs font-black mb-1 text-accent-600 dark:text-accent-400">
                         {contacts.find(c => c.peerId === message.senderId)?.petname || message.senderId.slice(0, 12) + '…'}
@@ -382,6 +378,15 @@ export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (prop
                       {deliveryIcon(message)}
                     </div>
                   </div>
+
+                  <Show when={isMe(message.senderId)}>
+                    <button
+                      class={`p-1.5 text-stone-400 hover:text-stone-600 dark:hover:text-stone-300 transition-opacity ${selectedMessages().length > 0 ? "opacity-100" : "opacity-0 group-hover/message:opacity-100"}`}
+                      onClick={() => toggleMessageSelection(message.id)}
+                    >
+                      {isSelected() ? <CheckSquare size={18} class="text-primary-500" /> : <Square size={18} />}
+                    </button>
+                  </Show>
                 </div>
               );
             }}
@@ -492,9 +497,9 @@ export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (prop
                   <div class="space-y-2 mt-4">
                     <button
                       class="w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors"
-                      onClick={() => {
+                      onClick={async () => {
                         const gid = groupId();
-                        if (gid && confirm("Clear all group messages locally? This cannot be undone.")) {
+                        if (gid && await confirm("Clear all group messages locally? This cannot be undone.", { kind: 'warning' })) {
                           clearChat(`group_${gid}`);
                         }
                       }}
@@ -504,7 +509,7 @@ export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (prop
 
                     <button
                       class="w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm text-amber-700 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900/30 transition-colors"
-                      onClick={() => { if (confirm("Leave this group?")) { const gid = groupId(); if(gid) leaveGroup(gid); } }}
+                      onClick={async () => { if (await confirm("Leave this group?", { kind: 'warning' })) { const gid = groupId(); if(gid) leaveGroup(gid); } }}
                     >
                       <LogOut size={16} /> Leave Group
                     </button>
@@ -512,7 +517,7 @@ export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (prop
                     <Show when={isAdmin()}>
                       <button
                         class="w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm text-red-700 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors"
-                        onClick={() => { if (confirm("Disband this group? This will remove all members.")) { const gid = groupId(); if(gid) disbandGroup(gid); } }}
+                        onClick={async () => { if (await confirm("Disband this group? This will remove all members.", { kind: 'warning' })) { const gid = groupId(); if(gid) disbandGroup(gid); } }}
                       >
                         <Trash2 size={16} /> Disband Group
                       </button>
@@ -543,9 +548,9 @@ export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (prop
                   <div class="pt-4 border-t-2 border-stone-800 dark:border-stone-700">
                     <button
                       class="w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors"
-                      onClick={() => {
+                      onClick={async () => {
                         const pid = peerId();
-                        if (pid && confirm("Clear all messages for this contact locally? This cannot be undone.")) {
+                        if (pid && await confirm("Clear all messages for this contact locally? This cannot be undone.", { kind: 'warning' })) {
                           clearChat(pid);
                         }
                       }}
