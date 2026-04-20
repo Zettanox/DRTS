@@ -32,6 +32,11 @@ struct Cli {
     /// Path to persist the keypair (gives a stable PeerID across restarts — recommended for production)
     #[arg(short, long)]
     key_file: Option<PathBuf>,
+
+    /// Public IP address of this server (REQUIRED for relay reservations to work).
+    /// The relay must know its own external address so clients can be told how to reach it.
+    #[arg(short, long, alias = "ip")]
+    external_ip: String,
 }
 
 #[derive(NetworkBehaviour)]
@@ -53,6 +58,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     println!("╠══════════════════════════════════════════════════╣");
     println!("║  PeerID : {peer_id}");
     println!("║  Port   : {}", args.port);
+    println!("║  ExtIP  : {}", args.external_ip);
     println!("╚══════════════════════════════════════════════════╝");
 
     // Generous limits for a hosted relay; tune to your VPS resources
@@ -87,6 +93,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let listen_addr: Multiaddr = format!("/ip4/0.0.0.0/tcp/{}", args.port).parse()?;
     swarm.listen_on(listen_addr)?;
+
+    // Tell the swarm our public address so reservation responses include it
+    let external_addr: Multiaddr = format!("/ip4/{}/tcp/{}/p2p/{}", args.external_ip, args.port, peer_id).parse()?;
+    swarm.add_external_address(external_addr.clone());
+    println!("[Relay] External address registered: {external_addr}");
 
     loop {
         match swarm.select_next_some().await {
