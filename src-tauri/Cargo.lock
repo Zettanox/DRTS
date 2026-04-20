@@ -5255,6 +5255,7 @@ dependencies = [
  "dirs",
  "futures",
  "hex",
+ "hickory-resolver",
  "image",
  "lazy_static",
  "libp2p",

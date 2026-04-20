@@ -15,10 +15,27 @@ use identity::IdentityInfo;
 use libp2p::identity::Keypair;
 use messages::StoredMessage;
 use network::{ContactsList, NearbyPeer, NearbyPeersMap, NetworkCommand};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
+use std::path::PathBuf;
 use tauri::{Manager, State};
 use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinHandle;
+
+pub static STOA_DIR: OnceLock<PathBuf> = OnceLock::new();
+
+pub fn get_stoa_dir() -> PathBuf {
+    // Check if the legacy `~/.stoa` directory exists for backward compatibility on Desktop
+    if let Some(home) = dirs::home_dir() {
+        let legacy_path = home.join(".stoa");
+        if legacy_path.exists() {
+            return legacy_path;
+        }
+    }
+    
+    STOA_DIR.get().cloned().unwrap_or_else(|| {
+        dirs::home_dir().expect("Could not determine home directory").join(".stoa")
+    })
+}
 
 /// Shared application state managed by Tauri.
 pub struct AppState {
@@ -131,10 +148,7 @@ async fn get_identity(
         }
     }
 
-    let path = dirs::home_dir()
-        .ok_or("No home dir")?
-        .join(".stoa")
-        .join("identity.json");
+    let path = crate::get_stoa_dir().join("identity.json");
 
     if !path.exists() {
         return Ok(None);
@@ -208,11 +222,14 @@ async fn get_visibility(state: State<'_, AppState>) -> Result<bool, String> {
 }
 
 #[tauri::command]
-async fn show_window(app_handle: tauri::AppHandle) -> Result<(), String> {
-    if let Some(window) = app_handle.get_webview_window("main") {
-        window
-            .show()
-            .map_err(|e| format!("Failed to show window: {e}"))?;
+async fn show_window(#[allow(unused_variables)] app_handle: tauri::AppHandle) -> Result<(), String> {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        if let Some(window) = app_handle.get_webview_window("main") {
+            window
+                .show()
+                .map_err(|e| format!("Failed to show window: {e}"))?;
+        }
     }
     Ok(())
 }
@@ -784,18 +801,29 @@ async fn add_contact_from_code(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let initial_contacts = contacts::load_contacts().unwrap_or_default();
-
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .setup(|app| {
+            let data_dir = app.path().app_data_dir().unwrap_or_else(|_| {
+                dirs::home_dir().expect("fallback").join(".stoa")
+            });
+            std::fs::create_dir_all(&data_dir).ok();
+            STOA_DIR.set(data_dir).ok();
+            
+            let initial_contacts = contacts::load_contacts().unwrap_or_default();
+            let state = app.state::<AppState>();
+            *state.contacts.blocking_lock() = initial_contacts;
+            
+            Ok(())
+        })
         .manage(AppState {
             identity_info: Arc::new(Mutex::new(None)),
             keypair: Arc::new(Mutex::new(None)),
             network_cmd_tx: Arc::new(Mutex::new(None)),
             network_handle: Arc::new(Mutex::new(None)),
             nearby_peers: Arc::new(Mutex::new(None)),
-            contacts: Arc::new(Mutex::new(initial_contacts)),
+            contacts: Arc::new(Mutex::new(Vec::new())),
             lan_visible: Arc::new(Mutex::new(true)),
         })
         .invoke_handler(tauri::generate_handler![

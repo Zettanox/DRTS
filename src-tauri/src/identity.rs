@@ -21,8 +21,7 @@ pub struct IdentityInfo {
 
 /// Returns the path to ~/.stoa/
 fn stoa_dir() -> PathBuf {
-    let home = dirs::home_dir().expect("Could not determine home directory");
-    home.join(".stoa")
+    crate::get_stoa_dir()
 }
 
 /// Returns the path to ~/.stoa/identity.json

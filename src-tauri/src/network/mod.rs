@@ -70,8 +70,20 @@ pub fn spawn_network(
         use libp2p::dns;
 
         let base_tcp = libp2p::tcp::tokio::Transport::new(libp2p::tcp::Config::default());
-        let dns_tcp = dns::tokio::Transport::system(base_tcp)
-            .map_err(|e| format!("DNS transport error: {e}"))?;
+        
+        // Try system DNS first (/etc/resolv.conf), fall back to Google DNS for Android
+        let dns_tcp = match dns::tokio::Transport::system(base_tcp) {
+            Ok(t) => t,
+            Err(_) => {
+                use hickory_resolver::config::{ResolverConfig, ResolverOpts};
+                let fallback_tcp = libp2p::tcp::tokio::Transport::new(libp2p::tcp::Config::default());
+                dns::tokio::Transport::custom(
+                    fallback_tcp,
+                    ResolverConfig::google(),
+                    ResolverOpts::default(),
+                )
+            }
+        };
 
         // Combine: relay transport for circuit addresses | DNS/TCP for direct connections
         OrTransport::new(relay_transport, dns_tcp)

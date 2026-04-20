@@ -35,8 +35,7 @@ pub const ALLOWED_EXTENSIONS: &[&str] = &[
 ];
 
 fn get_storage_path(group_id: &str) -> PathBuf {
-    let mut path = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-    path.push(".stoa");
+    let mut path = crate::get_stoa_dir();
     path.push("groups");
     fs::create_dir_all(&path).unwrap_or_default();
     path.push(format!("{}.yrs", group_id));

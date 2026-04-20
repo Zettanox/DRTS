@@ -126,10 +126,7 @@ pub fn decrypt(
 // ─── Session Key Persistence ─────────────────────────────────────────────────
 
 fn sessions_dir() -> Result<PathBuf, String> {
-    let dir = dirs::home_dir()
-        .ok_or("No home directory")?
-        .join(".stoa")
-        .join("sessions");
+    let dir = crate::get_stoa_dir().join("sessions");
     std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create sessions dir: {e}"))?;
     Ok(dir)
 }

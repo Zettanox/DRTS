@@ -17,9 +17,7 @@ pub struct Group {
 }
 
 fn groups_path() -> Result<PathBuf, String> {
-    let dir = dirs::home_dir()
-        .ok_or("No home directory")?
-        .join(".stoa");
+    let dir = crate::get_stoa_dir();
     std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create .stoa dir: {e}"))?;
     Ok(dir.join("groups.json"))
 }

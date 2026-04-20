@@ -46,10 +46,7 @@ impl Default for RelayConfig {
 }
 
 fn config_path() -> PathBuf {
-    let base = dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".stoa");
-    base.join("relay_config.json")
+    crate::get_stoa_dir().join("relay_config.json")
 }
 
 impl RelayConfig {

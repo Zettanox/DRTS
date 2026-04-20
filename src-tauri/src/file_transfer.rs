@@ -166,9 +166,7 @@ pub fn write_chunk(path: &Path, chunk_index: u32, data_b64: &str, chunk_size: us
 
 /// Get the received files directory for a given sender.
 pub fn received_dir(sender_peer_id: &str) -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".stoa")
+    crate::get_stoa_dir()
         .join("received")
         .join(sender_peer_id)
 }

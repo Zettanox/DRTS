@@ -26,10 +26,7 @@ pub struct StoredMessage {
 }
 
 fn messages_dir() -> Result<PathBuf, String> {
-    let dir = dirs::home_dir()
-        .ok_or("No home directory")?
-        .join(".stoa")
-        .join("messages");
+    let dir = crate::get_stoa_dir().join("messages");
     std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create messages dir: {e}"))?;
     Ok(dir)
 }
