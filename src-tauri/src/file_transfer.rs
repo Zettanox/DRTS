@@ -6,12 +6,17 @@ use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
-/// Size of each chunk in bytes (64 KB — relay-friendly).
-pub const CHUNK_SIZE: usize = 64 * 1024;
+// ─── Transfer Parameters ──────────────────────────────────────────────────────
 
-/// Maximum number of chunks to fetch concurrently (the pipeline window).
-/// Kept small for reliable relay circuit transfers.
-pub const MAX_WINDOW_SIZE: u32 = 4;
+/// LAN transfers: fast direct TCP, aggressive pipeline.
+pub const LAN_CHUNK_SIZE: usize = 256 * 1024;   // 256 KB (original, proven stable for 3GB+ files)
+pub const LAN_WINDOW_SIZE: u32 = 20;
+
+/// Relay transfers: conservative, circuit-friendly.
+pub const RELAY_CHUNK_SIZE: usize = 64 * 1024;   // 64 KB
+pub const RELAY_WINDOW_SIZE: u32 = 4;
+
+// ─── Transfer Types ───────────────────────────────────────────────────────────
 
 /// Direction of a file transfer.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -51,11 +56,17 @@ pub struct ActiveTransfer {
     pub last_requested_chunk: Option<u32>,
     /// If set, this transfer belongs to a group
     pub group_id: Option<String>,
+    /// Chunk size in bytes as negotiated in the FileOffer
+    pub chunk_size: usize,
 }
 
+// ─── File Preparation ─────────────────────────────────────────────────────────
+
 /// Prepares a file for transfer by calculating its checksum without freezing the main thread.
+/// `chunk_size` determines the chunk granularity (LAN or Relay).
 pub async fn prepare_file_off_thread(
     path: PathBuf,
+    chunk_size: usize,
 ) -> Result<(String, u64, String, u32), String> {
     tokio::task::spawn_blocking(move || {
         let file = File::open(&path).map_err(|e| format!("Failed to open file: {e}"))?;
@@ -71,7 +82,7 @@ pub async fn prepare_file_off_thread(
         let chunk_count = if file_size == 0 {
             0
         } else {
-            ((file_size + (CHUNK_SIZE as u64) - 1) / (CHUNK_SIZE as u64)) as u32
+            ((file_size + (chunk_size as u64) - 1) / (chunk_size as u64)) as u32
         };
 
         // Compute SHA-256 streamingly
@@ -116,13 +127,15 @@ pub async fn verify_file_off_thread(
     .map_err(|e| format!("Task failed: {e}"))?
 }
 
+// ─── Chunk I/O ────────────────────────────────────────────────────────────────
+
 /// Read exactly one chunk from disk and base64-encode it (Sender).
-pub fn read_chunk(path: &Path, chunk_index: u32) -> Result<String, String> {
+pub fn read_chunk(path: &Path, chunk_index: u32, chunk_size: usize) -> Result<String, String> {
     let mut file = File::open(path).map_err(|e| format!("Cannot open file: {e}"))?;
-    let offset = (chunk_index as u64) * (CHUNK_SIZE as u64);
+    let offset = (chunk_index as u64) * (chunk_size as u64);
     file.seek(SeekFrom::Start(offset)).map_err(|e| format!("Seek failed: {e}"))?;
 
-    let mut buffer = vec![0u8; CHUNK_SIZE];
+    let mut buffer = vec![0u8; chunk_size];
     let n = file.read(&mut buffer).map_err(|e| format!("Read chunk failed: {e}"))?;
     
     buffer.truncate(n);
@@ -130,7 +143,7 @@ pub fn read_chunk(path: &Path, chunk_index: u32) -> Result<String, String> {
 }
 
 /// Write exactly one chunk to disk and ensure directories exist (Receiver).
-pub fn write_chunk(path: &Path, chunk_index: u32, data_b64: &str) -> Result<(), String> {
+pub fn write_chunk(path: &Path, chunk_index: u32, data_b64: &str, chunk_size: usize) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|e| format!("Failed to create directory: {e}"))?;
@@ -143,7 +156,7 @@ pub fn write_chunk(path: &Path, chunk_index: u32, data_b64: &str) -> Result<(), 
         .open(path)
         .map_err(|e| format!("Failed to open dest file: {e}"))?;
         
-    let offset = (chunk_index as u64) * (CHUNK_SIZE as u64);
+    let offset = (chunk_index as u64) * (chunk_size as u64);
     file.seek(SeekFrom::Start(offset)).map_err(|e| format!("Seek failed: {e}"))?;
     file.write_all(&data).map_err(|e| format!("Write failed: {e}"))?;
     

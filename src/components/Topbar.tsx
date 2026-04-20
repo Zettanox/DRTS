@@ -1,6 +1,6 @@
 import { Component } from "solid-js";
-import { globalNetwork, setGlobalNetwork, identity, activeLeftPane, setActiveLeftPane } from "../store";
-import { Wifi, Network, Shield, Settings, ChevronLeft } from "lucide-solid";
+import { identity, activeLeftPane, setActiveLeftPane } from "../store";
+import { Shield, Settings, ChevronLeft } from "lucide-solid";
 import { A } from "@solidjs/router";
 
 export const Topbar: Component = () => {
@@ -30,25 +30,6 @@ export const Topbar: Component = () => {
             <span class="text-emerald-900 dark:text-emerald-300 hidden md:inline">{identity()?.name}</span>
           </div>
         )}
-
-        <div class="hidden md:flex items-center p-1 rounded-lg bg-primary-100 dark:bg-[#342823] border-2 border-stone-800 dark:border-stone-700">
-          <button
-            class={`px-3 py-1.5 text-xs font-bold rounded-md flex items-center gap-1.5 transition-all ${
-              globalNetwork() === "Auto" ? "bg-white dark:bg-[#4a3a33] shadow-sm text-primary-600 dark:text-primary-400 border border-stone-300 dark:border-stone-600" : "text-stone-600 dark:text-stone-400 hover:text-stone-800"
-            }`}
-            onClick={() => setGlobalNetwork("Auto")}
-          >
-            <Network size={14} /> Auto
-          </button>
-          <button
-            class={`px-3 py-1.5 text-xs font-bold rounded-md flex items-center gap-1.5 transition-all ${
-              globalNetwork() === "LAN-Only" ? "bg-white dark:bg-[#4a3a33] shadow-sm text-emerald-600 dark:text-emerald-400 border border-stone-300 dark:border-stone-600" : "text-stone-600 dark:text-stone-400 hover:text-stone-800"
-            }`}
-            onClick={() => setGlobalNetwork("LAN-Only")}
-          >
-            <Wifi size={14} /> LAN Only
-          </button>
-        </div>
 
         <A href="/settings" class="p-2 rounded-xl text-stone-700 dark:text-stone-300 hover:bg-stone-200 dark:hover:bg-stone-800 transition-colors border-2 border-transparent hover:border-stone-800 dark:hover:border-stone-600 font-bold flex items-center gap-2">
           <Settings size={20} />

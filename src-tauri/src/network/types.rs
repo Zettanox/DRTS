@@ -50,6 +50,7 @@ pub enum NetworkCommand {
         file_size: u64,
         checksum: String,
         chunk_count: u32,
+        chunk_size: u32,
         sender_name: String,
     },
     /// Pause an ongoing file transfer
@@ -136,3 +137,15 @@ pub type NearbyPeersMap = Arc<Mutex<HashMap<String, NearbyPeer>>>;
 
 /// Shared list of known contacts for auto-dialing.
 pub type ContactsList = Arc<Mutex<Vec<Contact>>>;
+
+/// Whether a peer is connected via LAN (direct TCP) or Internet (relay circuit).
+#[derive(Debug, Clone, PartialEq)]
+pub enum PeerConnectionType {
+    /// mDNS-discovered, direct TCP on the local network.
+    Lan,
+    /// Connected through a Circuit Relay v2 server.
+    Relay,
+}
+
+/// Shared map tracking the connection type for each connected peer.
+pub type PeerConnectionMap = Arc<Mutex<HashMap<String, PeerConnectionType>>>;

@@ -92,7 +92,7 @@ if (_savedTheme === "dark") {
   document.documentElement.classList.remove("dark");
 }
 export const [theme, setTheme] = createSignal<"dark" | "light">(_savedTheme);
-export const [globalNetwork, setGlobalNetwork] = createSignal<"Auto" | "LAN-Only" | "Online-Only">("Auto");
+// Network routing is fully automatic: LAN peers → direct TCP, internet peers → relay circuit
 export const [lanVisible, setLanVisible] = createSignal(true);
 
 // Desktop Split Pane Logic

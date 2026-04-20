@@ -7,7 +7,6 @@ import { SpaceEditor } from "../components/SpaceEditor";
 
 export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (props) => {
   const [inputText, setInputText] = createSignal("");
-  const [forceNetwork, setForceNetwork] = createSignal<"Auto" | "LAN" | "Internet">("Auto");
   const [detailsOpen, setDetailsOpen] = createSignal(false);
   const [activeTab, setActiveTab] = createSignal<"chat" | "space">("chat");
   let messagesEndRef: HTMLDivElement | undefined;
@@ -183,21 +182,6 @@ export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (prop
               <Columns size={16} /> Split
             </button>
           )}
-          <span class="text-xs font-black text-stone-400 dark:text-stone-500 uppercase tracking-wider hidden lg:inline">Route:</span>
-          <div class="hidden lg:flex bg-stone-200 dark:bg-[#2c2421] rounded-md border-2 border-stone-800 dark:border-stone-700 p-0.5">
-            {(["Auto", "LAN", "Internet"] as const).map(mode => (
-              <button
-                class={`px-3 py-1 text-sm font-bold rounded-md transition-all ${
-                  forceNetwork() === mode
-                    ? "bg-white dark:bg-[#4a3a33] text-primary-600 dark:text-primary-400 border border-stone-800 shadow-[1px_1px_0px_0px_rgba(41,37,36,1)] dark:shadow-none"
-                    : "text-stone-600 dark:text-stone-400 border border-transparent hover:text-stone-900"
-                }`}
-                onClick={() => setForceNetwork(mode)}
-              >
-                {mode}
-              </button>
-            ))}
-          </div>
         </div>
       </div>
 
@@ -211,7 +195,7 @@ export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (prop
             <div class="flex items-center justify-center my-6">
               <div class="px-4 py-2 rounded-md bg-emerald-100 dark:bg-emerald-900/40 border-2 border-emerald-800 flex items-center gap-2 text-xs font-black text-emerald-900 dark:text-emerald-400 shadow-[2px_2px_0px_0px_rgba(6,78,59,0.5)]">
                 <Shield size={14} />
-                End-to-End Encrypted (LAN Direct)
+                End-to-End Encrypted
               </div>
             </div>
 

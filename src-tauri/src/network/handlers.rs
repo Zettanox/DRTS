@@ -236,12 +236,14 @@ pub async fn handle_incoming_request(
             file_size,
             checksum,
             chunk_count,
+            chunk_size,
             sender_name,
         } => {
             let sender_id = peer.to_string();
+            let chunk_size_usize = chunk_size as usize;
             println!(
-                "[Stoa File] FileOffer from {sender_name}: {} ({} bytes, {} chunks)",
-                file_name, file_size, chunk_count
+                "[Stoa File] FileOffer from {sender_name}: {} ({} bytes, {} chunks @ {}KB)",
+                file_name, file_size, chunk_count, chunk_size / 1024
             );
 
             // Auto-accept: create download transfer
@@ -260,6 +262,7 @@ pub async fn handle_incoming_request(
                 received_chunks_set: std::collections::HashSet::new(),
                 last_requested_chunk: None,
                 group_id: None,
+                chunk_size: chunk_size_usize,
             };
             
             // Accept the offer
@@ -315,12 +318,13 @@ pub async fn handle_incoming_request(
                 );
                 active_transfers.insert(transfer_id.clone(), transfer);
             } else {
-                // Determine pipeline window
-                let mut window_max = chunk_count;
-                if window_max > file_transfer::MAX_WINDOW_SIZE {
-                    window_max = file_transfer::MAX_WINDOW_SIZE;
-                }
-                
+                // Window size based on chunk size: large chunks → smaller window
+                let window_size = if chunk_size_usize >= file_transfer::LAN_CHUNK_SIZE {
+                    file_transfer::LAN_WINDOW_SIZE
+                } else {
+                    file_transfer::RELAY_WINDOW_SIZE
+                };
+                let window_max = chunk_count.min(window_size);
                 transfer.last_requested_chunk = Some(window_max - 1);
                 active_transfers.insert(transfer_id.clone(), transfer);
                 
@@ -343,7 +347,8 @@ pub async fn handle_incoming_request(
         } => {
             if let Some(transfer) = active_transfers.get_mut(&transfer_id) {
                 if transfer.status == TransferStatus::Transferring {
-                    if let Ok(data_b64) = file_transfer::read_chunk(&transfer.file_path, chunk_index) {
+                    let cs = transfer.chunk_size;
+                    if let Ok(data_b64) = file_transfer::read_chunk(&transfer.file_path, chunk_index, cs) {
                         // Encrypt chunk data if we have a session with the peer
                         let peer_id_str = transfer.peer_id.clone();
                         let (final_data, final_nonce) = if crypto::has_session(&peer_id_str) {
@@ -488,7 +493,7 @@ pub async fn handle_incoming_request(
                     // Deserialize the inner message and dispatch
                     match serde_json::from_slice::<StoaRequest>(&plaintext) {
                         Ok(inner_request) => {
-                            // Successfully decrypted — dispatch inner request
+                            println!("[Stoa Crypto] Decrypted envelope from {pid}");
                             // Recursively handle the decrypted inner request.
                             // We create a dummy channel situation — the inner request
                             // should use the original channel for its response.
@@ -645,12 +650,14 @@ pub async fn handle_incoming_request(
             file_size,
             checksum,
             chunk_count,
+            chunk_size,
             sender_name,
         } => {
             let sender_id = peer.to_string();
+            let chunk_size_usize = chunk_size as usize;
             println!(
-                "[Stoa Group] FileOffer in '{group_id}' from {sender_name}: {} ({} bytes)",
-                file_name, file_size
+                "[Stoa Group] FileOffer in '{group_id}' from {sender_name}: {} ({} bytes, {}KB chunks)",
+                file_name, file_size, chunk_size / 1024
             );
 
             // Reuse the DM file offer logic — the file is pulled individually
@@ -669,6 +676,7 @@ pub async fn handle_incoming_request(
                 received_chunks_set: std::collections::HashSet::new(),
                 last_requested_chunk: None,
                 group_id: Some(group_id.clone()),
+                chunk_size: chunk_size_usize,
             };
 
             let response = StoaResponse::FileAccepted {
@@ -713,10 +721,12 @@ pub async fn handle_incoming_request(
                 let _ = std::fs::write(&transfer.file_path, b"");
                 active_transfers.insert(transfer_id, transfer);
             } else {
-                let mut window_max = chunk_count;
-                if window_max > file_transfer::MAX_WINDOW_SIZE {
-                    window_max = file_transfer::MAX_WINDOW_SIZE;
-                }
+                let window_size = if chunk_size_usize >= file_transfer::LAN_CHUNK_SIZE {
+                    file_transfer::LAN_WINDOW_SIZE
+                } else {
+                    file_transfer::RELAY_WINDOW_SIZE
+                };
+                let window_max = chunk_count.min(window_size);
                 transfer.last_requested_chunk = Some(window_max - 1);
                 active_transfers.insert(transfer_id.clone(), transfer);
 
@@ -789,7 +799,7 @@ pub async fn handle_incoming_request(
             }
         }
         StoaRequest::GroupSpaceUpdate { group_id, update_b64 } => {
-            // Live CRDT updates are very frequent (per-keystroke) — don't log each one
+            println!("[Stoa Space] Live update from {} for {}", peer.to_string(), group_id);
             if let Ok(update_bytes) = base64::decode(&update_b64) {
                 if let Ok(_) = crate::crdt::apply_remote_update(&group_id, &update_bytes).await {
                     let _ = app_handle.emit("space-remote-update", &serde_json::json!({
@@ -920,7 +930,8 @@ pub async fn handle_incoming_response(
                     data_b64
                 };
 
-                if let Err(e) = file_transfer::write_chunk(&transfer.file_path, chunk_index, &actual_data_b64) {
+                let cs = transfer.chunk_size;
+                if let Err(e) = file_transfer::write_chunk(&transfer.file_path, chunk_index, &actual_data_b64, cs) {
                     eprintln!("[Stoa File] Failed to write chunk: {e}");
                     transfer.status = TransferStatus::Failed;
                     return;

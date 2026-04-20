@@ -25,6 +25,7 @@ pub enum StoaRequest {
         file_size: u64,
         checksum: String,
         chunk_count: u32,
+        chunk_size: u32,
         sender_name: String,
     },
     /// Request a specific chunk of a file (Pull method).
@@ -68,6 +69,7 @@ pub enum StoaRequest {
         file_size: u64,
         checksum: String,
         chunk_count: u32,
+        chunk_size: u32,
         sender_name: String,
     },
     /// Admin removed a member from the group.

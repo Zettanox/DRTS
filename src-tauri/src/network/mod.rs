@@ -1,7 +1,7 @@
 pub mod handlers;
 pub mod types;
 
-pub use types::{ContactsList, NearbyPeer, NearbyPeersMap, NetworkCommand};
+pub use types::{ContactsList, NearbyPeer, NearbyPeersMap, NetworkCommand, PeerConnectionMap, PeerConnectionType};
 
 use crate::protocol::{StoaRequest, StoaResponse};
 use futures::StreamExt;
@@ -143,6 +143,7 @@ pub fn spawn_network(
         let mut active_transfers: HashMap<String, ActiveTransfer> = HashMap::new();
         let mut local_groups: Vec<Group> = groups::load_groups().unwrap_or_default();
         let our_peer_id_str = peer_id.to_string();
+        let conn_types: PeerConnectionMap = Arc::new(Mutex::new(HashMap::new()));
 
         // Reconnection sweep interval — retries cached addresses for offline contacts.
         // Delay the first tick by 15s to let the relay reservation establish first.
@@ -188,7 +189,19 @@ pub fn spawn_network(
                         }
 
                         // ── Connection Events (always active) ───────────────
-                        SwarmEvent::ConnectionEstablished { peer_id: connected_peer, .. } => {
+                        SwarmEvent::ConnectionEstablished { peer_id: connected_peer, endpoint, .. } => {
+                            // Classify connection type: relay circuit vs LAN
+                            let pid_str = connected_peer.to_string();
+                            let addr_str = endpoint.get_remote_address().to_string();
+                            let conn_type = if addr_str.contains("p2p-circuit") {
+                                PeerConnectionType::Relay
+                            } else {
+                                PeerConnectionType::Lan
+                            };
+                            println!("[Stoa Network] Connection established with {pid_str} ({})",
+                                if conn_type == PeerConnectionType::Lan { "LAN" } else { "Relay" });
+                            conn_types.lock().await.insert(pid_str, conn_type);
+
                             handlers::handle_connection_established(
                                 connected_peer,
                                 &contacts,
@@ -216,6 +229,7 @@ pub fn spawn_network(
                         }
 
                         SwarmEvent::ConnectionClosed { peer_id: disconnected_peer, .. } => {
+                            conn_types.lock().await.remove(&disconnected_peer.to_string());
                             handlers::handle_connection_closed(
                                 disconnected_peer,
                                 &contacts,
@@ -310,12 +324,7 @@ pub fn spawn_network(
                             println!("[Stoa Network] Listening on {address}");
                         }
                         SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
-                            let err_str = format!("{error}");
-                            // Suppress noisy timeout errors from hole-punch attempts
-                            // (Linux: "timed out", Windows: "did not properly respond")
-                            if !err_str.contains("timed out") && !err_str.contains("Unsupported resolved address") && !err_str.contains("did not properly respond") && !err_str.contains("oneshot canceled") {
-                                eprintln!("[Stoa Network] ❌ Connection error to {:?}: {error}", peer_id);
-                            }
+                            eprintln!("[Stoa Network] ❌ Outgoing connection error to {:?}: {error}", peer_id);
                         }
                         SwarmEvent::IncomingConnectionError { error, .. } => {
                             eprintln!("[Stoa Network] ❌ Incoming connection error: {error}");
@@ -326,7 +335,9 @@ pub fn spawn_network(
                         SwarmEvent::ListenerClosed { listener_id, reason, .. } => {
                             eprintln!("[Stoa Network] ⚠ Listener {listener_id:?} closed: {reason:?}");
                         }
-                        SwarmEvent::Dialing { .. } => {}
+                        SwarmEvent::Dialing { peer_id, .. } => {
+                            println!("[Stoa Network] 📡 Dialing {:?}...", peer_id);
+                        }
                         _ => {}
                     }
                 }
@@ -468,10 +479,18 @@ pub fn spawn_network(
                         }) => {
                             let tx = cmd_tx_for_loop.clone();
                             let path = std::path::PathBuf::from(file_path.clone());
+                            // Determine chunk size based on connection type
+                            let ct = conn_types.lock().await;
+                            let chunk_size = if ct.get(&peer_id) == Some(&PeerConnectionType::Lan) {
+                                file_transfer::LAN_CHUNK_SIZE
+                            } else {
+                                file_transfer::RELAY_CHUNK_SIZE
+                            };
+                            drop(ct);
                             // Spawn a task so hashing doesn't block the network event loop
                             tokio::spawn(async move {
-                                println!("[Stoa File] Hashing file: {file_path}");
-                                match file_transfer::prepare_file_off_thread(path.clone()).await {
+                                println!("[Stoa File] Hashing file: {file_path} (chunk_size={}KB)", chunk_size / 1024);
+                                match file_transfer::prepare_file_off_thread(path.clone(), chunk_size).await {
                                     Ok((file_name, file_size, checksum, chunk_count)) => {
                                         let _ = tx.send(NetworkCommand::FilePrepared {
                                             peer_id,
@@ -480,6 +499,7 @@ pub fn spawn_network(
                                             file_size,
                                             checksum,
                                             chunk_count,
+                                            chunk_size: chunk_size as u32,
                                             sender_name,
                                         }).await;
                                     }
@@ -497,13 +517,14 @@ pub fn spawn_network(
                             file_size,
                             checksum,
                             chunk_count,
+                            chunk_size,
                             sender_name,
                         }) => {
                             let transfer_id = uuid::Uuid::new_v4().to_string();
 
                             println!(
-                                "[Stoa File] Offering {} ({} bytes, {} chunks) to {}",
-                                file_name, file_size, chunk_count, peer_id
+                                "[Stoa File] Offering {} ({} bytes, {} chunks @ {}KB) to {}",
+                                file_name, file_size, chunk_count, chunk_size / 1024, peer_id
                             );
 
                             let transfer = ActiveTransfer {
@@ -520,6 +541,7 @@ pub fn spawn_network(
                                 received_chunks_set: std::collections::HashSet::new(),
                                 last_requested_chunk: None,
                                 group_id: None,
+                                chunk_size: chunk_size as usize,
                             };
                             active_transfers.insert(transfer_id.clone(), transfer);
 
@@ -529,6 +551,7 @@ pub fn spawn_network(
                                 file_size,
                                 checksum,
                                 chunk_count,
+                                chunk_size,
                                 sender_name,
                             };
 
@@ -711,13 +734,25 @@ pub fn spawn_network(
                             file_path,
                             sender_name,
                         }) => {
-                            // Use same pattern as DM files: prepare off-thread, then send offers
+                            // Use same pattern as DM files: connection-type-aware chunk size
+                            // For groups, use the minimum (most conservative) chunk size among all members
+                            // to ensure all members can receive. If any member is on relay, use relay.
                             let path = std::path::PathBuf::from(file_path.clone());
-                            match file_transfer::prepare_file_off_thread(path).await {
+                            let group_chunk_size = if let Some(group) = local_groups.iter().find(|g| g.id == group_id) {
+                                let ct = conn_types.lock().await;
+                                let all_lan = group.members.iter()
+                                    .filter(|m| **m != our_peer_id_str)
+                                    .all(|m| ct.get(m) == Some(&PeerConnectionType::Lan));
+                                drop(ct);
+                                if all_lan { file_transfer::LAN_CHUNK_SIZE } else { file_transfer::RELAY_CHUNK_SIZE }
+                            } else {
+                                file_transfer::RELAY_CHUNK_SIZE
+                            };
+                            match file_transfer::prepare_file_off_thread(path, group_chunk_size).await {
                                 Ok((file_name, file_size, checksum, chunk_count)) => {
                                     println!(
-                                        "[Stoa Group] Offering {} ({} bytes, {} chunks) to group {}",
-                                        file_name, file_size, chunk_count, group_id
+                                        "[Stoa Group] Offering {} ({} bytes, {} chunks @ {}KB) to group {}",
+                                        file_name, file_size, chunk_count, group_chunk_size / 1024, group_id
                                     );
 
                                     // Emit once for the sender's UI
@@ -756,6 +791,7 @@ pub fn spawn_network(
                                                 received_chunks_set: std::collections::HashSet::new(),
                                                 last_requested_chunk: None,
                                                 group_id: Some(group_id.clone()),
+                                                chunk_size: group_chunk_size,
                                             };
                                             active_transfers.insert(transfer_id.clone(), transfer);
 
@@ -767,6 +803,7 @@ pub fn spawn_network(
                                                     file_size,
                                                     checksum: checksum.clone(),
                                                     chunk_count,
+                                                    chunk_size: group_chunk_size as u32,
                                                     sender_name: sender_name.clone(),
                                                 };
                                                 let offer_clone = offer.clone();
@@ -1066,7 +1103,7 @@ fn maybe_encrypt_request(peer_id: &str, req: StoaRequest) -> StoaRequest {
 
     match crypto::encrypt_for_peer(peer_id, &plaintext) {
         Ok(Some((ciphertext_b64, nonce_b64))) => {
-            // Encryption applied transparently
+            println!("[Stoa Crypto] Encrypting message for {peer_id}");
             StoaRequest::EncryptedEnvelope {
                 id: uuid::Uuid::new_v4().to_string(),
                 ciphertext_b64,
