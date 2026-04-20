@@ -1,3 +1,4 @@
+mod connection_code;
 mod contacts;
 mod crdt;
 mod crypto;
@@ -684,7 +685,81 @@ async fn set_relay_config(config: relay_config::RelayConfig) -> Result<(), Strin
     config.save()
 }
 
-// ─── App Entry ────────────────────────────────────────────────────────────────
+// ─── Connection Codes ──────────────────────────────────────────────────────────
+
+/// Returns our own connection code string and QR code SVG (base64) so the UI
+/// can display them in the Settings panel for sharing with contacts.
+#[tauri::command]
+async fn get_my_connection_code(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let kp_guard = state.keypair.lock().await;
+    let keypair = kp_guard
+        .as_ref()
+        .ok_or("No identity — generate one first")?;
+
+    let relay_cfg = relay_config::RelayConfig::load();
+    let relay_addrs = relay_cfg.enabled_addresses();
+
+    let code_str = connection_code::build_our_code(keypair, relay_addrs)?;
+    let qr_b64 = connection_code::ConnectionCode::decode(&code_str)?.to_qr_base64()?;
+
+    Ok(serde_json::json!({
+        "code": code_str,
+        "qr_svg_b64": qr_b64,
+    }))
+}
+
+/// Decode a peer's connection code string and return their PeerID + relay addrs.
+#[tauri::command]
+async fn parse_connection_code(code: String) -> Result<serde_json::Value, String> {
+    let (peer_id, relay_addrs) = connection_code::parse_peer_code(&code)?;
+    Ok(serde_json::json!({
+        "peer_id": peer_id,
+        "relay_addrs": relay_addrs,
+    }))
+}
+
+/// Add a contact from their connection code in one step.
+/// Decodes the code, dials via relay address, sends a contact request,
+/// and adds them to the local contacts list.
+#[tauri::command]
+async fn add_contact_from_code(
+    code: String,
+    petname: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let (peer_id_str, _relay_addrs) = connection_code::parse_peer_code(&code)?;
+
+    // Add to contacts list first
+    {
+        let mut cts = state.contacts.lock().await;
+        contacts::add_contact(&mut cts, peer_id_str.clone(), petname)
+            .map_err(|e| format!("Failed to save contact: {e}"))?;
+    }
+
+    // Send contact request over the network so the peer knows about us
+    let tx = state.network_cmd_tx.lock().await;
+    if let Some(tx) = tx.as_ref() {
+        let id_guard = state.identity_info.lock().await;
+        let our_name = id_guard
+            .as_ref()
+            .map(|i| i.name.clone())
+            .unwrap_or_else(|| "Stoa User".to_string());
+        let our_peer_id = id_guard
+            .as_ref()
+            .map(|i| i.peer_id.clone())
+            .unwrap_or_default();
+        drop(id_guard);
+
+        let _ = tx.send(network::NetworkCommand::SendContactRequest {
+            peer_id: peer_id_str,
+            our_name,
+            our_peer_id,
+        }).await;
+    }
+
+    Ok(())
+}
+
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -741,6 +816,9 @@ pub fn run() {
             edit_space_file,
             get_relay_config,
             set_relay_config,
+            get_my_connection_code,
+            parse_connection_code,
+            add_contact_from_code,
         ])
         .on_window_event(|window, event| {
             // Gracefully shut down the network task before the window closes,

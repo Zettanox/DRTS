@@ -10,7 +10,7 @@ use std::path::PathBuf;
 /// Replace this with your actual deployed relay multiaddr + PeerId.
 /// Format: /ip4/<HOST>/tcp/<PORT>/p2p/<PEERID>
 pub const DEFAULT_RELAY: &str =
-    "/ip4/0.0.0.0/tcp/4001/p2p/12D3KooWDUMPLACEHOLDERYourRelayPeerIDGoesHere";
+    "/ip4/129.159.17.16/tcp/4001/p2p/12D3KooWDQHjWkGS9pxUQQeii7prryA5T1LzZP6cMMU128cas658";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RelayEntry {
