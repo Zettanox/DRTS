@@ -326,6 +326,17 @@ async fn get_chat_history(peer_id: String) -> Result<Vec<StoredMessage>, String>
 }
 
 #[tauri::command]
+async fn delete_chat_message(peer_id: String, message_id: String) -> Result<(), String> {
+    messages::delete_message(&peer_id, &message_id)
+}
+
+#[tauri::command]
+async fn clear_chat(peer_id: String) -> Result<(), String> {
+    messages::clear_chat_history(&peer_id)
+}
+
+
+#[tauri::command]
 async fn set_username(
     new_name: String,
     state: State<'_, AppState>,
@@ -824,6 +835,8 @@ pub fn run() {
             get_my_connection_code,
             parse_connection_code,
             add_contact_from_code,
+            delete_chat_message,
+            clear_chat,
         ])
         .on_window_event(|window, event| {
             // Gracefully shut down the network task before the window closes,

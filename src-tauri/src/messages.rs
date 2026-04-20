@@ -91,3 +91,22 @@ fn write_messages(peer_id: &str, messages: &[StoredMessage]) -> Result<(), Strin
     std::fs::write(&path, data)
         .map_err(|e| format!("Failed to write messages: {e}"))
 }
+
+/// Delete a specific message from history.
+pub fn delete_message(peer_id: &str, message_id: &str) -> Result<(), String> {
+    let mut messages = load_messages(peer_id)?;
+    let initial_len = messages.len();
+    messages.retain(|m| m.id != message_id);
+    
+    if messages.len() < initial_len {
+        write_messages(peer_id, &messages)
+    } else {
+        Ok(())
+    }
+}
+
+/// Clear all message history for a peer.
+pub fn clear_chat_history(peer_id: &str) -> Result<(), String> {
+    write_messages(peer_id, &[])
+}
+

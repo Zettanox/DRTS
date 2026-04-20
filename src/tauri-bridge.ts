@@ -220,6 +220,27 @@ export async function getChatHistory(peerId: string): Promise<void> {
   }));
 }
 
+/** Delete a specific chat message locally. */
+export async function deleteChatMessage(peerId: string, messageId: string): Promise<void> {
+  await invoke("delete_chat_message", { peerId, messageId });
+  
+  // UI update
+  setChatMessages((prev) => ({
+    ...prev,
+    [peerId]: prev[peerId]?.filter(m => m.id !== messageId) || []
+  }));
+}
+
+/** Clear entire chat history for a peer locally. */
+export async function clearChat(peerId: string): Promise<void> {
+  await invoke("clear_chat", { peerId });
+  setChatMessages((prev) => ({
+    ...prev,
+    [peerId]: []
+  }));
+}
+
+
 /** Update the user's display name. */
 export async function setUsername(newName: string): Promise<string> {
   const name = await invoke<string>("set_username", { newName });
@@ -518,12 +539,13 @@ export async function setupNetworkListeners(): Promise<void> {
     transfer_id: string;
     peer_id: string;
     file_name: string;
+    file_path?: string;
     file_size: number;
     direction: string;
     chunk_count: number;
     sender_name?: string;
   }>("file-transfer-started", (event) => {
-    const { transfer_id, peer_id, file_name, file_size, direction, chunk_count } = event.payload;
+    const { transfer_id, peer_id, file_name, file_path, file_size, direction, chunk_count } = event.payload;
     console.log(`[File] Transfer started: ${file_name} (${direction}) with ${peer_id}`);
 
     // Track this transfer
@@ -544,6 +566,7 @@ export async function setupNetworkListeners(): Promise<void> {
         progress: 0,
         status: "transferring",
         chunkCount: chunk_count,
+        filePath: file_path,
       },
     };
 
@@ -559,12 +582,13 @@ export async function setupNetworkListeners(): Promise<void> {
     transfer_id: string;
     peer_id: string;
     file_name: string;
+    file_path?: string;
     file_size: number;
     direction: string;
     chunk_count: number;
     sender_name?: string;
   }>("group-file-transfer-started", (event) => {
-    const { group_id, transfer_id, peer_id, file_name, file_size, direction, chunk_count, sender_name } = event.payload;
+    const { group_id, transfer_id, peer_id, file_name, file_path, file_size, direction, chunk_count, sender_name } = event.payload;
     console.log(`[File] Group transfer started: ${file_name} (${direction}) in group ${group_id}`);
 
     // Track with a special group prefix so progress/complete can find it
@@ -587,6 +611,7 @@ export async function setupNetworkListeners(): Promise<void> {
         progress: isUpload ? 1 : 0,  // Uploads show as complete immediately
         status: isUpload ? "complete" : "transferring",
         chunkCount: chunk_count,
+        filePath: file_path,
       },
     };
 

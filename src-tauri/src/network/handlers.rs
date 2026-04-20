@@ -436,6 +436,7 @@ pub async fn handle_incoming_request(
                                 transfer_id: String,
                                 peer_id: String,
                                 file_name: String,
+                                file_path: Option<String>,
                                 file_size: u64,
                                 direction: String,
                             }
@@ -445,6 +446,7 @@ pub async fn handle_incoming_request(
                                     transfer_id: transfer_id.clone(),
                                     peer_id: transfer.peer_id.clone(),
                                     file_name: transfer.file_name.clone(),
+                                    file_path: Some(transfer.file_path.to_string_lossy().to_string()),
                                     file_size: transfer.file_size,
                                     direction: "upload".into(),
                                 },

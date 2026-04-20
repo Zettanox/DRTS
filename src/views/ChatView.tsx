@@ -1,7 +1,7 @@
 import { Component, createSignal, createMemo, createEffect, For, Show, onMount } from "solid-js";
 import { dms, groups, contacts, identity, chatMessages, groupMessages, activeRightPane, setActiveRightPane, Message } from "../store";
-import { sendMessage as bridgeSendMessage, getChatHistory, sendFile, pauseFileTransfer, resumeFileTransfer, sendGroupMessage, getGroupHistory, sendGroupFile, leaveGroup, removeGroupMember, disbandGroup } from "../tauri-bridge";
-import { Send, Paperclip, Users, Shield, X, MapPin, Columns, Check, CheckCheck, Clock, FileIcon, Download, LogOut, UserMinus, Trash2, Hash, Image as ImageIcon, ExternalLink } from "lucide-solid";
+import { sendMessage as bridgeSendMessage, getChatHistory, sendFile, pauseFileTransfer, resumeFileTransfer, sendGroupMessage, getGroupHistory, sendGroupFile, leaveGroup, removeGroupMember, disbandGroup, deleteChatMessage, clearChat } from "../tauri-bridge";
+import { Send, Paperclip, Users, Shield, X, MapPin, Columns, Check, CheckCheck, Clock, FileIcon, Download, LogOut, UserMinus, Trash2, Hash, Image as ImageIcon, ExternalLink, Trash } from "lucide-solid";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { SpaceEditor } from "../components/SpaceEditor";
 
@@ -182,6 +182,21 @@ export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (prop
               <Columns size={16} /> Split
             </button>
           )}
+
+          {!isGroup() && (
+            <button
+              class="p-2 text-stone-500 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors border-2 border-transparent hover:border-red-200 dark:hover:border-red-800/30"
+              title="Clear Chat History"
+              onClick={() => {
+                if (confirm("Clear all messages for this chat? This cannot be undone.")) {
+                  const pid = peerId();
+                  if (pid) clearChat(pid);
+                }
+              }}
+            >
+              <Trash2 size={20} />
+            </button>
+          )}
         </div>
       </div>
 
@@ -211,6 +226,32 @@ export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (prop
                       <div class="text-xs font-black mb-1 text-accent-600 dark:text-accent-400">
                         {contacts.find(c => c.peerId === message.senderId)?.petname || message.senderId.slice(0, 12) + '…'}
                       </div>
+                    )}
+
+                    {isMe(message.senderId) && (
+                      <button
+                        class="absolute -left-10 top-1/2 -translate-y-1/2 p-2 text-stone-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                        title="Delete Message"
+                        onClick={() => {
+                          const pid = peerId();
+                          if (pid) deleteChatMessage(pid, message.id);
+                        }}
+                      >
+                        <Trash size={14} />
+                      </button>
+                    )}
+
+                    {!isMe(message.senderId) && (
+                      <button
+                        class="absolute -right-10 top-1/2 -translate-y-1/2 p-2 text-stone-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                        title="Delete Message"
+                        onClick={() => {
+                          const pid = peerId();
+                          if (pid) deleteChatMessage(pid, message.id);
+                        }}
+                      >
+                        <Trash size={14} />
+                      </button>
                     )}
 
                     {/* File message */}
