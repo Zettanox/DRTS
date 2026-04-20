@@ -1093,29 +1093,35 @@ pub async fn dial_peer(
     peer_id_str: &str,
     swarm: &mut Swarm<StoaBehaviour>,
 ) {
-    // 1. Try LAN addresses (fast, free)
-    let peers = peers_map.lock().await;
-    if let Some(peer_info) = peers.get(peer_id_str) {
-        for addr_str in &peer_info.addresses {
-            if let Ok(addr) = addr_str.parse::<libp2p::Multiaddr>() {
-                let _ = swarm.dial(addr);
-            }
-        }
-    }
-    drop(peers);
+    let Ok(target_peer_id) = peer_id_str.parse::<libp2p::PeerId>() else { return };
+    let already_connected = swarm.is_connected(&target_peer_id);
 
-    // 2. Always also try relay for contacts (background safety net for LAN→Internet handoff)
-    // libp2p deduplicates connections, so this is free if already connected via LAN.
-    let cts = contacts.lock().await;
-    if let Some(contact) = cts.iter().find(|c| c.peer_id == peer_id_str) {
-        if let Some(addrs) = &contact.known_addrs {
-            for addr_str in addrs {
-                let circuit_addr = format!("{}/p2p-circuit/p2p/{}", addr_str, peer_id_str);
-                if let Ok(maddr) = circuit_addr.parse::<libp2p::Multiaddr>() {
-                    let _ = swarm.dial(maddr);
+    // 1. Try LAN addresses only if not already connected (prevents EADDRINUSE on Windows)
+    if !already_connected {
+        let peers = peers_map.lock().await;
+        if let Some(peer_info) = peers.get(peer_id_str) {
+            for addr_str in &peer_info.addresses {
+                if let Ok(addr) = addr_str.parse::<libp2p::Multiaddr>() {
+                    let _ = swarm.dial(addr);
                 }
             }
         }
+        drop(peers);
     }
-    drop(cts);
+
+    // 2. Try relay only if not already connected (prevents oneshot-canceled errors)
+    if !already_connected {
+        let cts = contacts.lock().await;
+        if let Some(contact) = cts.iter().find(|c| c.peer_id == peer_id_str) {
+            if let Some(addrs) = &contact.known_addrs {
+                for addr_str in addrs {
+                    let circuit_addr = format!("{}/p2p-circuit/p2p/{}", addr_str, peer_id_str);
+                    if let Ok(maddr) = circuit_addr.parse::<libp2p::Multiaddr>() {
+                        let _ = swarm.dial(maddr);
+                    }
+                }
+            }
+        }
+        drop(cts);
+    }
 }

@@ -145,11 +145,17 @@ pub fn spawn_network(
         let our_peer_id_str = peer_id.to_string();
         let conn_types: PeerConnectionMap = Arc::new(Mutex::new(HashMap::new()));
 
-        // Reconnection sweep interval — retries cached addresses for offline contacts.
-        // Delay the first tick by 15s to let the relay reservation establish first.
+        // Reconnection sweep — retries disconnected contacts every 60s.
         let reconnect_start = tokio::time::Instant::now() + std::time::Duration::from_secs(15);
         let mut reconnect_interval = tokio::time::interval_at(reconnect_start, std::time::Duration::from_secs(60));
         reconnect_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+        // Relay keepalive sweep — for LAN-connected contacts, ensure a relay circuit
+        // also exists in the background for seamless LAN→Internet handoff.
+        // Runs every 5 minutes to avoid relay churn.
+        let relay_keepalive_start = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
+        let mut relay_keepalive_interval = tokio::time::interval_at(relay_keepalive_start, std::time::Duration::from_secs(300));
+        relay_keepalive_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
         loop {
             tokio::select! {
@@ -610,21 +616,33 @@ pub fn spawn_network(
                                 transfer.status = TransferStatus::Transferring;
                                 println!("[Stoa File] Resumed transfer {}", transfer_id);
                                 let target = PeerId::from_str(&transfer.peer_id).unwrap();
-                                // We fetch the NEXT missing chunk
-                                let mut start_chunk = 0;
-                                for i in 0..transfer.chunk_count {
+                                // Find the first missing chunk index
+                                let first_missing = (0..transfer.chunk_count)
+                                    .find(|i| !transfer.received_chunks_set.contains(i))
+                                    .unwrap_or(0);
+
+                                // Restore the full pipeline window based on chunk size
+                                let window_size = if transfer.chunk_size >= file_transfer::LAN_CHUNK_SIZE {
+                                    file_transfer::LAN_WINDOW_SIZE
+                                } else {
+                                    file_transfer::RELAY_WINDOW_SIZE
+                                };
+
+                                // Request as many missing chunks as the window allows
+                                let mut last_sent = first_missing;
+                                let mut count = 0u32;
+                                for i in first_missing..transfer.chunk_count {
+                                    if count >= window_size { break; }
                                     if !transfer.received_chunks_set.contains(&i) {
-                                        start_chunk = i;
-                                        break;
+                                        swarm.behaviour_mut().messaging.send_request(&target, StoaRequest::FetchChunk {
+                                            transfer_id: transfer_id.clone(),
+                                            chunk_index: i,
+                                        });
+                                        last_sent = i;
+                                        count += 1;
                                     }
                                 }
-                                
-                                transfer.last_requested_chunk = Some(start_chunk);
-                                let req = StoaRequest::FetchChunk {
-                                    transfer_id: transfer_id.clone(),
-                                    chunk_index: start_chunk,
-                                };
-                                swarm.behaviour_mut().messaging.send_request(&target, req);
+                                transfer.last_requested_chunk = Some(last_sent);
                             }
                         }
 
@@ -1078,11 +1096,38 @@ pub fn spawn_network(
                     drop(cts);
 
                     for pid in contact_ids {
-                        // Always call dial_peer: it tries both LAN and relay simultaneously.
-                        // For connected LAN peers this keeps the relay circuit warm in the background,
-                        // ensuring seamless handoff when they switch to a different network.
-                        // libp2p deduplicates connections internally, so this is safe.
-                        handlers::dial_peer(&peers_clone, &contacts, &pid, &mut swarm).await;
+                        if let Ok(target) = PeerId::from_str(&pid) {
+                            if !swarm.is_connected(&target) {
+                                // Peer is offline — try both LAN and relay
+                                handlers::dial_peer(&peers_clone, &contacts, &pid, &mut swarm).await;
+                            }
+                        }
+                    }
+                }
+
+                // ── Relay Keepalive ─────────────────────────────────────
+                _ = relay_keepalive_interval.tick() => {
+                    // For contacts already connected (likely via LAN), also
+                    // establish a relay circuit in the background so they can
+                    // switch networks without any reconnect delay.
+                    let cts = contacts.lock().await;
+                    let contact_snapshot: Vec<_> = cts.iter().map(|c| (c.peer_id.clone(), c.known_addrs.clone())).collect();
+                    drop(cts);
+
+                    for (pid, known_addrs) in contact_snapshot {
+                        if let Ok(target) = PeerId::from_str(&pid) {
+                            // Only warm the relay if currently connected (prevents log spam when offline)
+                            if swarm.is_connected(&target) {
+                                if let Some(addrs) = known_addrs {
+                                    for addr_str in &addrs {
+                                        let circuit_addr = format!("{}/p2p-circuit/p2p/{}", addr_str, pid);
+                                        if let Ok(maddr) = circuit_addr.parse::<libp2p::Multiaddr>() {
+                                            let _ = swarm.dial(maddr);
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }

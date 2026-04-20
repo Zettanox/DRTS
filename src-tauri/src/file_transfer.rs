@@ -152,7 +152,8 @@ pub fn write_chunk(path: &Path, chunk_index: u32, data_b64: &str, chunk_size: us
     let data = B64.decode(data_b64).map_err(|e| format!("Decode failed: {e}"))?;
     let mut file = OpenOptions::new()
         .write(true)
-        .create(true) // will create sparse file on linux
+        .create(true)
+        .truncate(false) // CRITICAL: must not truncate — we write chunks out-of-order
         .open(path)
         .map_err(|e| format!("Failed to open dest file: {e}"))?;
         
