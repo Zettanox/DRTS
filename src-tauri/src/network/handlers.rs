@@ -488,7 +488,7 @@ pub async fn handle_incoming_request(
                     // Deserialize the inner message and dispatch
                     match serde_json::from_slice::<StoaRequest>(&plaintext) {
                         Ok(inner_request) => {
-                            println!("[Stoa Crypto] Decrypted envelope from {pid}");
+                            // Successfully decrypted — dispatch inner request
                             // Recursively handle the decrypted inner request.
                             // We create a dummy channel situation — the inner request
                             // should use the original channel for its response.
@@ -789,7 +789,7 @@ pub async fn handle_incoming_request(
             }
         }
         StoaRequest::GroupSpaceUpdate { group_id, update_b64 } => {
-            println!("[Stoa Space] Live update from {} for {}", peer.to_string(), group_id);
+            // Live CRDT updates are very frequent (per-keystroke) — don't log each one
             if let Ok(update_bytes) = base64::decode(&update_b64) {
                 if let Ok(_) = crate::crdt::apply_remote_update(&group_id, &update_bytes).await {
                     let _ = app_handle.emit("space-remote-update", &serde_json::json!({

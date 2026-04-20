@@ -308,7 +308,11 @@ pub fn spawn_network(
                             println!("[Stoa Network] Listening on {address}");
                         }
                         SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
-                            eprintln!("[Stoa Network] ❌ Outgoing connection error to {:?}: {error}", peer_id);
+                            let err_str = format!("{error}");
+                            // Suppress noisy timeout errors from hole-punch attempts
+                            if !err_str.contains("timed out") && !err_str.contains("Unsupported resolved address") {
+                                eprintln!("[Stoa Network] ❌ Connection error to {:?}: {error}", peer_id);
+                            }
                         }
                         SwarmEvent::IncomingConnectionError { error, .. } => {
                             eprintln!("[Stoa Network] ❌ Incoming connection error: {error}");
@@ -319,9 +323,7 @@ pub fn spawn_network(
                         SwarmEvent::ListenerClosed { listener_id, reason, .. } => {
                             eprintln!("[Stoa Network] ⚠ Listener {listener_id:?} closed: {reason:?}");
                         }
-                        SwarmEvent::Dialing { peer_id, .. } => {
-                            println!("[Stoa Network] 📡 Dialing {:?}...", peer_id);
-                        }
+                        SwarmEvent::Dialing { .. } => {}
                         _ => {}
                     }
                 }
@@ -1061,7 +1063,7 @@ fn maybe_encrypt_request(peer_id: &str, req: StoaRequest) -> StoaRequest {
 
     match crypto::encrypt_for_peer(peer_id, &plaintext) {
         Ok(Some((ciphertext_b64, nonce_b64))) => {
-            println!("[Stoa Crypto] Encrypting message for {peer_id}");
+            // Encryption applied transparently
             StoaRequest::EncryptedEnvelope {
                 id: uuid::Uuid::new_v4().to_string(),
                 ciphertext_b64,
