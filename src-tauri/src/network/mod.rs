@@ -243,6 +243,16 @@ pub fn spawn_network(
                                             swarm.close_connection(*old_id);
                                         }
                                     }
+                                } else {
+                                    // A new Relay connection when we already have a connection (Relay or Direct).
+                                    // To prevent "Mutual Annihilation" where both peers drop the connection,
+                                    // we deterministically assign the "killer" role to the peer with the greater PeerId.
+                                    if our_peer_id_str > pid_str {
+                                        println!("[{}] [Stoa Network] Closing redundant relay connection to {pid_str} (Tie-breaker won)",
+                                            chrono::Local::now().format("%H:%M:%S"));
+                                        swarm.close_connection(connection_id);
+                                        continue;
+                                    }
                                 }
                             }
 
