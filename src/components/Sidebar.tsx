@@ -136,11 +136,11 @@ export const Sidebar: Component = () => {
           </div>
         </div>
 
-        {/* Nearby Peers Section */}
+        {/* Online & Nearby Peers Section */}
         <div>
           <h2 class="text-xs font-black text-stone-500 dark:text-stone-500 uppercase tracking-widest mb-3 px-2 flex items-center gap-2">
             <Radio size={12} class={lanVisible() ? "text-emerald-500" : "text-stone-400"} />
-            Nearby
+            Online &amp; Nearby
             <Show when={!lanVisible()}>
               <span class="text-[10px] font-bold text-stone-400 normal-case tracking-normal ml-1">(hidden)</span>
             </Show>

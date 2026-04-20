@@ -56,7 +56,8 @@ pub fn spawn_network(
     let msg_protocol = StreamProtocol::new("/stoa/msg/1.0.0");
     let msg_behaviour = request_response::json::Behaviour::<StoaRequest, StoaResponse>::new(
         [(msg_protocol, ProtocolSupport::Full)],
-        request_response::Config::default(),
+        request_response::Config::default()
+            .with_request_timeout(std::time::Duration::from_secs(120)),
     );
 
     // Build relay client transport.

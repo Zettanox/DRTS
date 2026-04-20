@@ -6,11 +6,12 @@ use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
-/// Size of each chunk in bytes (256 KB).
-pub const CHUNK_SIZE: usize = 256 * 1024;
+/// Size of each chunk in bytes (64 KB — relay-friendly).
+pub const CHUNK_SIZE: usize = 64 * 1024;
 
 /// Maximum number of chunks to fetch concurrently (the pipeline window).
-pub const MAX_WINDOW_SIZE: u32 = 20;
+/// Kept small for reliable relay circuit transfers.
+pub const MAX_WINDOW_SIZE: u32 = 4;
 
 /// Direction of a file transfer.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
