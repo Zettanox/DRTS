@@ -8,6 +8,8 @@ pub struct Contact {
     pub petname: String,
     pub added_at: i64,
     pub trust_level: TrustLevel,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub known_addrs: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -46,7 +48,7 @@ pub fn save_contacts(contacts: &[Contact]) -> Result<(), String> {
 }
 
 /// Add a new contact. Returns Err if already exists.
-pub fn add_contact(contacts: &mut Vec<Contact>, peer_id: String, petname: String) -> Result<(), String> {
+pub fn add_contact(contacts: &mut Vec<Contact>, peer_id: String, petname: String, known_addrs: Option<Vec<String>>) -> Result<(), String> {
     if contacts.iter().any(|c| c.peer_id == peer_id) {
         return Err("Contact already exists".into());
     }
@@ -55,7 +57,9 @@ pub fn add_contact(contacts: &mut Vec<Contact>, peer_id: String, petname: String
         petname,
         added_at: chrono::Utc::now().timestamp(),
         trust_level: TrustLevel::Direct,
+        known_addrs,
     });
+
     save_contacts(contacts)
 }
 

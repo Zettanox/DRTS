@@ -346,6 +346,22 @@ pub fn spawn_network(
                             }
                         }
 
+                        Some(NetworkCommand::DialPeer { peer_id, relay_addrs }) => {
+                            if let Ok(target) = PeerId::from_str(&peer_id) {
+                                if !swarm.is_connected(&target) {
+                                    println!("[Stoa Network] Initiating circuit relay dial to {peer_id}");
+                                    for addr_str in relay_addrs {
+                                        // A valid circuit relay address looks like: /ip4/.../tcp/4001/p2p/{relay_id}/p2p-circuit/p2p/{peer_id}
+                                        let circuit_addr = format!("{}/p2p-circuit/p2p/{}", addr_str, peer_id);
+                                        if let Ok(maddr) = circuit_addr.parse::<libp2p::Multiaddr>() {
+                                            println!("[Stoa Network] Dialing relay circuit: {}", circuit_addr);
+                                            let _ = swarm.dial(maddr);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
                         Some(NetworkCommand::SendContactRequest {
                             peer_id,
                             our_name,
@@ -987,14 +1003,28 @@ pub fn spawn_network(
                 // ── Reconnection Sweep ──────────────────────────────────
                 _ = reconnect_interval.tick() => {
                     let cts = contacts.lock().await;
-                    let contact_ids: Vec<String> = cts.iter().map(|c| c.peer_id.clone()).collect();
+                    // We clone the necessary data so we can drop the lock quickly
+                    let contact_data: Vec<(String, Option<Vec<String>>)> = cts
+                        .iter()
+                        .map(|c| (c.peer_id.clone(), c.known_addrs.clone()))
+                        .collect();
                     drop(cts);
 
-                    for pid in &contact_ids {
-                        if let Ok(target) = PeerId::from_str(pid) {
+                    for (pid, known_addrs) in contact_data {
+                        if let Ok(target) = PeerId::from_str(&pid) {
                             if !swarm.is_connected(&target) {
-                                // Try cached addresses
-                                handlers::dial_peer(&peers_clone, pid, &mut swarm).await;
+                                // 1. Try cached LAN addresses if any
+                                handlers::dial_peer(&peers_clone, &pid, &mut swarm).await;
+                                
+                                // 2. Try known Internet Relay addresses
+                                if let Some(addrs) = known_addrs {
+                                    for addr_str in addrs {
+                                        let circuit_addr = format!("{}/p2p-circuit/p2p/{}", addr_str, pid);
+                                        if let Ok(maddr) = circuit_addr.parse::<libp2p::Multiaddr>() {
+                                            let _ = swarm.dial(maddr);
+                                        }
+                                    }
+                                }
                             }
                         }
                     }

@@ -258,7 +258,7 @@ async fn respond_contact_request(
 ) -> Result<(), String> {
     if accept {
         let mut cts = state.contacts.lock().await;
-        contacts::add_contact(&mut cts, peer_id, petname)?;
+        contacts::add_contact(&mut cts, peer_id, petname, None)?;
     }
     Ok(())
 }
@@ -270,7 +270,7 @@ async fn add_contact_from_request(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let mut cts = state.contacts.lock().await;
-    contacts::add_contact(&mut cts, peer_id, petname)
+    contacts::add_contact(&mut cts, peer_id, petname, None)
 }
 
 #[tauri::command]
@@ -727,18 +727,23 @@ async fn add_contact_from_code(
     petname: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let (peer_id_str, _relay_addrs) = connection_code::parse_peer_code(&code)?;
+    let (peer_id_str, relay_addrs) = connection_code::parse_peer_code(&code)?;
 
     // Add to contacts list first
     {
         let mut cts = state.contacts.lock().await;
-        contacts::add_contact(&mut cts, peer_id_str.clone(), petname)
+        contacts::add_contact(&mut cts, peer_id_str.clone(), petname, Some(relay_addrs.clone()))
             .map_err(|e| format!("Failed to save contact: {e}"))?;
     }
 
-    // Send contact request over the network so the peer knows about us
+    // Dial the peer via their relay, then send contact request
     let tx = state.network_cmd_tx.lock().await;
     if let Some(tx) = tx.as_ref() {
+        let _ = tx.send(network::NetworkCommand::DialPeer {
+            peer_id: peer_id_str.clone(),
+            relay_addrs,
+        }).await;
+
         let id_guard = state.identity_info.lock().await;
         let our_name = id_guard
             .as_ref()

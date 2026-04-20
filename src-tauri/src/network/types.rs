@@ -18,6 +18,11 @@ pub struct NearbyPeer {
 /// Commands the frontend can send to the network task.
 #[derive(Debug)]
 pub enum NetworkCommand {
+    /// Explicitly dial a peer over a relay circuit
+    DialPeer {
+        peer_id: String,
+        relay_addrs: Vec<String>,
+    },
     /// Send a contact request to a peer
     SendContactRequest {
         peer_id: String,
