@@ -163,6 +163,9 @@ pub fn spawn_network(
                                 continue; // Ignore discovery when invisible
                             }
                             for (discovered_peer, addr) in list {
+                                let pid_str = discovered_peer.to_string();
+                                // mDNS confirmation overrides any earlier Relay classification
+                                conn_types.lock().await.insert(pid_str, PeerConnectionType::Lan);
                                 handlers::handle_mdns_discovered(
                                     discovered_peer,
                                     addr,
@@ -180,6 +183,11 @@ pub fn spawn_network(
                                 continue;
                             }
                             for (expired_peer, _addr) in list {
+                                // Downgrade to Relay — they may still be reachable via relay circuit
+                                conn_types.lock().await.insert(
+                                    expired_peer.to_string(),
+                                    PeerConnectionType::Relay,
+                                );
                                 handlers::handle_mdns_expired(
                                     expired_peer,
                                     &peers_clone,
@@ -189,17 +197,15 @@ pub fn spawn_network(
                         }
 
                         // ── Connection Events (always active) ───────────────
-                        SwarmEvent::ConnectionEstablished { peer_id: connected_peer, endpoint, .. } => {
-                            // Classify connection type: relay circuit vs LAN
+                        SwarmEvent::ConnectionEstablished { peer_id: connected_peer, .. } => {
+                            // Classify connection type: LAN if mDNS-discovered, Relay otherwise.
+                            // We use peers_map (mDNS) as ground truth — endpoint address is unreliable
+                            // for inbound relay connections (send_back_addr may lack p2p-circuit).
                             let pid_str = connected_peer.to_string();
-                            let addr_str = endpoint.get_remote_address().to_string();
-                            let conn_type = if addr_str.contains("p2p-circuit") {
-                                PeerConnectionType::Relay
-                            } else {
-                                PeerConnectionType::Lan
-                            };
+                            let is_lan = peers_clone.lock().await.contains_key(&pid_str);
+                            let conn_type = if is_lan { PeerConnectionType::Lan } else { PeerConnectionType::Relay };
                             println!("[Stoa Network] Connection established with {pid_str} ({})",
-                                if conn_type == PeerConnectionType::Lan { "LAN" } else { "Relay" });
+                                if is_lan { "LAN" } else { "Relay" });
                             conn_types.lock().await.insert(pid_str, conn_type);
 
                             handlers::handle_connection_established(
@@ -1072,11 +1078,11 @@ pub fn spawn_network(
                     drop(cts);
 
                     for pid in contact_ids {
-                        if let Ok(target) = PeerId::from_str(&pid) {
-                            if !swarm.is_connected(&target) {
-                                handlers::dial_peer(&peers_clone, &contacts, &pid, &mut swarm).await;
-                            }
-                        }
+                        // Always call dial_peer: it tries both LAN and relay simultaneously.
+                        // For connected LAN peers this keeps the relay circuit warm in the background,
+                        // ensuring seamless handoff when they switch to a different network.
+                        // libp2p deduplicates connections internally, so this is safe.
+                        handlers::dial_peer(&peers_clone, &contacts, &pid, &mut swarm).await;
                     }
                 }
             }

@@ -48,6 +48,7 @@ pub async fn handle_mdns_discovered(
     let cts = contacts.lock().await;
     let is_contact = cts.iter().any(|c| c.peer_id == pid);
     drop(cts);
+    // Auto-dial LAN address for new peers/contacts
     if (is_new || is_contact) && !swarm.is_connected(&discovered_peer) {
         let _ = swarm.dial(addr);
     }
@@ -77,7 +78,7 @@ pub async fn handle_connection_established(
     pending_messages: &mut Vec<super::types::PendingMessage>,
 ) {
     let pid = connected_peer.to_string();
-    println!("[Stoa Network] Connection established with {pid}");
+    // Note: the caller already logs the connection with its type (LAN/Relay)
 
     // Send WhoAreYou to learn their display name
     swarm
@@ -346,7 +347,10 @@ pub async fn handle_incoming_request(
             chunk_index,
         } => {
             if let Some(transfer) = active_transfers.get_mut(&transfer_id) {
-                if transfer.status == TransferStatus::Transferring {
+                if transfer.status == TransferStatus::Transferring
+                    || transfer.status == TransferStatus::Offering {
+                    // Also mark as Transferring now that we know the receiver is pulling
+                    transfer.status = TransferStatus::Transferring;
                     let cs = transfer.chunk_size;
                     if let Ok(data_b64) = file_transfer::read_chunk(&transfer.file_path, chunk_index, cs) {
                         // Encrypt chunk data if we have a session with the peer
@@ -1081,14 +1085,15 @@ pub async fn handle_incoming_response(
 
 // ─── Utility ─────────────────────────────────────────────────────────────────
 
-/// Dial a peer using its known LAN and Internet Relay addresses.
+/// Dial a peer: always try LAN first (if discovered), always try relay for contacts.
+/// Both paths can run simultaneously — LAN wins on speed, relay is the safety net.
 pub async fn dial_peer(
     peers_map: &NearbyPeersMap,
     contacts: &super::types::ContactsList,
     peer_id_str: &str,
     swarm: &mut Swarm<StoaBehaviour>,
 ) {
-    // 1. Dial local LAN addresses
+    // 1. Try LAN addresses (fast, free)
     let peers = peers_map.lock().await;
     if let Some(peer_info) = peers.get(peer_id_str) {
         for addr_str in &peer_info.addresses {
@@ -1099,7 +1104,8 @@ pub async fn dial_peer(
     }
     drop(peers);
 
-    // 2. Dial known Internet Relay addresses
+    // 2. Always also try relay for contacts (background safety net for LAN→Internet handoff)
+    // libp2p deduplicates connections, so this is free if already connected via LAN.
     let cts = contacts.lock().await;
     if let Some(contact) = cts.iter().find(|c| c.peer_id == peer_id_str) {
         if let Some(addrs) = &contact.known_addrs {
