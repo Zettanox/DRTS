@@ -229,15 +229,7 @@ pub fn spawn_network(
                             let entry = active_connections.entry(pid_str.clone()).or_insert_with(Vec::new);
 
                             if num_established.get() > 1 {
-                                if is_relay {
-                                    // We already have at least one connection (relay or direct).
-                                    // A new relay connection is redundant — close it immediately.
-                                    println!("[{}] [Stoa Network] Closing redundant relay connection to {pid_str}",
-                                        chrono::Local::now().format("%H:%M:%S"));
-                                    swarm.close_connection(connection_id);
-                                    // Don't re-run the connection setup logic
-                                    continue;
-                                } else {
+                                if !is_relay {
                                     // New direct (LAN / hole-punched) connection while relay exists.
                                     // Close all OTHER connections to this peer that are relays; keep this direct one.
                                     println!("[{}] [Stoa Network] ⚡ Direct connection to {pid_str} — closing any prior relay circuits",
@@ -304,6 +296,15 @@ pub fn spawn_network(
                                     &contacts,
                                     &app_handle,
                                 ).await;
+
+                                // Auto-reconnect proactively for seamless Internet <-> LAN handoffs
+                                let cts = contacts.lock().await;
+                                let is_contact = cts.iter().any(|c| c.peer_id == pid_str);
+                                drop(cts);
+                                if is_contact {
+                                    println!("[{}] [Stoa Network] Graceful handoff: Proactively redialing contact {pid_str} after disconnect", chrono::Local::now().format("%H:%M:%S"));
+                                    handlers::dial_peer(&peers_clone, &contacts, &pid_str, &mut swarm).await;
+                                }
                             }
                         }
 
