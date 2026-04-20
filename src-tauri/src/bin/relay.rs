@@ -16,7 +16,7 @@ use futures::StreamExt;
 use libp2p::{
     core::upgrade,
     identify, noise,
-    relay,
+    relay, ping,
     swarm::{NetworkBehaviour, SwarmEvent},
     tcp, yamux, Multiaddr, PeerId, Transport,
 };
@@ -38,6 +38,7 @@ struct Cli {
 struct RelayBehaviour {
     relay: relay::Behaviour,
     identify: identify::Behaviour,
+    ping: ping::Behaviour,
 }
 
 #[tokio::main]
@@ -74,6 +75,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             identify::Config::new("/stoa/relay/1.0.0".to_string(), keypair.public())
                 .with_push_listen_addr_updates(true),
         ),
+        ping: ping::Behaviour::new(ping::Config::new().with_interval(std::time::Duration::from_secs(15))),
     };
 
     let mut swarm = libp2p::Swarm::new(
@@ -95,6 +97,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             SwarmEvent::Behaviour(RelayBehaviourEvent::Relay(event)) => {
                 println!("[Relay] {:?}", event);
             }
+            SwarmEvent::Behaviour(RelayBehaviourEvent::Ping(_)) => {}
             SwarmEvent::ConnectionEstablished { peer_id, .. } => {
                 println!("[Relay] Peer connected:    {peer_id}");
             }

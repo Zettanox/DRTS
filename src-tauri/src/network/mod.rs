@@ -31,6 +31,7 @@ pub struct StoaBehaviour {
     relay_client: relay::client::Behaviour,
     dcutr: dcutr::Behaviour,
     identify: identify::Behaviour,
+    ping: libp2p::ping::Behaviour,
 }
 
 /// Spawn the libp2p swarm on a background Tokio task.
@@ -87,12 +88,17 @@ pub fn spawn_network(
             .with_push_listen_addr_updates(true),
     );
 
+    let ping_config = libp2p::ping::Config::new()
+        .with_interval(std::time::Duration::from_secs(15));
+    let ping_behaviour = libp2p::ping::Behaviour::new(ping_config);
+
     let behaviour = StoaBehaviour {
         mdns: mdns_behaviour,
         messaging: msg_behaviour,
         relay_client,
         dcutr: dcutr::Behaviour::new(peer_id),
         identify: identify_behaviour,
+        ping: ping_behaviour,
     };
 
     let mut swarm = Swarm::new(
@@ -288,6 +294,7 @@ pub fn spawn_network(
                             }
                         }
                         SwarmEvent::Behaviour(StoaBehaviourEvent::Identify(_)) => {}
+                        SwarmEvent::Behaviour(StoaBehaviourEvent::Ping(_)) => {}
 
                         SwarmEvent::NewListenAddr { address, .. } => {
                             println!("[Stoa Network] Listening on {address}");
