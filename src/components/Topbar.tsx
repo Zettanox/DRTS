@@ -9,7 +9,8 @@ export const Topbar: Component = () => {
       <div class="flex items-center gap-3">
         {activeLeftPane() && (
           <button 
-            onClick={() => setActiveLeftPane(null)} 
+            onClick={(e) => { e.preventDefault(); setActiveLeftPane(null); }}
+            onTouchStart={(e) => { e.preventDefault(); setActiveLeftPane(null); }}
             class="md:hidden p-2 text-stone-600 hover:bg-stone-200 rounded-lg -ml-2"
           >
             <ChevronLeft size={24} />

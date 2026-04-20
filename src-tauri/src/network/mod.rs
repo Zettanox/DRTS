@@ -42,7 +42,7 @@ pub fn spawn_network(
     app_handle: AppHandle,
     contacts: ContactsList,
     our_name: String,
-) -> Result<(mpsc::Sender<NetworkCommand>, NearbyPeersMap, JoinHandle<()>), String> {
+) -> Result<(mpsc::Sender<NetworkCommand>, NearbyPeersMap, Arc<Mutex<std::collections::HashSet<String>>>, JoinHandle<()>), String> {
     let peer_id = PeerId::from(keypair.public());
 
     let mdns_config = mdns::Config {
@@ -147,6 +147,8 @@ pub fn spawn_network(
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<NetworkCommand>(64);
     let nearby_peers: NearbyPeersMap = Arc::new(Mutex::new(HashMap::new()));
     let peers_clone = nearby_peers.clone();
+    let connected_peers = Arc::new(Mutex::new(std::collections::HashSet::new()));
+    let connected_peers_clone = connected_peers.clone();
 
     let cmd_tx_for_loop = cmd_tx.clone();
     let handle = tokio::spawn(async move {
@@ -282,7 +284,8 @@ pub fn spawn_network(
                             println!("[{}] [Stoa Network] Connection established with {pid_str} ({})",
                                 chrono::Local::now().format("%H:%M:%S"),
                                 if !is_relay { "LAN" } else { "Relay" });
-                            conn_types.lock().await.insert(pid_str, conn_type);
+                            conn_types.lock().await.insert(pid_str.clone(), conn_type);
+                            connected_peers_clone.lock().await.insert(pid_str.clone());
 
                             handlers::handle_connection_established(
                                 connected_peer,
@@ -322,6 +325,7 @@ pub fn spawn_network(
 
                             if num_established == 0 {
                                 conn_types.lock().await.remove(&pid_str);
+                                connected_peers_clone.lock().await.remove(&pid_str);
                                 handlers::handle_connection_closed(
                                     disconnected_peer,
                                     &contacts,
@@ -1238,7 +1242,7 @@ pub fn spawn_network(
         }
     });
 
-    Ok((cmd_tx, nearby_peers, handle))
+    Ok((cmd_tx, nearby_peers, connected_peers, handle))
 }
 
 /// Encrypt a request for a peer if a session exists, otherwise return it as-is.

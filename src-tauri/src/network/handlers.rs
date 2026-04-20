@@ -1116,18 +1116,27 @@ pub async fn dial_peer(
 
     // 2. Try relay only if not already connected (prevents oneshot-canceled errors)
     if !already_connected {
+        // Collect all potential relay addresses: our config + any known specific to contact
+        let mut potential_relays = crate::relay_config::RelayConfig::load().enabled_addresses();
+        
         let cts = contacts.lock().await;
         if let Some(contact) = cts.iter().find(|c| c.peer_id == peer_id_str) {
             if let Some(addrs) = &contact.known_addrs {
-                for addr_str in addrs {
-                    let circuit_addr = format!("{}/p2p-circuit/p2p/{}", addr_str, peer_id_str);
-                    if let Ok(maddr) = circuit_addr.parse::<libp2p::Multiaddr>() {
-                        let _ = swarm.dial(maddr);
+                for addr in addrs {
+                    if !potential_relays.contains(addr) && addr.contains("/p2p/") {
+                        potential_relays.push(addr.clone());
                     }
                 }
             }
         }
         drop(cts);
+        
+        for relay_addr in potential_relays {
+            let circuit_addr = format!("{}/p2p-circuit/p2p/{}", relay_addr, peer_id_str);
+            if let Ok(maddr) = circuit_addr.parse::<libp2p::Multiaddr>() {
+                let _ = swarm.dial(maddr);
+            }
+        }
     }
 }
 

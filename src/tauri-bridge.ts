@@ -115,14 +115,14 @@ export async function showWindow(): Promise<void> {
 
 export async function getContacts(): Promise<void> {
   const cts = await invoke<RustContact[]>("get_contacts");
-  const currentNearby = nearbyPeers;
+  const connectedPeers = await invoke<string[]>("get_connected_peers");
   setContacts(
     cts.map((c) => ({
       peerId: c.peer_id,
       petname: c.petname,
       addedAt: c.added_at,
       trustLevel: c.trust_level,
-      online: currentNearby.some((p) => p.peerId === c.peer_id),
+      online: connectedPeers.includes(c.peer_id),
     }))
   );
   syncDMsFromContacts();

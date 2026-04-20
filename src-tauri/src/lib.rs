@@ -17,7 +17,7 @@ use messages::StoredMessage;
 use network::{ContactsList, NearbyPeer, NearbyPeersMap, NetworkCommand};
 use std::sync::{Arc, OnceLock};
 use std::path::PathBuf;
-use tauri::{Manager, State};
+use tauri::{Emitter, Manager, State};
 use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinHandle;
 
@@ -44,6 +44,7 @@ pub struct AppState {
     pub network_cmd_tx: Arc<Mutex<Option<mpsc::Sender<NetworkCommand>>>>,
     pub network_handle: Arc<Mutex<Option<JoinHandle<()>>>>,
     pub nearby_peers: Arc<Mutex<Option<NearbyPeersMap>>>,
+    pub connected_peers: Arc<Mutex<Option<Arc<Mutex<std::collections::HashSet<String>>>>>>,
     pub contacts: ContactsList,
     pub lan_visible: Arc<Mutex<bool>>,
 }
@@ -58,7 +59,7 @@ async fn start_network(
         let info = state.identity_info.lock().await;
         info.as_ref().map(|i| i.name.clone()).unwrap_or_else(|| "User".to_string())
     };
-    let (cmd_tx, peers_map, handle) =
+    let (cmd_tx, peers_map, connected_peers, handle) =
         network::spawn_network(keypair.clone(), app_handle.clone(), state.contacts.clone(), our_name)?;
     {
         let mut tx = state.network_cmd_tx.lock().await;
@@ -67,6 +68,10 @@ async fn start_network(
     {
         let mut np = state.nearby_peers.lock().await;
         *np = Some(peers_map);
+    }
+    {
+        let mut cp = state.connected_peers.lock().await;
+        *cp = Some(connected_peers);
     }
     {
         let mut h = state.network_handle.lock().await;
@@ -243,6 +248,17 @@ async fn get_contacts(state: State<'_, AppState>) -> Result<Vec<Contact>, String
 }
 
 #[tauri::command]
+async fn get_connected_peers(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    let guard = state.connected_peers.lock().await;
+    if let Some(cp_arc) = &*guard {
+        let cp = cp_arc.lock().await;
+        Ok(cp.iter().cloned().collect())
+    } else {
+        Ok(vec![])
+    }
+}
+
+#[tauri::command]
 async fn send_contact_request(
     peer_id: String,
     state: State<'_, AppState>,
@@ -271,11 +287,21 @@ async fn respond_contact_request(
     peer_id: String,
     accept: bool,
     petname: String,
+    app_handle: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     if accept {
         let mut cts = state.contacts.lock().await;
-        contacts::add_contact(&mut cts, peer_id, petname, None)?;
+        contacts::add_contact(&mut cts, peer_id.clone(), petname, None)?;
+        drop(cts);
+        
+        // If the peer is already connected, emit contact-online immediately
+        let peers = state.nearby_peers.lock().await;
+        if let Some(ref map) = *peers {
+            if map.lock().await.contains_key(&peer_id) {
+                let _ = app_handle.emit("contact-online", &peer_id);
+            }
+        }
     }
     Ok(())
 }
@@ -284,10 +310,21 @@ async fn respond_contact_request(
 async fn add_contact_from_request(
     peer_id: String,
     petname: String,
+    app_handle: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let mut cts = state.contacts.lock().await;
-    contacts::add_contact(&mut cts, peer_id, petname, None)
+    contacts::add_contact(&mut cts, peer_id.clone(), petname, None)?;
+    drop(cts);
+    
+    // If the peer is already connected, emit contact-online immediately
+    let peers = state.nearby_peers.lock().await;
+    if let Some(ref map) = *peers {
+        if map.lock().await.contains_key(&peer_id) {
+            let _ = app_handle.emit("contact-online", &peer_id);
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -823,7 +860,8 @@ pub fn run() {
             network_cmd_tx: Arc::new(Mutex::new(None)),
             network_handle: Arc::new(Mutex::new(None)),
             nearby_peers: Arc::new(Mutex::new(None)),
-            contacts: Arc::new(Mutex::new(Vec::new())),
+            connected_peers: Arc::new(Mutex::new(None)),
+            contacts: Arc::new(tokio::sync::Mutex::new(Vec::new())),
             lan_visible: Arc::new(Mutex::new(true)),
         })
         .invoke_handler(tauri::generate_handler![
@@ -835,6 +873,7 @@ pub fn run() {
             get_nearby_peers,
             show_window,
             get_contacts,
+            get_connected_peers,
             send_contact_request,
             respond_contact_request,
             add_contact_from_request,
