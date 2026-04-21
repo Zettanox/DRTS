@@ -126,10 +126,7 @@ pub fn decrypt(
 // ─── Session Key Persistence ─────────────────────────────────────────────────
 
 fn sessions_dir() -> Result<PathBuf, String> {
-    let dir = dirs::home_dir()
-        .ok_or("No home directory")?
-        .join(".stoa")
-        .join("sessions");
+    let dir = crate::get_stoa_dir().join("sessions");
     std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create sessions dir: {e}"))?;
     Ok(dir)
 }
@@ -144,7 +141,7 @@ pub fn save_session(peer_id: &str, shared_secret: &[u8; 32]) -> Result<(), Strin
     let path = session_path(peer_id)?;
     std::fs::write(&path, hex::encode(shared_secret))
         .map_err(|e| format!("Failed to save session: {e}"))?;
-    println!("[Stoa Crypto] Session saved for {peer_id}");
+    println!("[{}] [Stoa Crypto] Session saved for {peer_id}", chrono::Local::now().format("%H:%M:%S"));
     Ok(())
 }
 

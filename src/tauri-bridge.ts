@@ -115,13 +115,14 @@ export async function showWindow(): Promise<void> {
 
 export async function getContacts(): Promise<void> {
   const cts = await invoke<RustContact[]>("get_contacts");
+  const connectedPeers = await invoke<string[]>("get_connected_peers");
   setContacts(
     cts.map((c) => ({
       peerId: c.peer_id,
       petname: c.petname,
       addedAt: c.added_at,
       trustLevel: c.trust_level,
-      online: false,
+      online: connectedPeers.includes(c.peer_id),
     }))
   );
   syncDMsFromContacts();
@@ -219,6 +220,60 @@ export async function getChatHistory(peerId: string): Promise<void> {
     [peerId]: msgs.map(mapStoredMessage),
   }));
 }
+
+/** Delete a specific chat message locally. */
+export async function deleteChatMessage(peerIdOrGroupKey: string, messageId: string): Promise<void> {
+  await invoke("delete_chat_message", { peerId: peerIdOrGroupKey, messageId });
+  
+  // UI update (detect if it's a group or DM)
+  if (peerIdOrGroupKey.startsWith("group_")) {
+    setGroupMessages((prev) => ({
+      ...prev,
+      [peerIdOrGroupKey]: prev[peerIdOrGroupKey]?.filter(m => m.id !== messageId) || []
+    }));
+  } else {
+    setChatMessages((prev) => ({
+      ...prev,
+      [peerIdOrGroupKey]: prev[peerIdOrGroupKey]?.filter(m => m.id !== messageId) || []
+    }));
+  }
+}
+
+/** Delete multiple chat messages locally. */
+export async function deleteChatMessages(peerIdOrGroupKey: string, messageIds: string[]): Promise<void> {
+  await invoke("delete_chat_messages", { peerId: peerIdOrGroupKey, messageIds });
+  
+  // UI update
+  if (peerIdOrGroupKey.startsWith("group_")) {
+    setGroupMessages((prev) => ({
+      ...prev,
+      [peerIdOrGroupKey]: prev[peerIdOrGroupKey]?.filter(m => !messageIds.includes(m.id)) || []
+    }));
+  } else {
+    setChatMessages((prev) => ({
+      ...prev,
+      [peerIdOrGroupKey]: prev[peerIdOrGroupKey]?.filter(m => !messageIds.includes(m.id)) || []
+    }));
+  }
+}
+
+/** Clear entire chat history for a peer locally. */
+export async function clearChat(peerIdOrGroupKey: string): Promise<void> {
+  await invoke("clear_chat", { peerId: peerIdOrGroupKey });
+  
+  if (peerIdOrGroupKey.startsWith("group_")) {
+    setGroupMessages((prev) => ({
+      ...prev,
+      [peerIdOrGroupKey]: []
+    }));
+  } else {
+    setChatMessages((prev) => ({
+      ...prev,
+      [peerIdOrGroupKey]: []
+    }));
+  }
+}
+
 
 /** Update the user's display name. */
 export async function setUsername(newName: string): Promise<string> {
@@ -518,12 +573,13 @@ export async function setupNetworkListeners(): Promise<void> {
     transfer_id: string;
     peer_id: string;
     file_name: string;
+    file_path?: string;
     file_size: number;
     direction: string;
     chunk_count: number;
     sender_name?: string;
   }>("file-transfer-started", (event) => {
-    const { transfer_id, peer_id, file_name, file_size, direction, chunk_count } = event.payload;
+    const { transfer_id, peer_id, file_name, file_path, file_size, direction, chunk_count } = event.payload;
     console.log(`[File] Transfer started: ${file_name} (${direction}) with ${peer_id}`);
 
     // Track this transfer
@@ -544,6 +600,7 @@ export async function setupNetworkListeners(): Promise<void> {
         progress: 0,
         status: "transferring",
         chunkCount: chunk_count,
+        filePath: file_path,
       },
     };
 
@@ -559,12 +616,13 @@ export async function setupNetworkListeners(): Promise<void> {
     transfer_id: string;
     peer_id: string;
     file_name: string;
+    file_path?: string;
     file_size: number;
     direction: string;
     chunk_count: number;
     sender_name?: string;
   }>("group-file-transfer-started", (event) => {
-    const { group_id, transfer_id, peer_id, file_name, file_size, direction, chunk_count, sender_name } = event.payload;
+    const { group_id, transfer_id, peer_id, file_name, file_path, file_size, direction, chunk_count, sender_name } = event.payload;
     console.log(`[File] Group transfer started: ${file_name} (${direction}) in group ${group_id}`);
 
     // Track with a special group prefix so progress/complete can find it
@@ -587,6 +645,7 @@ export async function setupNetworkListeners(): Promise<void> {
         progress: isUpload ? 1 : 0,  // Uploads show as complete immediately
         status: isUpload ? "complete" : "transferring",
         chunkCount: chunk_count,
+        filePath: file_path,
       },
     };
 
@@ -755,4 +814,49 @@ export async function setupNetworkListeners(): Promise<void> {
 
   // Load groups
   await getGroups();
+}
+
+// ─── Relay Config ─────────────────────────────────────────────────────────────
+
+export interface RelayEntry {
+  label: string;
+  address: string;
+  enabled: boolean;
+}
+
+export interface RelayConfig {
+  relays: RelayEntry[];
+}
+
+export async function getRelayConfig(): Promise<RelayConfig> {
+  return invoke<RelayConfig>("get_relay_config");
+}
+
+export async function setRelayConfig(config: RelayConfig): Promise<void> {
+  return invoke("set_relay_config", { config });
+}
+
+// ─── Connection Codes ─────────────────────────────────────────────────────────
+
+export interface MyConnectionCode {
+  code: string;
+  /** Base64-encoded SVG string */
+  qr_svg_b64: string;
+}
+
+export async function getMyConnectionCode(): Promise<MyConnectionCode> {
+  return invoke<MyConnectionCode>("get_my_connection_code");
+}
+
+export async function parseConnectionCode(
+  code: string
+): Promise<{ peer_id: string; relay_addrs: string[] }> {
+  return invoke("parse_connection_code", { code });
+}
+
+export async function addContactFromCode(
+  code: string,
+  petname: string
+): Promise<void> {
+  return invoke("add_contact_from_code", { code, petname });
 }

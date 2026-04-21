@@ -1,14 +1,14 @@
 pub mod handlers;
 pub mod types;
 
-pub use types::{ContactsList, NearbyPeer, NearbyPeersMap, NetworkCommand};
+pub use types::{ContactsList, NearbyPeer, NearbyPeersMap, NetworkCommand, PeerConnectionMap, PeerConnectionType};
 
 use crate::protocol::{StoaRequest, StoaResponse};
 use futures::StreamExt;
 use libp2p::identity::Keypair;
 use libp2p::request_response::{self, ProtocolSupport};
 use libp2p::swarm::SwarmEvent;
-use libp2p::{mdns, PeerId, StreamProtocol, Swarm, Transport};
+use libp2p::{dcutr, identify, mdns, relay, PeerId, StreamProtocol, Swarm, Transport};
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -20,13 +20,18 @@ use crate::crypto;
 use crate::file_transfer::{self, ActiveTransfer, TransferDirection, TransferStatus};
 use crate::groups::{self, Group};
 use crate::messages::{self, StoredMessage};
+use crate::relay_config::RelayConfig;
 use types::PendingMessage;
 
-/// The combined network behaviour — mDNS + request-response.
+/// The combined network behaviour — mDNS + request-response + relay + dcutr + identify.
 #[derive(libp2p::swarm::NetworkBehaviour)]
 pub struct StoaBehaviour {
     mdns: mdns::tokio::Behaviour,
     pub messaging: request_response::json::Behaviour<StoaRequest, StoaResponse>,
+    relay_client: relay::client::Behaviour,
+    dcutr: dcutr::Behaviour,
+    identify: identify::Behaviour,
+    ping: libp2p::ping::Behaviour,
 }
 
 /// Spawn the libp2p swarm on a background Tokio task.
@@ -37,7 +42,7 @@ pub fn spawn_network(
     app_handle: AppHandle,
     contacts: ContactsList,
     our_name: String,
-) -> Result<(mpsc::Sender<NetworkCommand>, NearbyPeersMap, JoinHandle<()>), String> {
+) -> Result<(mpsc::Sender<NetworkCommand>, NearbyPeersMap, Arc<Mutex<std::collections::HashSet<String>>>, JoinHandle<()>), String> {
     let peer_id = PeerId::from(keypair.public());
 
     let mdns_config = mdns::Config {
@@ -45,30 +50,72 @@ pub fn spawn_network(
         ttl: std::time::Duration::from_secs(10),
         ..Default::default()
     };
-
     let mdns_behaviour = mdns::tokio::Behaviour::new(mdns_config, peer_id)
         .map_err(|e| format!("Failed to create mDNS behaviour: {e}"))?;
 
     let msg_protocol = StreamProtocol::new("/stoa/msg/1.0.0");
     let msg_behaviour = request_response::json::Behaviour::<StoaRequest, StoaResponse>::new(
         [(msg_protocol, ProtocolSupport::Full)],
-        request_response::Config::default(),
+        request_response::Config::default()
+            .with_request_timeout(std::time::Duration::from_secs(120)),
     );
 
-    let behaviour = StoaBehaviour {
-        mdns: mdns_behaviour,
-        messaging: msg_behaviour,
-    };
+    // Build relay client transport.
+    // The relay::client::Transport wraps plain TCP so that dialing a relay circuit
+    // address (/p2p-circuit/…) is handled transparently by the swarm.
+    let (relay_transport, relay_client) = relay::client::new(peer_id);
 
-    let mut swarm = Swarm::new(
-        libp2p::tcp::tokio::Transport::new(libp2p::tcp::Config::default())
-            .upgrade(libp2p::core::upgrade::Version::V1)
+    let transport = {
+        use libp2p::core::{transport::OrTransport, upgrade};
+        use libp2p::dns;
+
+        let base_tcp = libp2p::tcp::tokio::Transport::new(libp2p::tcp::Config::default());
+        
+        // Try system DNS first (/etc/resolv.conf), fall back to Google DNS for Android
+        let dns_tcp = match dns::tokio::Transport::system(base_tcp) {
+            Ok(t) => t,
+            Err(_) => {
+                use hickory_resolver::config::{ResolverConfig, ResolverOpts};
+                let fallback_tcp = libp2p::tcp::tokio::Transport::new(libp2p::tcp::Config::default());
+                dns::tokio::Transport::custom(
+                    fallback_tcp,
+                    ResolverConfig::google(),
+                    ResolverOpts::default(),
+                )
+            }
+        };
+
+        // Combine: relay transport for circuit addresses | DNS/TCP for direct connections
+        OrTransport::new(relay_transport, dns_tcp)
+            .upgrade(upgrade::Version::V1)
             .authenticate(
                 libp2p::noise::Config::new(&keypair)
                     .map_err(|e| format!("Noise config error: {e}"))?,
             )
             .multiplex(libp2p::yamux::Config::default())
-            .boxed(),
+            .boxed()
+    };
+
+    let identify_behaviour = identify::Behaviour::new(
+        identify::Config::new("/stoa/1.0.0".to_string(), keypair.public())
+            .with_push_listen_addr_updates(true),
+    );
+
+    let ping_config = libp2p::ping::Config::new()
+        .with_interval(std::time::Duration::from_secs(15));
+    let ping_behaviour = libp2p::ping::Behaviour::new(ping_config);
+
+    let behaviour = StoaBehaviour {
+        mdns: mdns_behaviour,
+        messaging: msg_behaviour,
+        relay_client,
+        dcutr: dcutr::Behaviour::new(peer_id),
+        identify: identify_behaviour,
+        ping: ping_behaviour,
+    };
+
+    let mut swarm = Swarm::new(
+        transport,
         behaviour,
         peer_id,
         libp2p::swarm::Config::with_tokio_executor()
@@ -79,20 +126,44 @@ pub fn spawn_network(
         .listen_on("/ip4/0.0.0.0/tcp/0".parse().unwrap())
         .map_err(|e| format!("Failed to listen: {e}"))?;
 
+    // Load relay configuration and dial each enabled relay
+    let relay_cfg = RelayConfig::load();
+    let relay_addresses = relay_cfg.enabled_addresses();
+    for addr_str in &relay_addresses {
+        match addr_str.parse::<libp2p::Multiaddr>() {
+            Ok(mut addr) => {
+                println!("[{}] [Stoa Network] Requesting relay reservation: {addr}", chrono::Local::now().format("%H:%M:%S"));
+                addr.push(libp2p::multiaddr::Protocol::P2pCircuit);
+                if let Err(e) = swarm.listen_on(addr) {
+                    eprintln!("[{}] [Stoa Network] Failed to request relay reservation: {e}", chrono::Local::now().format("%H:%M:%S"));
+                }
+            }
+            Err(e) => {
+                eprintln!("[{}] [Stoa Network] Invalid relay address '{addr_str}': {e}", chrono::Local::now().format("%H:%M:%S"));
+            }
+        }
+    }
+
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<NetworkCommand>(64);
     let nearby_peers: NearbyPeersMap = Arc::new(Mutex::new(HashMap::new()));
     let peers_clone = nearby_peers.clone();
+    let connected_peers = Arc::new(Mutex::new(std::collections::HashSet::new()));
+    let connected_peers_clone = connected_peers.clone();
 
     let cmd_tx_for_loop = cmd_tx.clone();
     let handle = tokio::spawn(async move {
         let mut pending_messages: Vec<PendingMessage> = vec![];
+        let mut inflight_messages: HashMap<libp2p::request_response::OutboundRequestId, PendingMessage> = HashMap::new();
+        let mut active_connections: HashMap<String, Vec<(libp2p::core::ConnectedPoint, libp2p::swarm::ConnectionId)>> = HashMap::new();
         let mut lan_visible = true;
         let mut active_transfers: HashMap<String, ActiveTransfer> = HashMap::new();
         let mut local_groups: Vec<Group> = groups::load_groups().unwrap_or_default();
         let our_peer_id_str = peer_id.to_string();
+        let conn_types: PeerConnectionMap = Arc::new(Mutex::new(HashMap::new()));
 
-        // Reconnection sweep interval — retries cached addresses for offline contacts
-        let mut reconnect_interval = tokio::time::interval(std::time::Duration::from_secs(10));
+        // Reconnection sweep — retries disconnected contacts every 60s.
+        let reconnect_start = tokio::time::Instant::now() + std::time::Duration::from_secs(15);
+        let mut reconnect_interval = tokio::time::interval_at(reconnect_start, std::time::Duration::from_secs(10));
         reconnect_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
         loop {
@@ -107,6 +178,9 @@ pub fn spawn_network(
                                 continue; // Ignore discovery when invisible
                             }
                             for (discovered_peer, addr) in list {
+                                let pid_str = discovered_peer.to_string();
+                                // mDNS confirmation overrides any earlier Relay classification
+                                conn_types.lock().await.insert(pid_str, PeerConnectionType::Lan);
                                 handlers::handle_mdns_discovered(
                                     discovered_peer,
                                     addr,
@@ -124,6 +198,11 @@ pub fn spawn_network(
                                 continue;
                             }
                             for (expired_peer, _addr) in list {
+                                // Downgrade to Relay — they may still be reachable via relay circuit
+                                conn_types.lock().await.insert(
+                                    expired_peer.to_string(),
+                                    PeerConnectionType::Relay,
+                                );
                                 handlers::handle_mdns_expired(
                                     expired_peer,
                                     &peers_clone,
@@ -133,13 +212,89 @@ pub fn spawn_network(
                         }
 
                         // ── Connection Events (always active) ───────────────
-                        SwarmEvent::ConnectionEstablished { peer_id: connected_peer, .. } => {
+                        SwarmEvent::ConnectionEstablished {
+                            peer_id: connected_peer,
+                            connection_id,
+                            endpoint,
+                            num_established,
+                            ..
+                        } => {
+                            let pid_str = connected_peer.to_string();
+                            let is_relay = match &endpoint {
+                                libp2p::core::ConnectedPoint::Dialer { address, .. } => {
+                                    address.to_string().contains("p2p-circuit")
+                                }
+                                libp2p::core::ConnectedPoint::Listener { local_addr, send_back_addr } => {
+                                    local_addr.to_string().contains("p2p-circuit")
+                                        || send_back_addr.to_string().contains("p2p-circuit")
+                                }
+                            };
+                            let conn_type = if is_relay { PeerConnectionType::Relay } else { PeerConnectionType::Lan };
+
+                            // ── Dual-connection guard ──────────────────────────
+                            // libp2p round-robins requests across ALL connections to a peer.
+                            // dcutr creates a second (direct) connection while the relay one
+                            // is still open — this causes every-other-message to be sent on
+                            // the in-progress direct connection which hasn't negotiated our
+                            // messaging protocol yet → UnsupportedProtocols → silent drop.
+                            //
+                            // Fix: keep exactly ONE connection per peer.
+                            //  • New connection is relay  + already have relay/direct → close NEW one
+                            //  • New connection is direct + only relay exists        → close OLD relay
+                            let entry = active_connections.entry(pid_str.clone()).or_insert_with(Vec::new);
+
+                            if num_established.get() > 1 {
+                                if !is_relay {
+                                    // New direct (LAN / hole-punched) connection while relay exists.
+                                    // Close all OTHER connections to this peer that are relays; keep this direct one.
+                                    println!("[{}] [Stoa Network] ⚡ Direct connection to {pid_str} — closing any prior relay circuits",
+                                        chrono::Local::now().format("%H:%M:%S"));
+                                    for (old_ep, old_id) in entry.iter() {
+                                        let old_is_relay = match old_ep {
+                                            libp2p::core::ConnectedPoint::Dialer { address, .. } => address.to_string().contains("p2p-circuit"),
+                                            libp2p::core::ConnectedPoint::Listener { local_addr, send_back_addr } => local_addr.to_string().contains("p2p-circuit") || send_back_addr.to_string().contains("p2p-circuit"),
+                                        };
+                                        if old_is_relay {
+                                            swarm.close_connection(*old_id);
+                                        }
+                                    }
+                                } else {
+                                    // A new Relay connection when we already have a connection (Relay or Direct).
+                                    // To prevent "Mutual Annihilation" where both peers drop the connection,
+                                    // we deterministically assign the "killer" role to the peer with the greater PeerId.
+                                    // The killer keeps the NEW connection and kills ALL OLD relay connections (effectively pruning zombies).
+                                    if our_peer_id_str > pid_str {
+                                        println!("[{}] [Stoa Network] Tie-breaker won against {pid_str}: keeping new Relay circuit and closing old zombies.",
+                                            chrono::Local::now().format("%H:%M:%S"));
+                                        for (old_ep, old_id) in entry.iter() {
+                                            let old_is_relay = match old_ep {
+                                                libp2p::core::ConnectedPoint::Dialer { address, .. } => address.to_string().contains("p2p-circuit"),
+                                                libp2p::core::ConnectedPoint::Listener { local_addr, send_back_addr } => local_addr.to_string().contains("p2p-circuit") || send_back_addr.to_string().contains("p2p-circuit"),
+                                            };
+                                            if old_is_relay {
+                                                swarm.close_connection(*old_id);
+                                            }
+                                        }
+                                        // We let the logic proceed to push the NEW connection_id to the entry list!
+                                    }
+                                }
+                            }
+
+                            entry.push((endpoint.clone(), connection_id));
+
+                            println!("[{}] [Stoa Network] Connection established with {pid_str} ({})",
+                                chrono::Local::now().format("%H:%M:%S"),
+                                if !is_relay { "LAN" } else { "Relay" });
+                            conn_types.lock().await.insert(pid_str.clone(), conn_type);
+                            connected_peers_clone.lock().await.insert(pid_str.clone());
+
                             handlers::handle_connection_established(
                                 connected_peer,
                                 &contacts,
                                 &mut swarm,
                                 &app_handle,
                                 &mut pending_messages,
+                                &mut inflight_messages,
                             ).await;
 
                             // Auto-initiate E2E key exchange for contacts without a session
@@ -149,7 +304,7 @@ pub fn spawn_network(
                             drop(cts);
                             if is_contact && !crypto::has_session(&pid) {
                                 if let Ok(our_pk_hex) = crypto::our_x25519_public_key_hex(&keypair) {
-                                    println!("[Stoa Crypto] Initiating key exchange with {pid}");
+                                    println!("[{}] [Stoa Crypto] Initiating key exchange with {pid}", chrono::Local::now().format("%H:%M:%S"));
                                     swarm.behaviour_mut().messaging.send_request(
                                         &connected_peer,
                                         StoaRequest::KeyExchange {
@@ -160,12 +315,34 @@ pub fn spawn_network(
                             }
                         }
 
-                        SwarmEvent::ConnectionClosed { peer_id: disconnected_peer, .. } => {
-                            handlers::handle_connection_closed(
-                                disconnected_peer,
-                                &contacts,
-                                &app_handle,
-                            ).await;
+
+                        SwarmEvent::ConnectionClosed { peer_id: disconnected_peer, connection_id, endpoint, num_established, cause } => {
+                            let pid_str = disconnected_peer.to_string();
+                            if let Some(conns) = active_connections.get_mut(&pid_str) {
+                                conns.retain(|(_, id)| *id != connection_id);
+                                if conns.is_empty() {
+                                    active_connections.remove(&pid_str);
+                                }
+                            }
+
+                            if num_established == 0 {
+                                conn_types.lock().await.remove(&pid_str);
+                                connected_peers_clone.lock().await.remove(&pid_str);
+                                handlers::handle_connection_closed(
+                                    disconnected_peer,
+                                    &contacts,
+                                    &app_handle,
+                                ).await;
+
+                                // Auto-reconnect proactively for seamless Internet <-> LAN handoffs
+                                let cts = contacts.lock().await;
+                                let is_contact = cts.iter().any(|c| c.peer_id == pid_str);
+                                drop(cts);
+                                if is_contact {
+                                    println!("[{}] [Stoa Network] Graceful handoff: Proactively redialing contact {pid_str} after disconnect", chrono::Local::now().format("%H:%M:%S"));
+                                    handlers::dial_peer(&peers_clone, &contacts, &pid_str, &mut swarm).await;
+                                }
+                            }
                         }
 
                         // ── Messaging (always active) ───────────────────────
@@ -208,8 +385,113 @@ pub fn spawn_network(
                             }
                         }
 
+                        // ── Request/Response Failures ───────────────────────
+                        // OutboundFailure: a request WE SENT failed to deliver.
+                        SwarmEvent::Behaviour(StoaBehaviourEvent::Messaging(
+                            request_response::Event::OutboundFailure { peer, request_id, error, .. },
+                        )) => {
+                            eprintln!("[{}] [Stoa Network] ⚠ Outbound request to {peer} failed ({error:?}) — checking for stalled transfers", chrono::Local::now().format("%H:%M:%S"));
+                            
+                            // If this was a chat message that failed in-flight, it's highly likely
+                            // the connection it was racing on (e.g., dual relay circuits) was closed.
+                            // We immediately pop it from inflight and requeue it so it gets sent via the surviving connection!
+                            if let Some(pending) = inflight_messages.remove(&request_id) {
+                                if swarm.is_connected(&peer) {
+                                    let req_clone = pending.clone();
+                                    let encrypted_req = maybe_encrypt_request(&req_clone.peer_id_str, req_clone.request);
+                                    let new_req_id = swarm.behaviour_mut().messaging.send_request(&peer, encrypted_req);
+                                    inflight_messages.insert(new_req_id, pending);
+                                    println!("[{}] [Stoa Network] 🔄 Automatically retrying dropped chat message to {}", chrono::Local::now().format("%H:%M:%S"), peer);
+                                } else {
+                                    println!("[{}] [Stoa Network] 🔄 Peer {} disconnected, returning chat message to pending queue", chrono::Local::now().format("%H:%M:%S"), peer);
+                                    handlers::dial_peer(&peers_clone, &contacts, &pending.peer_id_str, &mut swarm).await;
+                                    pending_messages.push(pending);
+                                }
+                            }
+                            
+                            handlers::handle_outbound_failure(&peer, &mut active_transfers, &mut swarm).await;
+                        }
+
+                        // InboundFailure: a response WE SENT back failed to reach the requester.
+                        // Log only — the requester's OutboundFailure will handle retry.
+                        SwarmEvent::Behaviour(StoaBehaviourEvent::Messaging(
+                            request_response::Event::InboundFailure { peer, error, .. },
+                        )) => {
+                            eprintln!("[{}] [Stoa Network] ⚠ Inbound request from {} failed ({error:?})",
+                                chrono::Local::now().format("%H:%M:%S"), peer);
+                        }
+
+                        // ── Relay Client Events ─────────────────────────────
+                        SwarmEvent::Behaviour(StoaBehaviourEvent::RelayClient(
+                            relay::client::Event::ReservationReqAccepted { relay_peer_id, .. },
+                        )) => {
+                            println!("[{}] [Stoa Network] Relay reservation accepted from {relay_peer_id}", chrono::Local::now().format("%H:%M:%S"));
+                            let _ = app_handle.emit("relay-connected", relay_peer_id.to_string());
+                        }
+                        SwarmEvent::Behaviour(StoaBehaviourEvent::RelayClient(event)) => {
+                            // covers OutboundCircuitEstablished, InboundCircuitEstablished, etc.
+                            println!("[{}] [Stoa Network] Relay client event: {event:?}", chrono::Local::now().format("%H:%M:%S"));
+                        }
+
+                        // ── DCUtR Hole Punching Events ──────────────────────
+                        // dcutr::Event is a struct: { remote_peer_id, result: Result<ConnectionId, Error> }
+                        SwarmEvent::Behaviour(StoaBehaviourEvent::Dcutr(event)) => {
+                            match event.result {
+                                Ok(_) => {
+                                    println!("[{}] [Stoa Network] ⚡ Hole punch succeeded with {}", chrono::Local::now().format("%H:%M:%S"), event.remote_peer_id);
+                                    let _ = app_handle.emit("peer-direct-connection", event.remote_peer_id.to_string());
+                                }
+                                Err(e) => {
+                                    println!("[{}] [Stoa Network] Hole punch failed with {} ({e:?}) — staying on relay", chrono::Local::now().format("%H:%M:%S"), event.remote_peer_id);
+                                }
+                            }
+                        }
+
+                        // ── Identify Events (required by relay + dcutr) ─────
+                        SwarmEvent::Behaviour(StoaBehaviourEvent::Identify(
+                            identify::Event::Received { peer_id: identified_peer, info, .. },
+                        )) => {
+                            // Only add relay-circuit addresses to the address book.
+                            // Adding LAN or raw NAT'd IPs causes direct-dial attempts that usually fail over the internet.
+                            for addr in &info.listen_addrs {
+                                let addr_str = addr.to_string();
+                                if addr_str.contains("p2p-circuit") {
+                                    swarm.add_peer_address(identified_peer, addr.clone());
+                                }
+                            }
+                        }
+                        SwarmEvent::Behaviour(StoaBehaviourEvent::Identify(_)) => {}
+                        SwarmEvent::Behaviour(StoaBehaviourEvent::Ping(_)) => {}
+
                         SwarmEvent::NewListenAddr { address, .. } => {
-                            println!("[Stoa Network] Listening on {address}");
+                            println!("[{}] [Stoa Network] Listening on {address}", chrono::Local::now().format("%H:%M:%S"));
+                        }
+                        SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
+                            // Suppress hole-punch failures for already-connected peers — dcutr
+                            // automatically tries to upgrade relay→direct and failing is normal.
+                            let is_connected = peer_id
+                                .and_then(|p| if swarm.is_connected(&p) { Some(()) } else { None })
+                                .is_some();
+                            
+                            let err_str = error.to_string();
+                            let is_network_transition_noise = err_str.contains("os error 10048") || err_str.contains("oneshot canceled") || err_str.contains("os error 10060");
+
+                            if !is_connected && !is_network_transition_noise {
+                                eprintln!("[{}] [Stoa Network] ❌ Connection failed to {:?}: {}",
+                                    chrono::Local::now().format("%H:%M:%S"), peer_id, err_str);
+                            }
+                        }
+                        SwarmEvent::IncomingConnectionError { error, .. } => {
+                            eprintln!("[{}] [Stoa Network] ❌ Incoming connection error: {error}", chrono::Local::now().format("%H:%M:%S"));
+                        }
+                        SwarmEvent::ListenerError { listener_id, error } => {
+                            eprintln!("[{}] [Stoa Network] ❌ Listener {listener_id:?} error: {error}", chrono::Local::now().format("%H:%M:%S"));
+                        }
+                        SwarmEvent::ListenerClosed { listener_id, reason, .. } => {
+                            eprintln!("[{}] [Stoa Network] ⚠ Listener {listener_id:?} closed: {reason:?}", chrono::Local::now().format("%H:%M:%S"));
+                        }
+                        SwarmEvent::Dialing { peer_id, .. } => {
+                            println!("[{}] [Stoa Network] 📡 Dialing {:?}...", chrono::Local::now().format("%H:%M:%S"), peer_id);
                         }
                         _ => {}
                     }
@@ -221,7 +503,7 @@ pub fn spawn_network(
                         Some(NetworkCommand::SetVisibility(visible)) => {
                             lan_visible = visible;
                             if visible {
-                                println!("[Stoa Network] Visibility ON — mDNS active");
+                                println!("[{}] [Stoa Network] Visibility ON — mDNS active", chrono::Local::now().format("%H:%M:%S"));
 
                                 // Repopulate nearby peers from currently connected peers
                                 // (mDNS won't re-fire for peers it already knows about internally)
@@ -250,11 +532,27 @@ pub fn spawn_network(
                                     );
                                 }
                             } else {
-                                println!("[Stoa Network] Visibility OFF — mDNS paused, connections kept");
+                                println!("[{}] [Stoa Network] Visibility OFF — mDNS paused, connections kept", chrono::Local::now().format("%H:%M:%S"));
                                 // Clear nearby peers (we're not tracking anymore)
                                 let mut peers = peers_clone.lock().await;
                                 peers.clear();
                                 drop(peers);
+                            }
+                        }
+
+                        Some(NetworkCommand::DialPeer { peer_id, relay_addrs }) => {
+                            if let Ok(target) = PeerId::from_str(&peer_id) {
+                                if !swarm.is_connected(&target) {
+                                    println!("[{}] [Stoa Network] Initiating circuit relay dial to {peer_id}", chrono::Local::now().format("%H:%M:%S"));
+                                    for addr_str in relay_addrs {
+                                        // A valid circuit relay address looks like: /ip4/.../tcp/4001/p2p/{relay_id}/p2p-circuit/p2p/{peer_id}
+                                        let circuit_addr = format!("{}/p2p-circuit/p2p/{}", addr_str, peer_id);
+                                        if let Ok(maddr) = circuit_addr.parse::<libp2p::Multiaddr>() {
+                                            println!("[{}] [Stoa Network] Dialing relay circuit: {}", chrono::Local::now().format("%H:%M:%S"), circuit_addr);
+                                            let _ = swarm.dial(maddr);
+                                        }
+                                    }
+                                }
                             }
                         }
 
@@ -271,9 +569,9 @@ pub fn spawn_network(
                             if let Ok(target) = PeerId::from_str(&peer_id) {
                                 if swarm.is_connected(&target) {
                                     swarm.behaviour_mut().messaging.send_request(&target, req);
-                                    println!("[Stoa Network] Sent contact request to {peer_id}");
+                                    println!("[{}] [Stoa Network] Sent contact request to {peer_id}", chrono::Local::now().format("%H:%M:%S"));
                                 } else {
-                                    handlers::dial_peer(&peers_clone, &peer_id, &mut swarm).await;
+                                    handlers::dial_peer(&peers_clone, &contacts, &peer_id, &mut swarm).await;
                                     pending_messages.push(PendingMessage {
                                         peer_id: target,
                                         request: req,
@@ -281,7 +579,7 @@ pub fn spawn_network(
                                         message_id: None,
                                         content: None,
                                     });
-                                    println!("[Stoa Network] Queued contact request for {peer_id} (connecting...)");
+                                    println!("[{}] [Stoa Network] Queued contact request for {peer_id} (connecting...)", chrono::Local::now().format("%H:%M:%S"));
                                 }
                             }
                         }
@@ -313,10 +611,18 @@ pub fn spawn_network(
                                 let _ = messages::save_message(&peer_id, &msg);
 
                                 if swarm.is_connected(&target) {
+                                    let req_clone = req.clone();
                                     let encrypted_req = maybe_encrypt_request(&peer_id, req);
-                                    swarm.behaviour_mut().messaging.send_request(&target, encrypted_req);
+                                    let req_id = swarm.behaviour_mut().messaging.send_request(&target, encrypted_req);
+                                    inflight_messages.insert(req_id, PendingMessage {
+                                        peer_id: target,
+                                        request: req_clone,
+                                        peer_id_str: peer_id.clone(),
+                                        message_id: Some(message_id),
+                                        content: Some(content),
+                                    });
                                 } else {
-                                    handlers::dial_peer(&peers_clone, &peer_id, &mut swarm).await;
+                                    handlers::dial_peer(&peers_clone, &contacts, &peer_id, &mut swarm).await;
                                     pending_messages.push(PendingMessage {
                                         peer_id: target,
                                         request: req,
@@ -324,7 +630,7 @@ pub fn spawn_network(
                                         message_id: Some(message_id),
                                         content: Some(content),
                                     });
-                                    println!("[Stoa Network] Queued message for {peer_id} (connecting...)");
+                                    println!("[{}] [Stoa Network] Queued message for {peer_id} (connecting...)", chrono::Local::now().format("%H:%M:%S"));
                                 }
                             }
                         }
@@ -336,10 +642,18 @@ pub fn spawn_network(
                         }) => {
                             let tx = cmd_tx_for_loop.clone();
                             let path = std::path::PathBuf::from(file_path.clone());
+                            // Determine chunk size based on connection type
+                            let ct = conn_types.lock().await;
+                            let chunk_size = if ct.get(&peer_id) == Some(&PeerConnectionType::Lan) {
+                                file_transfer::LAN_CHUNK_SIZE
+                            } else {
+                                file_transfer::RELAY_CHUNK_SIZE
+                            };
+                            drop(ct);
                             // Spawn a task so hashing doesn't block the network event loop
                             tokio::spawn(async move {
-                                println!("[Stoa File] Hashing file: {file_path}");
-                                match file_transfer::prepare_file_off_thread(path.clone()).await {
+                                println!("[{}] [Stoa File] Hashing file: {file_path} (chunk_size={}KB)", chrono::Local::now().format("%H:%M:%S"), chunk_size / 1024);
+                                match file_transfer::prepare_file_off_thread(path.clone(), chunk_size).await {
                                     Ok((file_name, file_size, checksum, chunk_count)) => {
                                         let _ = tx.send(NetworkCommand::FilePrepared {
                                             peer_id,
@@ -348,11 +662,12 @@ pub fn spawn_network(
                                             file_size,
                                             checksum,
                                             chunk_count,
+                                            chunk_size: chunk_size as u32,
                                             sender_name,
                                         }).await;
                                     }
                                     Err(e) => {
-                                        eprintln!("[Stoa File] File prep error: {e}");
+                                        eprintln!("[{}] [Stoa File] File prep error: {e}", chrono::Local::now().format("%H:%M:%S"));
                                     }
                                 }
                             });
@@ -365,13 +680,14 @@ pub fn spawn_network(
                             file_size,
                             checksum,
                             chunk_count,
+                            chunk_size,
                             sender_name,
                         }) => {
                             let transfer_id = uuid::Uuid::new_v4().to_string();
 
                             println!(
-                                "[Stoa File] Offering {} ({} bytes, {} chunks) to {}",
-                                file_name, file_size, chunk_count, peer_id
+                                "[Stoa File] Offering {} ({} bytes, {} chunks @ {}KB) to {}",
+                                file_name, file_size, chunk_count, chunk_size / 1024, peer_id
                             );
 
                             let transfer = ActiveTransfer {
@@ -384,10 +700,11 @@ pub fn spawn_network(
                                 chunks_done: 0,
                                 direction: TransferDirection::Upload,
                                 status: TransferStatus::Offering,
-                                file_path: std::path::PathBuf::from(file_path),
+                                file_path: std::path::PathBuf::from(file_path.clone()),
                                 received_chunks_set: std::collections::HashSet::new(),
                                 last_requested_chunk: None,
                                 group_id: None,
+                                chunk_size: chunk_size as usize,
                             };
                             active_transfers.insert(transfer_id.clone(), transfer);
 
@@ -397,6 +714,7 @@ pub fn spawn_network(
                                 file_size,
                                 checksum,
                                 chunk_count,
+                                chunk_size,
                                 sender_name,
                             };
 
@@ -405,7 +723,7 @@ pub fn spawn_network(
                                     let encrypted_offer = maybe_encrypt_request(&peer_id, offer);
                                     swarm.behaviour_mut().messaging.send_request(&target, encrypted_offer);
                                 } else {
-                                    handlers::dial_peer(&peers_clone, &peer_id, &mut swarm).await;
+                                    handlers::dial_peer(&peers_clone, &contacts, &peer_id, &mut swarm).await;
                                     pending_messages.push(PendingMessage {
                                         peer_id: target,
                                         request: offer,
@@ -423,6 +741,7 @@ pub fn spawn_network(
                                 transfer_id: String,
                                 peer_id: String,
                                 file_name: String,
+                                file_path: Option<String>,
                                 file_size: u64,
                                 direction: String,
                                 chunk_count: u32,
@@ -431,6 +750,7 @@ pub fn spawn_network(
                                 transfer_id,
                                 peer_id,
                                 file_name,
+                                file_path: Some(file_path),
                                 file_size,
                                 direction: "upload".into(),
                                 chunk_count,
@@ -440,30 +760,42 @@ pub fn spawn_network(
                         Some(NetworkCommand::PauseTransfer { transfer_id }) => {
                             if let Some(t) = active_transfers.get_mut(&transfer_id) {
                                 t.status = TransferStatus::Paused;
-                                println!("[Stoa File] Paused transfer {}", transfer_id);
+                                println!("[{}] [Stoa File] Paused transfer {}", chrono::Local::now().format("%H:%M:%S"), transfer_id);
                             }
                         }
 
                         Some(NetworkCommand::ResumeTransfer { transfer_id }) => {
                             if let Some(transfer) = active_transfers.get_mut(&transfer_id) {
                                 transfer.status = TransferStatus::Transferring;
-                                println!("[Stoa File] Resumed transfer {}", transfer_id);
+                                println!("[{}] [Stoa File] Resumed transfer {}", chrono::Local::now().format("%H:%M:%S"), transfer_id);
                                 let target = PeerId::from_str(&transfer.peer_id).unwrap();
-                                // We fetch the NEXT missing chunk
-                                let mut start_chunk = 0;
-                                for i in 0..transfer.chunk_count {
+                                // Find the first missing chunk index
+                                let first_missing = (0..transfer.chunk_count)
+                                    .find(|i| !transfer.received_chunks_set.contains(i))
+                                    .unwrap_or(0);
+
+                                // Restore the full pipeline window based on chunk size
+                                let window_size = if transfer.chunk_size >= file_transfer::LAN_CHUNK_SIZE {
+                                    file_transfer::LAN_WINDOW_SIZE
+                                } else {
+                                    file_transfer::RELAY_WINDOW_SIZE
+                                };
+
+                                // Request as many missing chunks as the window allows
+                                let mut last_sent = first_missing;
+                                let mut count = 0u32;
+                                for i in first_missing..transfer.chunk_count {
+                                    if count >= window_size { break; }
                                     if !transfer.received_chunks_set.contains(&i) {
-                                        start_chunk = i;
-                                        break;
+                                        swarm.behaviour_mut().messaging.send_request(&target, StoaRequest::FetchChunk {
+                                            transfer_id: transfer_id.clone(),
+                                            chunk_index: i,
+                                        });
+                                        last_sent = i;
+                                        count += 1;
                                     }
                                 }
-                                
-                                transfer.last_requested_chunk = Some(start_chunk);
-                                let req = StoaRequest::FetchChunk {
-                                    transfer_id: transfer_id.clone(),
-                                    chunk_index: start_chunk,
-                                };
-                                swarm.behaviour_mut().messaging.send_request(&target, req);
+                                transfer.last_requested_chunk = Some(last_sent);
                             }
                         }
 
@@ -481,7 +813,7 @@ pub fn spawn_network(
                                 our_peer_id_str.clone(),
                             ) {
                                 Ok(group) => {
-                                    println!("[Stoa Group] Created group '{}' ({})", name, group_id);
+                                    println!("[{}] [Stoa Group] Created group '{}' ({})", chrono::Local::now().format("%H:%M:%S"), name, group_id);
 
                                     // Fan-out GroupInvite to all members
                                     for mid in &member_ids {
@@ -497,8 +829,8 @@ pub fn spawn_network(
                                             if swarm.is_connected(&target) {
                                                 swarm.behaviour_mut().messaging.send_request(&target, encrypted_invite);
                                             } else {
-                                                println!("[Stoa Group] Member {mid} offline, queueing invite and dialing...");
-                                                handlers::dial_peer(&peers_clone, mid, &mut swarm).await;
+                                                println!("[{}] [Stoa Group] Member {mid} offline, queueing invite and dialing...", chrono::Local::now().format("%H:%M:%S"));
+                                                handlers::dial_peer(&peers_clone, &contacts, mid, &mut swarm).await;
                                                 pending_messages.push(PendingMessage {
                                                     peer_id: target,
                                                     request: invite,
@@ -519,7 +851,7 @@ pub fn spawn_network(
                                         "created_at": group.created_at,
                                     }));
                                 }
-                                Err(e) => eprintln!("[Stoa Group] Create failed: {e}"),
+                                Err(e) => eprintln!("[{}] [Stoa Group] Create failed: {e}", chrono::Local::now().format("%H:%M:%S")),
                             }
                         }
 
@@ -560,7 +892,7 @@ pub fn spawn_network(
                                         if swarm.is_connected(&target) {
                                             swarm.behaviour_mut().messaging.send_request(&target, encrypted_req);
                                         } else {
-                                            handlers::dial_peer(&peers_clone, mid, &mut swarm).await;
+                                            handlers::dial_peer(&peers_clone, &contacts, mid, &mut swarm).await;
                                             pending_messages.push(PendingMessage {
                                                 peer_id: target,
                                                 request: req,
@@ -579,13 +911,25 @@ pub fn spawn_network(
                             file_path,
                             sender_name,
                         }) => {
-                            // Use same pattern as DM files: prepare off-thread, then send offers
+                            // Use same pattern as DM files: connection-type-aware chunk size
+                            // For groups, use the minimum (most conservative) chunk size among all members
+                            // to ensure all members can receive. If any member is on relay, use relay.
                             let path = std::path::PathBuf::from(file_path.clone());
-                            match file_transfer::prepare_file_off_thread(path).await {
+                            let group_chunk_size = if let Some(group) = local_groups.iter().find(|g| g.id == group_id) {
+                                let ct = conn_types.lock().await;
+                                let all_lan = group.members.iter()
+                                    .filter(|m| **m != our_peer_id_str)
+                                    .all(|m| ct.get(m) == Some(&PeerConnectionType::Lan));
+                                drop(ct);
+                                if all_lan { file_transfer::LAN_CHUNK_SIZE } else { file_transfer::RELAY_CHUNK_SIZE }
+                            } else {
+                                file_transfer::RELAY_CHUNK_SIZE
+                            };
+                            match file_transfer::prepare_file_off_thread(path, group_chunk_size).await {
                                 Ok((file_name, file_size, checksum, chunk_count)) => {
                                     println!(
-                                        "[Stoa Group] Offering {} ({} bytes, {} chunks) to group {}",
-                                        file_name, file_size, chunk_count, group_id
+                                        "[Stoa Group] Offering {} ({} bytes, {} chunks @ {}KB) to group {}",
+                                        file_name, file_size, chunk_count, group_chunk_size / 1024, group_id
                                     );
 
                                     // Emit once for the sender's UI
@@ -597,6 +941,7 @@ pub fn spawn_network(
                                             "transfer_id": first_transfer_id,
                                             "peer_id": our_peer_id_str,
                                             "file_name": file_name,
+                                            "file_path": file_path,
                                             "file_size": file_size,
                                             "direction": "upload",
                                             "chunk_count": chunk_count,
@@ -624,6 +969,7 @@ pub fn spawn_network(
                                                 received_chunks_set: std::collections::HashSet::new(),
                                                 last_requested_chunk: None,
                                                 group_id: Some(group_id.clone()),
+                                                chunk_size: group_chunk_size,
                                             };
                                             active_transfers.insert(transfer_id.clone(), transfer);
 
@@ -635,6 +981,7 @@ pub fn spawn_network(
                                                     file_size,
                                                     checksum: checksum.clone(),
                                                     chunk_count,
+                                                    chunk_size: group_chunk_size as u32,
                                                     sender_name: sender_name.clone(),
                                                 };
                                                 let offer_clone = offer.clone();
@@ -642,7 +989,7 @@ pub fn spawn_network(
                                                 if swarm.is_connected(&target) {
                                                     swarm.behaviour_mut().messaging.send_request(&target, encrypted_offer);
                                                 } else {
-                                                    handlers::dial_peer(&peers_clone, mid, &mut swarm).await;
+                                                    handlers::dial_peer(&peers_clone, &contacts, mid, &mut swarm).await;
                                                     pending_messages.push(PendingMessage {
                                                         peer_id: target,
                                                         request: offer_clone,
@@ -655,12 +1002,12 @@ pub fn spawn_network(
                                         }
                                     }
                                 }
-                                Err(e) => eprintln!("[Stoa Group] Failed to prepare file: {e}"),
+                                Err(e) => eprintln!("[{}] [Stoa Group] Failed to prepare file: {e}", chrono::Local::now().format("%H:%M:%S")),
                             }
                         }
 
                         Some(NetworkCommand::LeaveGroup { group_id }) => {
-                            println!("[Stoa Group] Leaving group {group_id}");
+                            println!("[{}] [Stoa Group] Leaving group {group_id}", chrono::Local::now().format("%H:%M:%S"));
                             if let Some(group) = local_groups.iter().find(|g| g.id == group_id).cloned() {
                                 for mid in &group.members {
                                     if *mid == our_peer_id_str { continue; }
@@ -673,7 +1020,7 @@ pub fn spawn_network(
                                         if swarm.is_connected(&target) {
                                             swarm.behaviour_mut().messaging.send_request(&target, encrypted_req);
                                         } else {
-                                            handlers::dial_peer(&peers_clone, mid, &mut swarm).await;
+                                            handlers::dial_peer(&peers_clone, &contacts, mid, &mut swarm).await;
                                             pending_messages.push(PendingMessage {
                                                 peer_id: target,
                                                 request: req,
@@ -689,10 +1036,10 @@ pub fn spawn_network(
                         }
 
                         Some(NetworkCommand::RemoveGroupMember { group_id, peer_id: remove_pid }) => {
-                            println!("[Stoa Group] Admin removing {remove_pid} from {group_id}");
+                            println!("[{}] [Stoa Group] Admin removing {remove_pid} from {group_id}", chrono::Local::now().format("%H:%M:%S"));
                             if let Some(group) = local_groups.iter().find(|g| g.id == group_id).cloned() {
                                 if group.admin != our_peer_id_str {
-                                    eprintln!("[Stoa Group] Not admin, cannot remove member");
+                                    eprintln!("[{}] [Stoa Group] Not admin, cannot remove member", chrono::Local::now().format("%H:%M:%S"));
                                     continue;
                                 }
                                 for mid in &group.members {
@@ -706,7 +1053,7 @@ pub fn spawn_network(
                                         if swarm.is_connected(&target) {
                                             swarm.behaviour_mut().messaging.send_request(&target, encrypted_req);
                                         } else {
-                                            handlers::dial_peer(&peers_clone, mid, &mut swarm).await;
+                                            handlers::dial_peer(&peers_clone, &contacts, mid, &mut swarm).await;
                                             pending_messages.push(PendingMessage {
                                                 peer_id: target,
                                                 request: req,
@@ -722,10 +1069,10 @@ pub fn spawn_network(
                         }
 
                         Some(NetworkCommand::DisbandGroup { group_id }) => {
-                            println!("[Stoa Group] Admin disbanding group {group_id}");
+                            println!("[{}] [Stoa Group] Admin disbanding group {group_id}", chrono::Local::now().format("%H:%M:%S"));
                             if let Some(group) = local_groups.iter().find(|g| g.id == group_id).cloned() {
                                 if group.admin != our_peer_id_str {
-                                    eprintln!("[Stoa Group] Not admin, cannot disband");
+                                    eprintln!("[{}] [Stoa Group] Not admin, cannot disband", chrono::Local::now().format("%H:%M:%S"));
                                     continue;
                                 }
                                 for mid in &group.members {
@@ -738,7 +1085,7 @@ pub fn spawn_network(
                                         if swarm.is_connected(&target) {
                                             swarm.behaviour_mut().messaging.send_request(&target, encrypted_req);
                                         } else {
-                                            handlers::dial_peer(&peers_clone, mid, &mut swarm).await;
+                                            handlers::dial_peer(&peers_clone, &contacts, mid, &mut swarm).await;
                                             pending_messages.push(PendingMessage {
                                                 peer_id: target,
                                                 request: req,
@@ -754,7 +1101,7 @@ pub fn spawn_network(
                         }
 
                         Some(NetworkCommand::OpenGroupSpace { group_id }) => {
-                            println!("[Stoa Space] Opening space for group {}", group_id);
+                            println!("[{}] [Stoa Space] Opening space for group {}", chrono::Local::now().format("%H:%M:%S"), group_id);
                             if let Some(group) = local_groups.iter().find(|g| g.id == group_id).cloned() {
                                 if let Ok(sv_bytes) = crate::crdt::encode_state_vector(&group_id).await {
                                     let sv_b64 = base64::encode(&sv_bytes);
@@ -769,7 +1116,7 @@ pub fn spawn_network(
                                             if swarm.is_connected(&target) {
                                                 swarm.behaviour_mut().messaging.send_request(&target, encrypted_req);
                                             } else {
-                                                handlers::dial_peer(&peers_clone, mid, &mut swarm).await;
+                                                handlers::dial_peer(&peers_clone, &contacts, mid, &mut swarm).await;
                                                 pending_messages.push(PendingMessage {
                                                     peer_id: target,
                                                     request: req,
@@ -799,7 +1146,7 @@ pub fn spawn_network(
                                             if swarm.is_connected(&target) {
                                                 swarm.behaviour_mut().messaging.send_request(&target, encrypted_req);
                                             } else {
-                                                handlers::dial_peer(&peers_clone, mid, &mut swarm).await;
+                                                handlers::dial_peer(&peers_clone, &contacts, mid, &mut swarm).await;
                                                 pending_messages.push(PendingMessage {
                                                     peer_id: target,
                                                     request: req,
@@ -815,7 +1162,7 @@ pub fn spawn_network(
                         }
 
                         Some(NetworkCommand::CreateSpaceFile { group_id, file_name, content }) => {
-                            println!("[Stoa Space] Creating file '{}' in group {}", file_name, group_id);
+                            println!("[{}] [Stoa Space] Creating file '{}' in group {}", chrono::Local::now().format("%H:%M:%S"), file_name, group_id);
                             let result = if let Some(text) = content {
                                 crate::crdt::create_file_with_content(&group_id, &file_name, &text, &our_peer_id_str).await
                             } else {
@@ -835,7 +1182,7 @@ pub fn spawn_network(
                                             if swarm.is_connected(&target) {
                                                 swarm.behaviour_mut().messaging.send_request(&target, encrypted_req);
                                             } else {
-                                                handlers::dial_peer(&peers_clone, mid, &mut swarm).await;
+                                                handlers::dial_peer(&peers_clone, &contacts, mid, &mut swarm).await;
                                                 pending_messages.push(PendingMessage {
                                                     peer_id: target,
                                                     request: req,
@@ -855,7 +1202,7 @@ pub fn spawn_network(
                         }
 
                         Some(NetworkCommand::DeleteSpaceFile { group_id, file_id }) => {
-                            println!("[Stoa Space] Deleting file {} in group {}", file_id, group_id);
+                            println!("[{}] [Stoa Space] Deleting file {} in group {}", chrono::Local::now().format("%H:%M:%S"), file_id, group_id);
                             if let Ok(update_bytes) = crate::crdt::delete_file(&group_id, &file_id).await {
                                 let update_b64 = base64::encode(&update_bytes);
                                 if let Some(group) = local_groups.iter().find(|g| g.id == group_id).cloned() {
@@ -870,7 +1217,7 @@ pub fn spawn_network(
                                             if swarm.is_connected(&target) {
                                                 swarm.behaviour_mut().messaging.send_request(&target, encrypted_req);
                                             } else {
-                                                handlers::dial_peer(&peers_clone, mid, &mut swarm).await;
+                                                handlers::dial_peer(&peers_clone, &contacts, mid, &mut swarm).await;
                                                 pending_messages.push(PendingMessage {
                                                     peer_id: target,
                                                     request: req,
@@ -890,7 +1237,7 @@ pub fn spawn_network(
                         }
 
                         Some(NetworkCommand::Shutdown) | None => {
-                            println!("[Stoa Network] Shutting down network task.");
+                            println!("[{}] [Stoa Network] Shutting down network task.", chrono::Local::now().format("%H:%M:%S"));
                             break;
                         }
                     }
@@ -902,11 +1249,11 @@ pub fn spawn_network(
                     let contact_ids: Vec<String> = cts.iter().map(|c| c.peer_id.clone()).collect();
                     drop(cts);
 
-                    for pid in &contact_ids {
-                        if let Ok(target) = PeerId::from_str(pid) {
+                    for pid in contact_ids {
+                        if let Ok(target) = PeerId::from_str(&pid) {
                             if !swarm.is_connected(&target) {
-                                // Try cached addresses
-                                handlers::dial_peer(&peers_clone, pid, &mut swarm).await;
+                                // Peer is offline — try both LAN and relay
+                                handlers::dial_peer(&peers_clone, &contacts, &pid, &mut swarm).await;
                             }
                         }
                     }
@@ -915,12 +1262,12 @@ pub fn spawn_network(
         }
     });
 
-    Ok((cmd_tx, nearby_peers, handle))
+    Ok((cmd_tx, nearby_peers, connected_peers, handle))
 }
 
 /// Encrypt a request for a peer if a session exists, otherwise return it as-is.
 /// This is the single point where outgoing messages get encrypted.
-fn maybe_encrypt_request(peer_id: &str, req: StoaRequest) -> StoaRequest {
+pub fn maybe_encrypt_request(peer_id: &str, req: StoaRequest) -> StoaRequest {
     if !crypto::has_session(peer_id) {
         return req;
     }
@@ -928,14 +1275,14 @@ fn maybe_encrypt_request(peer_id: &str, req: StoaRequest) -> StoaRequest {
     let plaintext = match serde_json::to_vec(&req) {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("[Stoa Crypto] Failed to serialize for encryption: {e}");
+            eprintln!("[{}] [Stoa Crypto] Failed to serialize for encryption: {e}", chrono::Local::now().format("%H:%M:%S"));
             return req;
         }
     };
 
     match crypto::encrypt_for_peer(peer_id, &plaintext) {
         Ok(Some((ciphertext_b64, nonce_b64))) => {
-            println!("[Stoa Crypto] Encrypting message for {peer_id}");
+            println!("[{}] [Stoa Crypto] Encrypting message for {peer_id}", chrono::Local::now().format("%H:%M:%S"));
             StoaRequest::EncryptedEnvelope {
                 id: uuid::Uuid::new_v4().to_string(),
                 ciphertext_b64,
@@ -944,7 +1291,7 @@ fn maybe_encrypt_request(peer_id: &str, req: StoaRequest) -> StoaRequest {
         }
         Ok(None) => req,
         Err(e) => {
-            eprintln!("[Stoa Crypto] Encryption failed, sending plaintext: {e}");
+            eprintln!("[{}] [Stoa Crypto] Encryption failed, sending plaintext: {e}", chrono::Local::now().format("%H:%M:%S"));
             req
         }
     }

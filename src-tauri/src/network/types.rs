@@ -18,6 +18,11 @@ pub struct NearbyPeer {
 /// Commands the frontend can send to the network task.
 #[derive(Debug)]
 pub enum NetworkCommand {
+    /// Explicitly dial a peer over a relay circuit
+    DialPeer {
+        peer_id: String,
+        relay_addrs: Vec<String>,
+    },
     /// Send a contact request to a peer
     SendContactRequest {
         peer_id: String,
@@ -45,6 +50,7 @@ pub enum NetworkCommand {
         file_size: u64,
         checksum: String,
         chunk_count: u32,
+        chunk_size: u32,
         sender_name: String,
     },
     /// Pause an ongoing file transfer
@@ -117,7 +123,7 @@ pub enum NetworkCommand {
 }
 
 /// A message waiting for a connection to be established.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PendingMessage {
     pub peer_id: PeerId,
     pub request: StoaRequest,
@@ -131,3 +137,15 @@ pub type NearbyPeersMap = Arc<Mutex<HashMap<String, NearbyPeer>>>;
 
 /// Shared list of known contacts for auto-dialing.
 pub type ContactsList = Arc<Mutex<Vec<Contact>>>;
+
+/// Whether a peer is connected via LAN (direct TCP) or Internet (relay circuit).
+#[derive(Debug, Clone, PartialEq)]
+pub enum PeerConnectionType {
+    /// mDNS-discovered, direct TCP on the local network.
+    Lan,
+    /// Connected through a Circuit Relay v2 server.
+    Relay,
+}
+
+/// Shared map tracking the connection type for each connected peer.
+pub type PeerConnectionMap = Arc<Mutex<HashMap<String, PeerConnectionType>>>;

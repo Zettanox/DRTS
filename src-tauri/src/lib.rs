@@ -1,3 +1,4 @@
+mod connection_code;
 mod contacts;
 mod crdt;
 mod crypto;
@@ -7,16 +8,34 @@ mod identity;
 mod messages;
 mod network;
 mod protocol;
+mod relay_config;
 
 use contacts::Contact;
 use identity::IdentityInfo;
 use libp2p::identity::Keypair;
 use messages::StoredMessage;
 use network::{ContactsList, NearbyPeer, NearbyPeersMap, NetworkCommand};
-use std::sync::Arc;
-use tauri::{Manager, State};
+use std::sync::{Arc, OnceLock};
+use std::path::PathBuf;
+use tauri::{Emitter, Manager, State};
 use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinHandle;
+
+pub static STOA_DIR: OnceLock<PathBuf> = OnceLock::new();
+
+pub fn get_stoa_dir() -> PathBuf {
+    // Check if the legacy `~/.stoa` directory exists for backward compatibility on Desktop
+    if let Some(home) = dirs::home_dir() {
+        let legacy_path = home.join(".stoa");
+        if legacy_path.exists() {
+            return legacy_path;
+        }
+    }
+    
+    STOA_DIR.get().cloned().unwrap_or_else(|| {
+        dirs::home_dir().expect("Could not determine home directory").join(".stoa")
+    })
+}
 
 /// Shared application state managed by Tauri.
 pub struct AppState {
@@ -25,6 +44,7 @@ pub struct AppState {
     pub network_cmd_tx: Arc<Mutex<Option<mpsc::Sender<NetworkCommand>>>>,
     pub network_handle: Arc<Mutex<Option<JoinHandle<()>>>>,
     pub nearby_peers: Arc<Mutex<Option<NearbyPeersMap>>>,
+    pub connected_peers: Arc<Mutex<Option<Arc<Mutex<std::collections::HashSet<String>>>>>>,
     pub contacts: ContactsList,
     pub lan_visible: Arc<Mutex<bool>>,
 }
@@ -39,7 +59,7 @@ async fn start_network(
         let info = state.identity_info.lock().await;
         info.as_ref().map(|i| i.name.clone()).unwrap_or_else(|| "User".to_string())
     };
-    let (cmd_tx, peers_map, handle) =
+    let (cmd_tx, peers_map, connected_peers, handle) =
         network::spawn_network(keypair.clone(), app_handle.clone(), state.contacts.clone(), our_name)?;
     {
         let mut tx = state.network_cmd_tx.lock().await;
@@ -48,6 +68,10 @@ async fn start_network(
     {
         let mut np = state.nearby_peers.lock().await;
         *np = Some(peers_map);
+    }
+    {
+        let mut cp = state.connected_peers.lock().await;
+        *cp = Some(connected_peers);
     }
     {
         let mut h = state.network_handle.lock().await;
@@ -129,10 +153,7 @@ async fn get_identity(
         }
     }
 
-    let path = dirs::home_dir()
-        .ok_or("No home dir")?
-        .join(".stoa")
-        .join("identity.json");
+    let path = crate::get_stoa_dir().join("identity.json");
 
     if !path.exists() {
         return Ok(None);
@@ -206,11 +227,14 @@ async fn get_visibility(state: State<'_, AppState>) -> Result<bool, String> {
 }
 
 #[tauri::command]
-async fn show_window(app_handle: tauri::AppHandle) -> Result<(), String> {
-    if let Some(window) = app_handle.get_webview_window("main") {
-        window
-            .show()
-            .map_err(|e| format!("Failed to show window: {e}"))?;
+async fn show_window(#[allow(unused_variables)] app_handle: tauri::AppHandle) -> Result<(), String> {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        if let Some(window) = app_handle.get_webview_window("main") {
+            window
+                .show()
+                .map_err(|e| format!("Failed to show window: {e}"))?;
+        }
     }
     Ok(())
 }
@@ -221,6 +245,17 @@ async fn show_window(app_handle: tauri::AppHandle) -> Result<(), String> {
 async fn get_contacts(state: State<'_, AppState>) -> Result<Vec<Contact>, String> {
     let cts = state.contacts.lock().await;
     Ok(cts.clone())
+}
+
+#[tauri::command]
+async fn get_connected_peers(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    let guard = state.connected_peers.lock().await;
+    if let Some(cp_arc) = &*guard {
+        let cp = cp_arc.lock().await;
+        Ok(cp.iter().cloned().collect())
+    } else {
+        Ok(vec![])
+    }
 }
 
 #[tauri::command]
@@ -252,11 +287,21 @@ async fn respond_contact_request(
     peer_id: String,
     accept: bool,
     petname: String,
+    app_handle: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     if accept {
         let mut cts = state.contacts.lock().await;
-        contacts::add_contact(&mut cts, peer_id, petname)?;
+        contacts::add_contact(&mut cts, peer_id.clone(), petname, None)?;
+        drop(cts);
+        
+        // If the peer is already connected, emit contact-online immediately
+        let peers = state.nearby_peers.lock().await;
+        if let Some(ref map) = *peers {
+            if map.lock().await.contains_key(&peer_id) {
+                let _ = app_handle.emit("contact-online", &peer_id);
+            }
+        }
     }
     Ok(())
 }
@@ -265,10 +310,21 @@ async fn respond_contact_request(
 async fn add_contact_from_request(
     peer_id: String,
     petname: String,
+    app_handle: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let mut cts = state.contacts.lock().await;
-    contacts::add_contact(&mut cts, peer_id, petname)
+    contacts::add_contact(&mut cts, peer_id.clone(), petname, None)?;
+    drop(cts);
+    
+    // If the peer is already connected, emit contact-online immediately
+    let peers = state.nearby_peers.lock().await;
+    if let Some(ref map) = *peers {
+        if map.lock().await.contains_key(&peer_id) {
+            let _ = app_handle.emit("contact-online", &peer_id);
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -322,6 +378,22 @@ async fn send_message(
 async fn get_chat_history(peer_id: String) -> Result<Vec<StoredMessage>, String> {
     messages::get_chat_history(&peer_id)
 }
+
+#[tauri::command]
+async fn delete_chat_message(peer_id: String, message_id: String) -> Result<(), String> {
+    messages::delete_message(&peer_id, &message_id)
+}
+
+#[tauri::command]
+async fn delete_chat_messages(peer_id: String, message_ids: Vec<String>) -> Result<(), String> {
+    messages::delete_messages(&peer_id, &message_ids)
+}
+
+#[tauri::command]
+async fn clear_chat(peer_id: String) -> Result<(), String> {
+    messages::clear_chat_history(&peer_id)
+}
+
 
 #[tauri::command]
 async fn set_username(
@@ -671,22 +743,125 @@ async fn edit_space_file(
     Ok(())
 }
 
-// ─── App Entry ────────────────────────────────────────────────────────────────
+// ─── Relay Config ──────────────────────────────────────────────────────────────
+
+#[tauri::command]
+async fn get_relay_config() -> Result<relay_config::RelayConfig, String> {
+    Ok(relay_config::RelayConfig::load())
+}
+
+#[tauri::command]
+async fn set_relay_config(config: relay_config::RelayConfig) -> Result<(), String> {
+    config.save()
+}
+
+// ─── Connection Codes ──────────────────────────────────────────────────────────
+
+/// Returns our own connection code string and QR code SVG (base64) so the UI
+/// can display them in the Settings panel for sharing with contacts.
+#[tauri::command]
+async fn get_my_connection_code(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let kp_guard = state.keypair.lock().await;
+    let keypair = kp_guard
+        .as_ref()
+        .ok_or("No identity — generate one first")?;
+
+    let relay_cfg = relay_config::RelayConfig::load();
+    let relay_addrs = relay_cfg.enabled_addresses();
+
+    let code_str = connection_code::build_our_code(keypair, relay_addrs)?;
+    let qr_b64 = connection_code::ConnectionCode::decode(&code_str)?.to_qr_base64()?;
+
+    Ok(serde_json::json!({
+        "code": code_str,
+        "qr_svg_b64": qr_b64,
+    }))
+}
+
+/// Decode a peer's connection code string and return their PeerID + relay addrs.
+#[tauri::command]
+async fn parse_connection_code(code: String) -> Result<serde_json::Value, String> {
+    let (peer_id, relay_addrs) = connection_code::parse_peer_code(&code)?;
+    Ok(serde_json::json!({
+        "peer_id": peer_id,
+        "relay_addrs": relay_addrs,
+    }))
+}
+
+/// Add a contact from their connection code in one step.
+/// Decodes the code, dials via relay address, sends a contact request,
+/// and adds them to the local contacts list.
+#[tauri::command]
+async fn add_contact_from_code(
+    code: String,
+    petname: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let (peer_id_str, relay_addrs) = connection_code::parse_peer_code(&code)?;
+
+    // Add to contacts list first
+    {
+        let mut cts = state.contacts.lock().await;
+        contacts::add_contact(&mut cts, peer_id_str.clone(), petname, Some(relay_addrs.clone()))
+            .map_err(|e| format!("Failed to save contact: {e}"))?;
+    }
+
+    // Dial the peer via their relay, then send contact request
+    let tx = state.network_cmd_tx.lock().await;
+    if let Some(tx) = tx.as_ref() {
+        let _ = tx.send(network::NetworkCommand::DialPeer {
+            peer_id: peer_id_str.clone(),
+            relay_addrs,
+        }).await;
+
+        let id_guard = state.identity_info.lock().await;
+        let our_name = id_guard
+            .as_ref()
+            .map(|i| i.name.clone())
+            .unwrap_or_else(|| "Stoa User".to_string());
+        let our_peer_id = id_guard
+            .as_ref()
+            .map(|i| i.peer_id.clone())
+            .unwrap_or_default();
+        drop(id_guard);
+
+        let _ = tx.send(network::NetworkCommand::SendContactRequest {
+            peer_id: peer_id_str,
+            our_name,
+            our_peer_id,
+        }).await;
+    }
+
+    Ok(())
+}
+
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let initial_contacts = contacts::load_contacts().unwrap_or_default();
-
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .setup(|app| {
+            let data_dir = app.path().app_data_dir().unwrap_or_else(|_| {
+                dirs::home_dir().expect("fallback").join(".stoa")
+            });
+            std::fs::create_dir_all(&data_dir).ok();
+            STOA_DIR.set(data_dir).ok();
+            
+            let initial_contacts = contacts::load_contacts().unwrap_or_default();
+            let state = app.state::<AppState>();
+            *state.contacts.blocking_lock() = initial_contacts;
+            
+            Ok(())
+        })
         .manage(AppState {
             identity_info: Arc::new(Mutex::new(None)),
             keypair: Arc::new(Mutex::new(None)),
             network_cmd_tx: Arc::new(Mutex::new(None)),
             network_handle: Arc::new(Mutex::new(None)),
             nearby_peers: Arc::new(Mutex::new(None)),
-            contacts: Arc::new(Mutex::new(initial_contacts)),
+            connected_peers: Arc::new(Mutex::new(None)),
+            contacts: Arc::new(tokio::sync::Mutex::new(Vec::new())),
             lan_visible: Arc::new(Mutex::new(true)),
         })
         .invoke_handler(tauri::generate_handler![
@@ -698,6 +873,7 @@ pub fn run() {
             get_nearby_peers,
             show_window,
             get_contacts,
+            get_connected_peers,
             send_contact_request,
             respond_contact_request,
             add_contact_from_request,
@@ -726,6 +902,14 @@ pub fn run() {
             get_space_file_text,
             export_space_file,
             edit_space_file,
+            get_relay_config,
+            set_relay_config,
+            get_my_connection_code,
+            parse_connection_code,
+            add_contact_from_code,
+            delete_chat_message,
+            delete_chat_messages,
+            clear_chat,
         ])
         .on_window_event(|window, event| {
             // Gracefully shut down the network task before the window closes,

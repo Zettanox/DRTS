@@ -48,6 +48,7 @@ pub async fn handle_mdns_discovered(
     let cts = contacts.lock().await;
     let is_contact = cts.iter().any(|c| c.peer_id == pid);
     drop(cts);
+    // Auto-dial LAN address for new peers/contacts
     if (is_new || is_contact) && !swarm.is_connected(&discovered_peer) {
         let _ = swarm.dial(addr);
     }
@@ -75,9 +76,10 @@ pub async fn handle_connection_established(
     swarm: &mut Swarm<StoaBehaviour>,
     app_handle: &AppHandle,
     pending_messages: &mut Vec<super::types::PendingMessage>,
+    inflight_messages: &mut std::collections::HashMap<libp2p::request_response::OutboundRequestId, super::types::PendingMessage>,
 ) {
     let pid = connected_peer.to_string();
-    println!("[Stoa Network] Connection established with {pid}");
+    // Note: the caller already logs the connection with its type (LAN/Relay)
 
     // Send WhoAreYou to learn their display name
     swarm
@@ -97,11 +99,16 @@ pub async fn handle_connection_established(
     let mut remaining = vec![];
     for pm in pending_messages.drain(..) {
         if pm.peer_id == connected_peer {
-            swarm
+            // E2E Encrypt the queued message if a session exists (or wait if we just asked for KeyExchange)
+            let pm_clone = pm.clone();
+            let encrypted_req = super::maybe_encrypt_request(&pid, pm.request);
+
+            let req_id = swarm
                 .behaviour_mut()
                 .messaging
-                .send_request(&pm.peer_id, pm.request);
-            println!("[Stoa Network] Flushed queued message to {pid}");
+                .send_request(&pm_clone.peer_id, encrypted_req);
+            inflight_messages.insert(req_id, pm_clone);
+            println!("[{}] [Stoa Network] Flushed queued message to {pid}", chrono::Local::now().format("%H:%M:%S"));
         } else {
             remaining.push(pm);
         }
@@ -116,7 +123,7 @@ pub async fn handle_connection_closed(
     app_handle: &AppHandle,
 ) {
     let pid = disconnected_peer.to_string();
-    println!("[Stoa Network] Connection closed with {pid}");
+    println!("[{}] [Stoa Network] Connection closed with {pid}", chrono::Local::now().format("%H:%M:%S"));
 
     let cts = contacts.lock().await;
     let is_contact = cts.iter().any(|c| c.peer_id == pid);
@@ -144,7 +151,7 @@ pub async fn handle_incoming_request(
     match request {
         StoaRequest::WhoAreYou => {
             let pid = peer.to_string();
-            println!("[Stoa Network] WhoAreYou from {pid} — replying with '{our_name}'");
+            println!("[{}] [Stoa Network] WhoAreYou from {pid} — replying with '{our_name}'", chrono::Local::now().format("%H:%M:%S"));
             let response = StoaResponse::PeerIdentity {
                 name: our_name.to_string(),
             };
@@ -157,7 +164,7 @@ pub async fn handle_incoming_request(
             from_peer_id,
             from_name,
         } => {
-            println!("[Stoa Network] Contact request from {from_name} ({from_peer_id})");
+            println!("[{}] [Stoa Network] Contact request from {from_name} ({from_peer_id})", chrono::Local::now().format("%H:%M:%S"));
 
             #[derive(Serialize, Clone)]
             struct ContactRequestEvent {
@@ -189,7 +196,7 @@ pub async fn handle_incoming_request(
             sender_name,
         } => {
             let sender_id = peer.to_string();
-            println!("[Stoa Network] Message from {sender_name}: {content}");
+            println!("[{}] [Stoa Network] Message from {sender_name}: {content}", chrono::Local::now().format("%H:%M:%S"));
 
             // Persist incoming message
             let msg = StoredMessage {
@@ -236,12 +243,14 @@ pub async fn handle_incoming_request(
             file_size,
             checksum,
             chunk_count,
+            chunk_size,
             sender_name,
         } => {
             let sender_id = peer.to_string();
+            let chunk_size_usize = chunk_size as usize;
             println!(
-                "[Stoa File] FileOffer from {sender_name}: {} ({} bytes, {} chunks)",
-                file_name, file_size, chunk_count
+                "[Stoa File] FileOffer from {sender_name}: {} ({} bytes, {} chunks @ {}KB)",
+                file_name, file_size, chunk_count, chunk_size / 1024
             );
 
             // Auto-accept: create download transfer
@@ -260,6 +269,7 @@ pub async fn handle_incoming_request(
                 received_chunks_set: std::collections::HashSet::new(),
                 last_requested_chunk: None,
                 group_id: None,
+                chunk_size: chunk_size_usize,
             };
             
             // Accept the offer
@@ -315,12 +325,13 @@ pub async fn handle_incoming_request(
                 );
                 active_transfers.insert(transfer_id.clone(), transfer);
             } else {
-                // Determine pipeline window
-                let mut window_max = chunk_count;
-                if window_max > file_transfer::MAX_WINDOW_SIZE {
-                    window_max = file_transfer::MAX_WINDOW_SIZE;
-                }
-                
+                // Window size based on chunk size: large chunks → smaller window
+                let window_size = if chunk_size_usize >= file_transfer::LAN_CHUNK_SIZE {
+                    file_transfer::LAN_WINDOW_SIZE
+                } else {
+                    file_transfer::RELAY_WINDOW_SIZE
+                };
+                let window_max = chunk_count.min(window_size);
                 transfer.last_requested_chunk = Some(window_max - 1);
                 active_transfers.insert(transfer_id.clone(), transfer);
                 
@@ -342,8 +353,12 @@ pub async fn handle_incoming_request(
             chunk_index,
         } => {
             if let Some(transfer) = active_transfers.get_mut(&transfer_id) {
-                if transfer.status == TransferStatus::Transferring {
-                    if let Ok(data_b64) = file_transfer::read_chunk(&transfer.file_path, chunk_index) {
+                if transfer.status == TransferStatus::Transferring
+                    || transfer.status == TransferStatus::Offering {
+                    // Also mark as Transferring now that we know the receiver is pulling
+                    transfer.status = TransferStatus::Transferring;
+                    let cs = transfer.chunk_size;
+                    if let Ok(data_b64) = file_transfer::read_chunk(&transfer.file_path, chunk_index, cs) {
                         // Encrypt chunk data if we have a session with the peer
                         let peer_id_str = transfer.peer_id.clone();
                         let (final_data, final_nonce) = if crypto::has_session(&peer_id_str) {
@@ -424,6 +439,7 @@ pub async fn handle_incoming_request(
                                 transfer_id: String,
                                 peer_id: String,
                                 file_name: String,
+                                file_path: Option<String>,
                                 file_size: u64,
                                 direction: String,
                             }
@@ -433,6 +449,7 @@ pub async fn handle_incoming_request(
                                     transfer_id: transfer_id.clone(),
                                     peer_id: transfer.peer_id.clone(),
                                     file_name: transfer.file_name.clone(),
+                                    file_path: Some(transfer.file_path.to_string_lossy().to_string()),
                                     file_size: transfer.file_size,
                                     direction: "upload".into(),
                                 },
@@ -441,7 +458,7 @@ pub async fn handle_incoming_request(
                             active_transfers.remove(&transfer_id);
                         }
                     } else {
-                        eprintln!("[Stoa File] Failed to read chunk {chunk_index} for {}", transfer_id);
+                        eprintln!("[{}] [Stoa File] Failed to read chunk {chunk_index} for {}", chrono::Local::now().format("%H:%M:%S"), transfer_id);
                     }
                 }
             }
@@ -450,14 +467,14 @@ pub async fn handle_incoming_request(
             x25519_public_key_hex,
         } => {
             let pid = peer.to_string();
-            println!("[Stoa Crypto] KeyExchange from {pid}");
+            println!("[{}] [Stoa Crypto] KeyExchange from {pid}", chrono::Local::now().format("%H:%M:%S"));
 
             match crypto::compute_shared_secret(our_keypair, &x25519_public_key_hex) {
                 Ok(shared_secret) => {
                     if let Err(e) = crypto::save_session(&pid, &shared_secret) {
-                        eprintln!("[Stoa Crypto] Failed to save session: {e}");
+                        eprintln!("[{}] [Stoa Crypto] Failed to save session: {e}", chrono::Local::now().format("%H:%M:%S"));
                     } else {
-                        println!("[Stoa Crypto] Session established with {pid}");
+                        println!("[{}] [Stoa Crypto] Session established with {pid}", chrono::Local::now().format("%H:%M:%S"));
                     }
 
                     // Respond with our X25519 public key
@@ -471,10 +488,10 @@ pub async fn handle_incoming_request(
                                 .messaging
                                 .send_response(channel, response);
                         }
-                        Err(e) => eprintln!("[Stoa Crypto] Failed to derive our X25519 key: {e}"),
+                        Err(e) => eprintln!("[{}] [Stoa Crypto] Failed to derive our X25519 key: {e}", chrono::Local::now().format("%H:%M:%S")),
                     }
                 }
-                Err(e) => eprintln!("[Stoa Crypto] ECDH failed: {e}"),
+                Err(e) => eprintln!("[{}] [Stoa Crypto] ECDH failed: {e}", chrono::Local::now().format("%H:%M:%S")),
             }
         }
         StoaRequest::EncryptedEnvelope {
@@ -488,7 +505,7 @@ pub async fn handle_incoming_request(
                     // Deserialize the inner message and dispatch
                     match serde_json::from_slice::<StoaRequest>(&plaintext) {
                         Ok(inner_request) => {
-                            println!("[Stoa Crypto] Decrypted envelope from {pid}");
+                            println!("[{}] [Stoa Crypto] Decrypted envelope from {pid}", chrono::Local::now().format("%H:%M:%S"));
                             // Recursively handle the decrypted inner request.
                             // We create a dummy channel situation — the inner request
                             // should use the original channel for its response.
@@ -508,15 +525,15 @@ pub async fn handle_incoming_request(
                             .await;
                         }
                         Err(e) => {
-                            eprintln!("[Stoa Crypto] Failed to deserialize decrypted payload: {e}");
+                            eprintln!("[{}] [Stoa Crypto] Failed to deserialize decrypted payload: {e}", chrono::Local::now().format("%H:%M:%S"));
                         }
                     }
                 }
                 Ok(None) => {
-                    eprintln!("[Stoa Crypto] No session for {pid} — cannot decrypt envelope");
+                    eprintln!("[{}] [Stoa Crypto] No session for {pid} — cannot decrypt envelope", chrono::Local::now().format("%H:%M:%S"));
                 }
                 Err(e) => {
-                    eprintln!("[Stoa Crypto] Decryption failed from {pid}: {e}");
+                    eprintln!("[{}] [Stoa Crypto] Decryption failed from {pid}: {e}", chrono::Local::now().format("%H:%M:%S"));
                 }
             }
         }
@@ -529,7 +546,7 @@ pub async fn handle_incoming_request(
             inviter_name,
         } => {
             let pid = peer.to_string();
-            println!("[Stoa Group] GroupInvite from {inviter_name}: '{group_name}' ({group_id})");
+            println!("[{}] [Stoa Group] GroupInvite from {inviter_name}: '{group_name}' ({group_id})", chrono::Local::now().format("%H:%M:%S"));
 
             let group = Group {
                 id: group_id.clone(),
@@ -540,7 +557,7 @@ pub async fn handle_incoming_request(
             };
 
             if let Err(e) = groups::add_group_from_invite(groups, group) {
-                eprintln!("[Stoa Group] Failed to save group: {e}");
+                eprintln!("[{}] [Stoa Group] Failed to save group: {e}", chrono::Local::now().format("%H:%M:%S"));
             }
 
             // Notify frontend
@@ -580,12 +597,12 @@ pub async fn handle_incoming_request(
             sender_name,
         } => {
             let sender_id = peer.to_string();
-            println!("[Stoa Group] Message in '{group_id}' from {sender_name}: {content}");
+            println!("[{}] [Stoa Group] Message in '{group_id}' from {sender_name}: {content}", chrono::Local::now().format("%H:%M:%S"));
 
             // Check if we know this group; if not, it may be stale
             let known = groups.iter().any(|g| g.id == group_id);
             if !known {
-                println!("[Stoa Group] Unknown group {group_id} — ignoring");
+                println!("[{}] [Stoa Group] Unknown group {group_id} — ignoring", chrono::Local::now().format("%H:%M:%S"));
                 let response = StoaResponse::MessageAck { id };
                 let _ = swarm
                     .behaviour_mut()
@@ -645,12 +662,14 @@ pub async fn handle_incoming_request(
             file_size,
             checksum,
             chunk_count,
+            chunk_size,
             sender_name,
         } => {
             let sender_id = peer.to_string();
+            let chunk_size_usize = chunk_size as usize;
             println!(
-                "[Stoa Group] FileOffer in '{group_id}' from {sender_name}: {} ({} bytes)",
-                file_name, file_size
+                "[Stoa Group] FileOffer in '{group_id}' from {sender_name}: {} ({} bytes, {}KB chunks)",
+                file_name, file_size, chunk_size / 1024
             );
 
             // Reuse the DM file offer logic — the file is pulled individually
@@ -669,6 +688,7 @@ pub async fn handle_incoming_request(
                 received_chunks_set: std::collections::HashSet::new(),
                 last_requested_chunk: None,
                 group_id: Some(group_id.clone()),
+                chunk_size: chunk_size_usize,
             };
 
             let response = StoaResponse::FileAccepted {
@@ -713,10 +733,12 @@ pub async fn handle_incoming_request(
                 let _ = std::fs::write(&transfer.file_path, b"");
                 active_transfers.insert(transfer_id, transfer);
             } else {
-                let mut window_max = chunk_count;
-                if window_max > file_transfer::MAX_WINDOW_SIZE {
-                    window_max = file_transfer::MAX_WINDOW_SIZE;
-                }
+                let window_size = if chunk_size_usize >= file_transfer::LAN_CHUNK_SIZE {
+                    file_transfer::LAN_WINDOW_SIZE
+                } else {
+                    file_transfer::RELAY_WINDOW_SIZE
+                };
+                let window_max = chunk_count.min(window_size);
                 transfer.last_requested_chunk = Some(window_max - 1);
                 active_transfers.insert(transfer_id.clone(), transfer);
 
@@ -735,7 +757,7 @@ pub async fn handle_incoming_request(
             group_id,
             removed_peer_id,
         } => {
-            println!("[Stoa Group] MemberRemoved: {removed_peer_id} from {group_id}");
+            println!("[{}] [Stoa Group] MemberRemoved: {removed_peer_id} from {group_id}", chrono::Local::now().format("%H:%M:%S"));
             if removed_peer_id == our_peer_id {
                 // We were removed
                 let _ = groups::remove_group(groups, &group_id);
@@ -757,7 +779,7 @@ pub async fn handle_incoming_request(
             group_id,
             peer_id,
         } => {
-            println!("[Stoa Group] MemberLeft: {peer_id} from {group_id}");
+            println!("[{}] [Stoa Group] MemberLeft: {peer_id} from {group_id}", chrono::Local::now().format("%H:%M:%S"));
             let _ = groups::remove_member(groups, &group_id, &peer_id);
             let _ = app_handle.emit("group-member-update", &serde_json::json!({
                 "group_id": group_id,
@@ -767,7 +789,7 @@ pub async fn handle_incoming_request(
             let _ = swarm.behaviour_mut().messaging.send_response(channel, response);
         }
         StoaRequest::GroupDisbanded { group_id } => {
-            println!("[Stoa Group] GroupDisbanded: {group_id}");
+            println!("[{}] [Stoa Group] GroupDisbanded: {group_id}", chrono::Local::now().format("%H:%M:%S"));
             let _ = groups::remove_group(groups, &group_id);
             let _ = app_handle.emit("group-removed", &serde_json::json!({
                 "group_id": group_id,
@@ -777,7 +799,7 @@ pub async fn handle_incoming_request(
             let _ = swarm.behaviour_mut().messaging.send_response(channel, response);
         }
         StoaRequest::GroupSpaceSync { group_id, state_vector_b64 } => {
-            println!("[Stoa Space] Sync request from {} for {}", peer.to_string(), group_id);
+            println!("[{}] [Stoa Space] Sync request from {} for {}", chrono::Local::now().format("%H:%M:%S"), peer.to_string(), group_id);
             if let Ok(sv_bytes) = base64::decode(&state_vector_b64) {
                 if let Ok(update_bytes) = crate::crdt::encode_diff(&group_id, &sv_bytes).await {
                     let response = StoaResponse::GroupSpaceSyncReply {
@@ -789,7 +811,7 @@ pub async fn handle_incoming_request(
             }
         }
         StoaRequest::GroupSpaceUpdate { group_id, update_b64 } => {
-            println!("[Stoa Space] Live update from {} for {}", peer.to_string(), group_id);
+            println!("[{}] [Stoa Space] Live update from {} for {}", chrono::Local::now().format("%H:%M:%S"), peer.to_string(), group_id);
             if let Ok(update_bytes) = base64::decode(&update_b64) {
                 if let Ok(_) = crate::crdt::apply_remote_update(&group_id, &update_bytes).await {
                     let _ = app_handle.emit("space-remote-update", &serde_json::json!({
@@ -821,7 +843,7 @@ pub async fn handle_incoming_response(
     match response {
         StoaResponse::PeerIdentity { name } => {
             let pid = peer.to_string();
-            println!("[Stoa Network] Peer {pid} identified as '{name}'");
+            println!("[{}] [Stoa Network] Peer {pid} identified as '{name}'", chrono::Local::now().format("%H:%M:%S"));
 
             let mut peers = peers_map.lock().await;
             let entry = peers
@@ -838,7 +860,7 @@ pub async fn handle_incoming_response(
         }
         StoaResponse::ContactAccepted { name } => {
             let pid = peer.to_string();
-            println!("[Stoa Network] Contact accepted by {name} ({pid})");
+            println!("[{}] [Stoa Network] Contact accepted by {name} ({pid})", chrono::Local::now().format("%H:%M:%S"));
 
             #[derive(Serialize, Clone)]
             struct ContactAcceptedEvent {
@@ -856,7 +878,7 @@ pub async fn handle_incoming_response(
         }
         StoaResponse::ContactRejected => {
             let pid = peer.to_string();
-            println!("[Stoa Network] Contact rejected by {pid}");
+            println!("[{}] [Stoa Network] Contact rejected by {pid}", chrono::Local::now().format("%H:%M:%S"));
             let _ = app_handle.emit("contact-rejected", &pid);
         }
         StoaResponse::MessageAck { id } => {
@@ -878,13 +900,13 @@ pub async fn handle_incoming_response(
             );
         }
         StoaResponse::FileAccepted { transfer_id } => {
-            println!("[Stoa File] FileAccepted for {transfer_id} — awaiting Fetch requests");
+            println!("[{}] [Stoa File] FileAccepted for {transfer_id} — awaiting Fetch requests", chrono::Local::now().format("%H:%M:%S"));
             if let Some(transfer) = active_transfers.get_mut(&transfer_id) {
                 transfer.status = TransferStatus::Transferring;
             }
         }
         StoaResponse::FileRejected { transfer_id } => {
-            println!("[Stoa File] FileRejected for {transfer_id}");
+            println!("[{}] [Stoa File] FileRejected for {transfer_id}", chrono::Local::now().format("%H:%M:%S"));
             if let Some(transfer) = active_transfers.get_mut(&transfer_id) {
                 transfer.status = TransferStatus::Cancelled;
             }
@@ -907,11 +929,11 @@ pub async fn handle_incoming_response(
                             String::from_utf8(decrypted_bytes).unwrap_or_else(|_| data_b64.clone())
                         }
                         Ok(None) => {
-                            eprintln!("[Stoa Crypto] No session to decrypt chunk from {sender_id}");
+                            eprintln!("[{}] [Stoa Crypto] No session to decrypt chunk from {sender_id}", chrono::Local::now().format("%H:%M:%S"));
                             data_b64.clone()
                         }
                         Err(e) => {
-                            eprintln!("[Stoa Crypto] Chunk decryption failed: {e}");
+                            eprintln!("[{}] [Stoa Crypto] Chunk decryption failed: {e}", chrono::Local::now().format("%H:%M:%S"));
                             transfer.status = TransferStatus::Failed;
                             return;
                         }
@@ -920,8 +942,9 @@ pub async fn handle_incoming_response(
                     data_b64
                 };
 
-                if let Err(e) = file_transfer::write_chunk(&transfer.file_path, chunk_index, &actual_data_b64) {
-                    eprintln!("[Stoa File] Failed to write chunk: {e}");
+                let cs = transfer.chunk_size;
+                if let Err(e) = file_transfer::write_chunk(&transfer.file_path, chunk_index, &actual_data_b64, cs) {
+                    eprintln!("[{}] [Stoa File] Failed to write chunk: {e}", chrono::Local::now().format("%H:%M:%S"));
                     transfer.status = TransferStatus::Failed;
                     return;
                 }
@@ -958,13 +981,13 @@ pub async fn handle_incoming_response(
                     let transfer_id_clone = transfer_id.clone();
                     let transfer_group_id = transfer.group_id.clone();
                     
-                    println!("[Stoa File] All chunks received for {}. Verifying...", file_name);
+                    println!("[{}] [Stoa File] All chunks received for {}. Verifying...", chrono::Local::now().format("%H:%M:%S"), file_name);
                     
                     let app_handle_clone = app_handle.clone();
                     tokio::spawn(async move {
                         match file_transfer::verify_file_off_thread(path.clone(), expected_checksum).await {
                             Ok(true) => {
-                                println!("[Stoa File] Transfer complete and verified: {} -> {:?}", file_name, path);
+                                println!("[{}] [Stoa File] Transfer complete and verified: {} -> {:?}", chrono::Local::now().format("%H:%M:%S"), file_name, path);
 
                                 // Persist file message — use group key if this is a group transfer
                                 let persist_key = if let Some(ref gid) = transfer_group_id {
@@ -1001,8 +1024,8 @@ pub async fn handle_incoming_response(
                                     }),
                                 );
                             }
-                            Ok(false) => eprintln!("[Stoa File] Checksum mismatch for {}", file_name),
-                            Err(e) => eprintln!("[Stoa File] Verification failed: {e}"),
+                            Ok(false) => eprintln!("[{}] [Stoa File] Checksum mismatch for {}", chrono::Local::now().format("%H:%M:%S"), file_name),
+                            Err(e) => eprintln!("[{}] [Stoa File] Verification failed: {e}", chrono::Local::now().format("%H:%M:%S")),
                         }
                     });
                     
@@ -1029,31 +1052,31 @@ pub async fn handle_incoming_response(
             x25519_public_key_hex,
         } => {
             let pid = peer.to_string();
-            println!("[Stoa Crypto] KeyExchangeAck from {pid}");
+            println!("[{}] [Stoa Crypto] KeyExchangeAck from {pid}", chrono::Local::now().format("%H:%M:%S"));
 
             match crypto::compute_shared_secret(our_keypair, &x25519_public_key_hex) {
                 Ok(shared_secret) => {
                     if let Err(e) = crypto::save_session(&pid, &shared_secret) {
-                        eprintln!("[Stoa Crypto] Failed to save session: {e}");
+                        eprintln!("[{}] [Stoa Crypto] Failed to save session: {e}", chrono::Local::now().format("%H:%M:%S"));
                     } else {
-                        println!("[Stoa Crypto] Session established with {pid} (via ack)");
+                        println!("[{}] [Stoa Crypto] Session established with {pid} (via ack)", chrono::Local::now().format("%H:%M:%S"));
                         let _ = app_handle.emit(
                             "e2e-session-established",
                             &serde_json::json!({ "peer_id": pid }),
                         );
                     }
                 }
-                Err(e) => eprintln!("[Stoa Crypto] ECDH failed: {e}"),
+                Err(e) => eprintln!("[{}] [Stoa Crypto] ECDH failed: {e}", chrono::Local::now().format("%H:%M:%S")),
             }
         }
         StoaResponse::GroupAck {
             group_id,
             message_id,
         } => {
-            println!("[Stoa Group] GroupAck for message {message_id} in {group_id}");
+            println!("[{}] [Stoa Group] GroupAck for message {message_id} in {group_id}", chrono::Local::now().format("%H:%M:%S"));
         }
         StoaResponse::GroupSpaceSyncReply { group_id, update_b64 } => {
-            println!("[Stoa Space] Sync reply from {} for {}", peer.to_string(), group_id);
+            println!("[{}] [Stoa Space] Sync reply from {} for {}", chrono::Local::now().format("%H:%M:%S"), peer.to_string(), group_id);
             if let Ok(update_bytes) = base64::decode(&update_b64) {
                 if let Ok(_) = crate::crdt::apply_remote_update(&group_id, &update_bytes).await {
                     let _ = app_handle.emit("space-remote-update", &serde_json::json!({
@@ -1070,19 +1093,116 @@ pub async fn handle_incoming_response(
 
 // ─── Utility ─────────────────────────────────────────────────────────────────
 
-/// Dial a peer using its known addresses from the nearby peers map.
+/// Dial a peer: always try LAN first (if discovered), always try relay for contacts.
+/// Both paths can run simultaneously — LAN wins on speed, relay is the safety net.
 pub async fn dial_peer(
     peers_map: &NearbyPeersMap,
+    contacts: &super::types::ContactsList,
     peer_id_str: &str,
     swarm: &mut Swarm<StoaBehaviour>,
 ) {
-    let peers = peers_map.lock().await;
-    if let Some(peer_info) = peers.get(peer_id_str) {
-        for addr_str in &peer_info.addresses {
-            if let Ok(addr) = addr_str.parse::<libp2p::Multiaddr>() {
-                let _ = swarm.dial(addr);
+    let Ok(target_peer_id) = peer_id_str.parse::<libp2p::PeerId>() else { return };
+    let already_connected = swarm.is_connected(&target_peer_id);
+
+    // 1. Try LAN addresses only if not already connected (prevents EADDRINUSE on Windows)
+    if !already_connected {
+        let peers = peers_map.lock().await;
+        if let Some(peer_info) = peers.get(peer_id_str) {
+            for addr_str in &peer_info.addresses {
+                if let Ok(addr) = addr_str.parse::<libp2p::Multiaddr>() {
+                    let _ = swarm.dial(addr);
+                }
+            }
+        }
+        drop(peers);
+    }
+
+    // 2. Try relay only if not already connected (prevents oneshot-canceled errors)
+    if !already_connected {
+        // Collect all potential relay addresses: our config + any known specific to contact
+        let mut potential_relays = crate::relay_config::RelayConfig::load().enabled_addresses();
+        
+        let cts = contacts.lock().await;
+        if let Some(contact) = cts.iter().find(|c| c.peer_id == peer_id_str) {
+            if let Some(addrs) = &contact.known_addrs {
+                for addr in addrs {
+                    if !potential_relays.contains(addr) && addr.contains("/p2p/") {
+                        potential_relays.push(addr.clone());
+                    }
+                }
+            }
+        }
+        drop(cts);
+        
+        for relay_addr in potential_relays {
+            let circuit_addr = format!("{}/p2p-circuit/p2p/{}", relay_addr, peer_id_str);
+            if let Ok(maddr) = circuit_addr.parse::<libp2p::Multiaddr>() {
+                let _ = swarm.dial(maddr);
             }
         }
     }
-    drop(peers);
+}
+
+/// Handle an outbound request failure.
+///
+/// When the request-response layer fails to deliver a request we sent
+/// (e.g. a FetchChunk from the receiver side), the pipeline stalls because
+/// the sender never receives the request and never sends that chunk back.
+///
+/// This re-issues the first missing chunk window to restart the pipeline.
+pub async fn handle_outbound_failure(
+    peer: &PeerId,
+    active_transfers: &mut HashMap<String, ActiveTransfer>,
+    swarm: &mut Swarm<StoaBehaviour>,
+) {
+    let pid = peer.to_string();
+
+    // Collect stalled download transfer IDs (avoid borrow conflicts on active_transfers)
+    let stalled: Vec<String> = active_transfers
+        .iter()
+        .filter(|(_, t)| {
+            t.peer_id == pid
+                && t.direction == file_transfer::TransferDirection::Download
+                && (t.status == file_transfer::TransferStatus::Transferring
+                    || t.status == file_transfer::TransferStatus::Offering)
+        })
+        .map(|(id, _)| id.clone())
+        .collect();
+
+    for transfer_id in stalled {
+        if let Some(transfer) = active_transfers.get_mut(&transfer_id) {
+            // Find first missing chunk and re-open the pipeline window
+            if let Some(first_missing) = (0..transfer.chunk_count)
+                .find(|i| !transfer.received_chunks_set.contains(i))
+            {
+                if let Ok(target) = PeerId::from_str(&transfer.peer_id) {
+                    let window_size = if transfer.chunk_size >= file_transfer::LAN_CHUNK_SIZE {
+                        file_transfer::LAN_WINDOW_SIZE
+                    } else {
+                        file_transfer::RELAY_WINDOW_SIZE
+                    };
+
+                    let mut sent = 0u32;
+                    let mut last_sent = first_missing;
+                    for i in first_missing..transfer.chunk_count {
+                        if sent >= window_size { break; }
+                        if !transfer.received_chunks_set.contains(&i) {
+                            swarm.behaviour_mut().messaging.send_request(
+                                &target,
+                                crate::protocol::StoaRequest::FetchChunk {
+                                    transfer_id: transfer_id.clone(),
+                                    chunk_index: i,
+                                },
+                            );
+                            last_sent = i;
+                            sent += 1;
+                        }
+                    }
+                    transfer.last_requested_chunk = Some(last_sent);
+                    eprintln!("[{}] [Stoa File] ↺ Re-requesting {} chunks for stalled transfer {} (from chunk {})",
+                        chrono::Local::now().format("%H:%M:%S"), sent, &transfer_id[..8], first_missing);
+                }
+            }
+        }
+    }
 }

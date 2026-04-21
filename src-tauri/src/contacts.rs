@@ -8,6 +8,8 @@ pub struct Contact {
     pub petname: String,
     pub added_at: i64,
     pub trust_level: TrustLevel,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub known_addrs: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -17,9 +19,7 @@ pub enum TrustLevel {
 }
 
 fn contacts_path() -> Result<PathBuf, String> {
-    let dir = dirs::home_dir()
-        .ok_or("No home directory")?
-        .join(".stoa");
+    let dir = crate::get_stoa_dir();
     std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create .stoa dir: {e}"))?;
     Ok(dir.join("contacts.json"))
 }
@@ -45,17 +45,25 @@ pub fn save_contacts(contacts: &[Contact]) -> Result<(), String> {
         .map_err(|e| format!("Failed to write contacts: {e}"))
 }
 
-/// Add a new contact. Returns Err if already exists.
-pub fn add_contact(contacts: &mut Vec<Contact>, peer_id: String, petname: String) -> Result<(), String> {
-    if contacts.iter().any(|c| c.peer_id == peer_id) {
-        return Err("Contact already exists".into());
+/// Add a new contact or update existing one with new connection code. Returns Err on disk failure.
+pub fn add_contact(contacts: &mut Vec<Contact>, peer_id: String, petname: String, known_addrs: Option<Vec<String>>) -> Result<(), String> {
+    if let Some(existing) = contacts.iter_mut().find(|c| c.peer_id == peer_id) {
+        // Update existing contact metadata
+        existing.petname = petname;
+        if known_addrs.is_some() {
+            existing.known_addrs = known_addrs;
+        }
+        return save_contacts(contacts);
     }
+    
     contacts.push(Contact {
         peer_id,
         petname,
         added_at: chrono::Utc::now().timestamp(),
         trust_level: TrustLevel::Direct,
+        known_addrs,
     });
+
     save_contacts(contacts)
 }
 

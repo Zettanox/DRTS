@@ -83,8 +83,16 @@ export const [identity, setIdentity] = createSignal<{
   name: string;
 } | null>(null);
 
-export const [theme, setTheme] = createSignal<"dark" | "light">("dark");
-export const [globalNetwork, setGlobalNetwork] = createSignal<"Auto" | "LAN-Only" | "Online-Only">("Auto");
+// Initialise from localStorage; fall back to "dark" if nothing stored yet.
+// Also apply to the DOM immediately so there is no flash on load.
+const _savedTheme = (localStorage.getItem("stoa-theme") as "dark" | "light" | null) ?? "dark";
+if (_savedTheme === "dark") {
+  document.documentElement.classList.add("dark");
+} else {
+  document.documentElement.classList.remove("dark");
+}
+export const [theme, setTheme] = createSignal<"dark" | "light">(_savedTheme);
+// Network routing is fully automatic: LAN peers → direct TCP, internet peers → relay circuit
 export const [lanVisible, setLanVisible] = createSignal(true);
 
 // Desktop Split Pane Logic
@@ -115,8 +123,10 @@ export const [groupMessages, setGroupMessages] = createStore<Record<string, Mess
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 export function toggleTheme() {
-  setTheme((t) => (t === "dark" ? "light" : "dark"));
-  if (theme() === "dark") {
+  const next = theme() === "dark" ? "light" : "dark";
+  setTheme(next);
+  localStorage.setItem("stoa-theme", next);
+  if (next === "dark") {
     document.documentElement.classList.add("dark");
   } else {
     document.documentElement.classList.remove("dark");

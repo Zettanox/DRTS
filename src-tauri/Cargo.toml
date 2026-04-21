@@ -4,10 +4,15 @@ version = "0.1.0"
 description = "Stoa — Local-first decentralized collaboration"
 authors = ["you"]
 edition = "2021"
+default-run = "stoa"
 
 [lib]
 name = "tauri_app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "stoa-relay"
+path = "src/bin/relay.rs"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -17,7 +22,7 @@ tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-libp2p = { version = "0.56.0", features = ["mdns", "noise", "yamux", "tcp", "tokio", "macros", "ed25519", "request-response", "json"] }
+libp2p = { version = "0.56.0", features = ["mdns", "noise", "yamux", "tcp", "tokio", "macros", "ed25519", "request-response", "json", "relay", "dcutr", "identify", "dns", "ping"] }
 tokio = { version = "1", features = ["full"] }
 dirs = "6.0.0"
 futures = "0.3"
@@ -28,8 +33,13 @@ uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 sha2 = "0.10"
 tauri-plugin-dialog = "2.7.0"
+hickory-resolver = "0.25"
 x25519-dalek = { version = "2", features = ["static_secrets"] }
 aes-gcm = "0.10"
 curve25519-dalek = { version = "4", features = ["digest"] }
 yrs = "0.25.0"
 lazy_static = "1.5.0"
+qrcode = "0.14"
+image = { version = "0.25", default-features = false, features = ["png"] }
+bs58 = "0.5"
+clap = { version = "4", features = ["derive"] }
