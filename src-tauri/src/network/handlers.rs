@@ -49,7 +49,7 @@ pub async fn handle_mdns_discovered(
     let is_contact = cts.iter().any(|c| c.peer_id == pid);
     drop(cts);
     // Auto-dial LAN address for new peers/contacts
-    if (is_new || is_contact) && !swarm.is_connected(&discovered_peer) {
+    if is_new || is_contact {
         let _ = swarm.dial(addr);
     }
 }
@@ -211,6 +211,17 @@ pub async fn handle_incoming_request(
             sender_name,
         } => {
             let sender_id = peer.to_string();
+
+            // App-Layer Deduplication (The Highlander Rule / Step 4)
+            // If we've seen this UUID before, silently drop it.
+            if let Ok(existing_messages) = messages::load_messages(&sender_id) {
+                if existing_messages.iter().any(|m| m.id == id) {
+                    println!("[{}] [Stoa Network] Silently dropping duplicated message UUID: {id}", chrono::Local::now().format("%H:%M:%S"));
+                    let _ = swarm.behaviour_mut().messaging.send_response(channel, StoaResponse::MessageAck { id: id.clone() });
+                    return;
+                }
+            }
+
             println!(
                 "[{}] [Stoa Network] Message from {sender_name}: {content}",
                 chrono::Local::now().format("%H:%M:%S")
@@ -1332,7 +1343,7 @@ pub async fn dial_peer(
         if let Some(contact) = cts.iter().find(|c| c.peer_id == peer_id_str) {
             if let Some(addrs) = &contact.known_addrs {
                 for addr in addrs {
-                    if !potential_relays.contains(addr) && addr.contains("/p2p/") {
+                    if !potential_relays.contains(addr) && addr.contains("/p2p/") && !addr.contains("tcp/4001") {
                         potential_relays.push(addr.clone());
                     }
                 }

@@ -91,18 +91,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         max_reservations: args.max_reservations as usize,
         max_circuits: (args.max_reservations / 2) as usize,
         max_circuits_per_peer: 4,
-
-        // 2 minutes is plenty for DCUtR hole-punching. If peers fail to upgrade
-        // to a direct connection within that window, they reconnect via the relay
-        // (which resets the timer). This prevents 1-hour-long freeloading sessions.
-        max_circuit_duration: std::time::Duration::from_secs(120),
-
-        // 2 MiB is enough to exchange handshake + a few chat messages while hole-punching.
-        // File transfers that would saturate a 1 GB VPS are now impossible via relay alone;
-        // peers MUST establish a direct connection for large transfers.
-        max_circuit_bytes: 2 * 1024 * 1024,
-
-        // Reservations last 1 hour — fine, they are just a routing table entry (zero bandwidth).
+        max_circuit_duration: std::time::Duration::from_secs(20 * 60),
+        max_circuit_bytes: 50 * 1024 * 1024,
         reservation_duration: std::time::Duration::from_secs(3600),
         ..Default::default()
     };
