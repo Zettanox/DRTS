@@ -114,6 +114,9 @@ pub struct PendingMessage {
     pub peer_id_str: String,
     pub message_id: Option<String>,
     pub content: Option<String>,
+    /// How many times this message has been retried after OutboundFailure.
+    /// Capped at MAX_INFLIGHT_RETRIES to prevent infinite retry storms.
+    pub retry_count: u32,
 }
 
 /// Shared state tracking discovered peers.

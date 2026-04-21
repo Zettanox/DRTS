@@ -418,18 +418,32 @@ pub fn spawn_network(
                         )) => {
                             eprintln!("[{}] [Stoa Network] ⚠ Outbound request to {peer} failed ({error:?}) — checking for stalled transfers", chrono::Local::now().format("%H:%M:%S"));
 
-                            // If this was a chat message that failed in-flight, it's highly likely
-                            // the connection it was racing on (e.g., dual relay circuits) was closed.
-                            // We immediately pop it from inflight and requeue it so it gets sent via the surviving connection!
-                            if let Some(pending) = inflight_messages.remove(&request_id) {
-                                if swarm.is_connected(&peer) {
+                            // Cap retries to prevent infinite retry storms that starve the event loop.
+                            // After MAX retries, park the message in the pending queue so it waits
+                            // for a fresh ConnectionEstablished instead of burning CPU.
+                            const MAX_INFLIGHT_RETRIES: u32 = 3;
+
+                            if let Some(mut pending) = inflight_messages.remove(&request_id) {
+                                pending.retry_count += 1;
+
+                                if pending.retry_count > MAX_INFLIGHT_RETRIES {
+                                    // Exhausted retries — stop hammering and wait for reconnection
+                                    println!("[{}] [Stoa Network] ⛔ Max retries ({}) reached for message to {} — parking until reconnect",
+                                        chrono::Local::now().format("%H:%M:%S"), MAX_INFLIGHT_RETRIES, peer);
+                                    pending.retry_count = 0; // reset for when connection re-establishes
+                                    pending_messages.push(pending);
+                                    // Try to re-dial so we pick up a fresh route (LAN or relay)
+                                    let pid_str = peer.to_string();
+                                    handlers::dial_peer(&peers_clone, &contacts, &pid_str, &mut swarm).await;
+                                } else if swarm.is_connected(&peer) {
                                     let req_clone = pending.clone();
                                     let encrypted_req = maybe_encrypt_request(&req_clone.peer_id_str, req_clone.request);
                                     let new_req_id = swarm.behaviour_mut().messaging.send_request(&peer, encrypted_req);
                                     inflight_messages.insert(new_req_id, pending);
-                                    println!("[{}] [Stoa Network] 🔄 Automatically retrying dropped chat message to {}", chrono::Local::now().format("%H:%M:%S"), peer);
+                                    println!("[{}] [Stoa Network] 🔄 Retry {}/{} for message to {}",
+                                        chrono::Local::now().format("%H:%M:%S"), req_clone.retry_count, MAX_INFLIGHT_RETRIES, peer);
                                 } else {
-                                    println!("[{}] [Stoa Network] 🔄 Peer {} disconnected, returning chat message to pending queue", chrono::Local::now().format("%H:%M:%S"), peer);
+                                    println!("[{}] [Stoa Network] 🔄 Peer {} disconnected, returning message to pending queue", chrono::Local::now().format("%H:%M:%S"), peer);
                                     handlers::dial_peer(&peers_clone, &contacts, &pending.peer_id_str, &mut swarm).await;
                                     pending_messages.push(pending);
                                 }
@@ -604,6 +618,7 @@ pub fn spawn_network(
                                         peer_id_str: peer_id.clone(),
                                         message_id: None,
                                         content: None,
+                                        retry_count: 0,
                                     });
                                     println!("[{}] [Stoa Network] Queued contact request for {peer_id} (connecting...)", chrono::Local::now().format("%H:%M:%S"));
                                 }
@@ -646,6 +661,7 @@ pub fn spawn_network(
                                         peer_id_str: peer_id.clone(),
                                         message_id: Some(message_id),
                                         content: Some(content),
+                                        retry_count: 0,
                                     });
                                 } else {
                                     handlers::dial_peer(&peers_clone, &contacts, &peer_id, &mut swarm).await;
@@ -655,6 +671,7 @@ pub fn spawn_network(
                                         peer_id_str: peer_id.clone(),
                                         message_id: Some(message_id),
                                         content: Some(content),
+                                        retry_count: 0,
                                     });
                                     println!("[{}] [Stoa Network] Queued message for {peer_id} (connecting...)", chrono::Local::now().format("%H:%M:%S"));
                                 }
@@ -756,6 +773,7 @@ pub fn spawn_network(
                                         peer_id_str: peer_id.clone(),
                                         message_id: None,
                                         content: None,
+                                        retry_count: 0,
                                     });
                                 }
                             }
@@ -863,6 +881,7 @@ pub fn spawn_network(
                                                     peer_id_str: mid.clone(),
                                                     message_id: None,
                                                     content: None,
+                                        retry_count: 0,
                                                 });
                                             }
                                         }
@@ -925,6 +944,7 @@ pub fn spawn_network(
                                                 peer_id_str: mid.clone(),
                                                 message_id: None,
                                                 content: None,
+                                        retry_count: 0,
                                             });
                                         }
                                     }
@@ -1022,6 +1042,7 @@ pub fn spawn_network(
                                                         peer_id_str: mid.clone(),
                                                         message_id: None,
                                                         content: None,
+                                        retry_count: 0,
                                                     });
                                                 }
                                             }
@@ -1053,6 +1074,7 @@ pub fn spawn_network(
                                                 peer_id_str: mid.clone(),
                                                 message_id: None,
                                                 content: None,
+                                        retry_count: 0,
                                             });
                                         }
                                     }
@@ -1086,6 +1108,7 @@ pub fn spawn_network(
                                                 peer_id_str: mid.clone(),
                                                 message_id: None,
                                                 content: None,
+                                        retry_count: 0,
                                             });
                                         }
                                     }
@@ -1118,6 +1141,7 @@ pub fn spawn_network(
                                                 peer_id_str: mid.clone(),
                                                 message_id: None,
                                                 content: None,
+                                        retry_count: 0,
                                             });
                                         }
                                     }
@@ -1149,6 +1173,7 @@ pub fn spawn_network(
                                                     peer_id_str: mid.clone(),
                                                     message_id: None,
                                                     content: None,
+                                        retry_count: 0,
                                                 });
                                             }
                                         }
@@ -1179,6 +1204,7 @@ pub fn spawn_network(
                                                     peer_id_str: mid.clone(),
                                                     message_id: None,
                                                     content: None,
+                                        retry_count: 0,
                                                 });
                                             }
                                         }
@@ -1215,6 +1241,7 @@ pub fn spawn_network(
                                                     peer_id_str: mid.clone(),
                                                     message_id: None,
                                                     content: None,
+                                        retry_count: 0,
                                                 });
                                             }
                                         }
@@ -1250,6 +1277,7 @@ pub fn spawn_network(
                                                     peer_id_str: mid.clone(),
                                                     message_id: None,
                                                     content: None,
+                                        retry_count: 0,
                                                 });
                                             }
                                         }
