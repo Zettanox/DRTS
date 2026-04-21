@@ -10,7 +10,7 @@ use std::path::PathBuf;
 /// Replace this with your actual deployed relay multiaddr + PeerId.
 /// Format: /ip4/<HOST>/tcp/<PORT>/p2p/<PEERID>
 pub const DEFAULT_RELAY: &str =
-    "/ip4/129.159.17.16/tcp/4001/p2p/12D3KooWDQHjWkGS9pxUQQeii7prryA5T1LzZP6cMMU128cas658";
+    "/ip4/129.159.17.16/tcp/38291/p2p/12D3KooWDQHjWkGS9pxUQQeii7prryA5T1LzZP6cMMU128cas658";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RelayEntry {
@@ -54,7 +54,19 @@ impl RelayConfig {
         let path = config_path();
         if path.exists() {
             if let Ok(data) = std::fs::read_to_string(&path) {
-                if let Ok(cfg) = serde_json::from_str::<RelayConfig>(&data) {
+                if let Ok(mut cfg) = serde_json::from_str::<RelayConfig>(&data) {
+                    // Auto-migrate the old default relay port if the user already has a saved config
+                    let old_relay = "/ip4/129.159.17.16/tcp/4001/p2p/12D3KooWDQHjWkGS9pxUQQeii7prryA5T1LzZP6cMMU128cas658";
+                    let mut migrated = false;
+                    for r in &mut cfg.relays {
+                        if r.address == old_relay {
+                            r.address = DEFAULT_RELAY.to_string();
+                            migrated = true;
+                        }
+                    }
+                    if migrated {
+                        let _ = cfg.save();
+                    }
                     return cfg;
                 }
             }
