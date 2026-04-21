@@ -46,8 +46,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: app-v__VERSION__ 
-          releaseName: 'Stoa v__VERSION__'
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Stoa ${{ github.ref_name }}'
           releaseBody: 'See the assets below to download and install this version of Stoa.'
           releaseDraft: true
           prerelease: false
