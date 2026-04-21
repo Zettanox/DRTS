@@ -43,3 +43,4 @@ qrcode = "0.14"
 image = { version = "0.25", default-features = false, features = ["png"] }
 bs58 = "0.5"
 clap = { version = "4", features = ["derive"] }
+tauri-plugin-fs = "2"

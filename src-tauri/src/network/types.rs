@@ -54,13 +54,9 @@ pub enum NetworkCommand {
         sender_name: String,
     },
     /// Pause an ongoing file transfer
-    PauseTransfer {
-        transfer_id: String,
-    },
+    PauseTransfer { transfer_id: String },
     /// Resume a paused file transfer
-    ResumeTransfer {
-        transfer_id: String,
-    },
+    ResumeTransfer { transfer_id: String },
     /// Toggle LAN visibility (mDNS on/off)
     SetVisibility(bool),
     // ─── Group Commands ──────────────────────────────────────────────────────
@@ -83,22 +79,13 @@ pub enum NetworkCommand {
         sender_name: String,
     },
     /// Leave a group
-    LeaveGroup {
-        group_id: String,
-    },
+    LeaveGroup { group_id: String },
     /// Admin: remove a member from a group
-    RemoveGroupMember {
-        group_id: String,
-        peer_id: String,
-    },
+    RemoveGroupMember { group_id: String, peer_id: String },
     /// Admin: disband a group
-    DisbandGroup {
-        group_id: String,
-    },
+    DisbandGroup { group_id: String },
     /// Open group space (initiate CRDT sync)
-    OpenGroupSpace {
-        group_id: String,
-    },
+    OpenGroupSpace { group_id: String },
     /// Edit a specific file in the group space (apply local CRDT edit and broadcast)
     EditGroupSpace {
         group_id: String,
@@ -114,10 +101,7 @@ pub enum NetworkCommand {
         content: Option<String>,
     },
     /// Delete a file from the group space
-    DeleteSpaceFile {
-        group_id: String,
-        file_id: String,
-    },
+    DeleteSpaceFile { group_id: String, file_id: String },
     /// Shut down the network task
     Shutdown,
 }

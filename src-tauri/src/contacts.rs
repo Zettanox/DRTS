@@ -14,8 +14,8 @@ pub struct Contact {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum TrustLevel {
-    Direct,   // Added directly by the user
-    Vouched,  // Vouched for by a trusted contact (future: web-of-trust)
+    Direct,  // Added directly by the user
+    Vouched, // Vouched for by a trusted contact (future: web-of-trust)
 }
 
 fn contacts_path() -> Result<PathBuf, String> {
@@ -30,10 +30,9 @@ pub fn load_contacts() -> Result<Vec<Contact>, String> {
     if !path.exists() {
         return Ok(vec![]);
     }
-    let data = std::fs::read_to_string(&path)
-        .map_err(|e| format!("Failed to read contacts: {e}"))?;
-    serde_json::from_str(&data)
-        .map_err(|e| format!("Failed to parse contacts: {e}"))
+    let data =
+        std::fs::read_to_string(&path).map_err(|e| format!("Failed to read contacts: {e}"))?;
+    serde_json::from_str(&data).map_err(|e| format!("Failed to parse contacts: {e}"))
 }
 
 /// Save the full contacts list to disk.
@@ -41,12 +40,16 @@ pub fn save_contacts(contacts: &[Contact]) -> Result<(), String> {
     let path = contacts_path()?;
     let data = serde_json::to_string_pretty(contacts)
         .map_err(|e| format!("Failed to serialize contacts: {e}"))?;
-    std::fs::write(&path, data)
-        .map_err(|e| format!("Failed to write contacts: {e}"))
+    std::fs::write(&path, data).map_err(|e| format!("Failed to write contacts: {e}"))
 }
 
 /// Add a new contact or update existing one with new connection code. Returns Err on disk failure.
-pub fn add_contact(contacts: &mut Vec<Contact>, peer_id: String, petname: String, known_addrs: Option<Vec<String>>) -> Result<(), String> {
+pub fn add_contact(
+    contacts: &mut Vec<Contact>,
+    peer_id: String,
+    petname: String,
+    known_addrs: Option<Vec<String>>,
+) -> Result<(), String> {
     if let Some(existing) = contacts.iter_mut().find(|c| c.peer_id == peer_id) {
         // Update existing contact metadata
         existing.petname = petname;
@@ -55,7 +58,7 @@ pub fn add_contact(contacts: &mut Vec<Contact>, peer_id: String, petname: String
         }
         return save_contacts(contacts);
     }
-    
+
     contacts.push(Contact {
         peer_id,
         petname,
@@ -74,7 +77,11 @@ pub fn remove_contact(contacts: &mut Vec<Contact>, peer_id: &str) -> Result<(), 
 }
 
 /// Rename a contact's petname.
-pub fn rename_contact(contacts: &mut Vec<Contact>, peer_id: &str, new_name: String) -> Result<(), String> {
+pub fn rename_contact(
+    contacts: &mut Vec<Contact>,
+    peer_id: &str,
+    new_name: String,
+) -> Result<(), String> {
     if let Some(contact) = contacts.iter_mut().find(|c| c.peer_id == peer_id) {
         contact.petname = new_name;
         save_contacts(contacts)

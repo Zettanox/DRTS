@@ -15,8 +15,7 @@ use clap::Parser;
 use futures::StreamExt;
 use libp2p::{
     core::upgrade,
-    identify, noise,
-    relay, ping,
+    identify, noise, ping, relay,
     swarm::{NetworkBehaviour, SwarmEvent},
     tcp, yamux, Multiaddr, PeerId, Transport,
 };
@@ -65,9 +64,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let relay_config = relay::Config {
         max_reservations: 1024,
         max_circuits: 256,
-        max_circuit_duration: std::time::Duration::from_secs(3600),  // 1 hour per circuit (default: 2 min!)
+        max_circuit_duration: std::time::Duration::from_secs(3600), // 1 hour per circuit (default: 2 min!)
         max_circuit_bytes: 512 * 1024 * 1024,                       // 512 MiB per circuit
-        reservation_duration: std::time::Duration::from_secs(3600),  // 1 hour reservations
+        reservation_duration: std::time::Duration::from_secs(3600), // 1 hour reservations
         ..Default::default()
     };
 
@@ -83,7 +82,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
             identify::Config::new("/stoa/relay/1.0.0".to_string(), keypair.public())
                 .with_push_listen_addr_updates(true),
         ),
-        ping: ping::Behaviour::new(ping::Config::new().with_interval(std::time::Duration::from_secs(15))),
+        ping: ping::Behaviour::new(
+            ping::Config::new().with_interval(std::time::Duration::from_secs(15)),
+        ),
     };
 
     let mut swarm = libp2p::Swarm::new(
@@ -97,7 +98,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
     swarm.listen_on(listen_addr)?;
 
     // Tell the swarm our public address so reservation responses include it
-    let external_addr: Multiaddr = format!("/ip4/{}/tcp/{}/p2p/{}", args.external_ip, args.port, peer_id).parse()?;
+    let external_addr: Multiaddr = format!(
+        "/ip4/{}/tcp/{}/p2p/{}",
+        args.external_ip, args.port, peer_id
+    )
+    .parse()?;
     swarm.add_external_address(external_addr.clone());
     println!("[Relay] External address registered: {external_addr}");
 

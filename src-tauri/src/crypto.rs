@@ -19,7 +19,9 @@ use x25519_dalek::{PublicKey, StaticSecret};
 /// We hash the Ed25519 secret key bytes through SHA-512 and clamp the first 32
 /// bytes, which is exactly what Ed25519 → X25519 conversion does per RFC 7748.
 /// This means no additional key material needs to be stored.
-pub fn derive_x25519_secret(ed25519_keypair: &libp2p::identity::Keypair) -> Result<StaticSecret, String> {
+pub fn derive_x25519_secret(
+    ed25519_keypair: &libp2p::identity::Keypair,
+) -> Result<StaticSecret, String> {
     // Extract the raw Ed25519 secret key bytes (first 32 bytes of the 64-byte keypair encoding)
     let kp_bytes = ed25519_keypair
         .to_protobuf_encoding()
@@ -41,13 +43,17 @@ pub fn derive_x25519_secret(ed25519_keypair: &libp2p::identity::Keypair) -> Resu
 }
 
 /// Get our X25519 public key from our Ed25519 keypair.
-pub fn our_x25519_public_key(ed25519_keypair: &libp2p::identity::Keypair) -> Result<PublicKey, String> {
+pub fn our_x25519_public_key(
+    ed25519_keypair: &libp2p::identity::Keypair,
+) -> Result<PublicKey, String> {
     let secret = derive_x25519_secret(ed25519_keypair)?;
     Ok(PublicKey::from(&secret))
 }
 
 /// Get our X25519 public key as a hex string.
-pub fn our_x25519_public_key_hex(ed25519_keypair: &libp2p::identity::Keypair) -> Result<String, String> {
+pub fn our_x25519_public_key_hex(
+    ed25519_keypair: &libp2p::identity::Keypair,
+) -> Result<String, String> {
     let pk = our_x25519_public_key(ed25519_keypair)?;
     Ok(hex::encode(pk.as_bytes()))
 }
@@ -141,7 +147,10 @@ pub fn save_session(peer_id: &str, shared_secret: &[u8; 32]) -> Result<(), Strin
     let path = session_path(peer_id)?;
     std::fs::write(&path, hex::encode(shared_secret))
         .map_err(|e| format!("Failed to save session: {e}"))?;
-    println!("[{}] [Stoa Crypto] Session saved for {peer_id}", chrono::Local::now().format("%H:%M:%S"));
+    println!(
+        "[{}] [Stoa Crypto] Session saved for {peer_id}",
+        chrono::Local::now().format("%H:%M:%S")
+    );
     Ok(())
 }
 
@@ -151,10 +160,10 @@ pub fn load_session(peer_id: &str) -> Result<Option<[u8; 32]>, String> {
     if !path.exists() {
         return Ok(None);
     }
-    let hex_str = std::fs::read_to_string(&path)
-        .map_err(|e| format!("Failed to read session: {e}"))?;
-    let bytes = hex::decode(hex_str.trim())
-        .map_err(|e| format!("Failed to decode session hex: {e}"))?;
+    let hex_str =
+        std::fs::read_to_string(&path).map_err(|e| format!("Failed to read session: {e}"))?;
+    let bytes =
+        hex::decode(hex_str.trim()).map_err(|e| format!("Failed to decode session hex: {e}"))?;
     if bytes.len() != 32 {
         return Err(format!(
             "Invalid session key length: {} (expected 32)",
@@ -168,16 +177,17 @@ pub fn load_session(peer_id: &str) -> Result<Option<[u8; 32]>, String> {
 
 /// Check if we have a stored session for a peer.
 pub fn has_session(peer_id: &str) -> bool {
-    session_path(peer_id)
-        .map(|p| p.exists())
-        .unwrap_or(false)
+    session_path(peer_id).map(|p| p.exists()).unwrap_or(false)
 }
 
 // ─── High-Level Helpers ──────────────────────────────────────────────────────
 
 /// Encrypt a JSON-serializable payload for a peer (if session exists).
 /// Returns `Some((ciphertext_b64, nonce_b64))` or `None` if no session.
-pub fn encrypt_for_peer(peer_id: &str, plaintext: &[u8]) -> Result<Option<(String, String)>, String> {
+pub fn encrypt_for_peer(
+    peer_id: &str,
+    plaintext: &[u8],
+) -> Result<Option<(String, String)>, String> {
     match load_session(peer_id)? {
         Some(secret) => {
             let (ct, nonce) = encrypt(&secret, plaintext)?;

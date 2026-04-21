@@ -28,7 +28,10 @@ pub struct ConnectionCode {
 
 impl ConnectionCode {
     pub fn new(peer_id: PeerId, relay_addrs: Vec<String>) -> Self {
-        Self { peer_id, relay_addrs }
+        Self {
+            peer_id,
+            relay_addrs,
+        }
     }
 
     /// Encode to a shareable `stoa1<bs58>` string.
@@ -56,10 +59,13 @@ impl ConnectionCode {
 
     /// Decode from a `stoa1<bs58>` string.
     pub fn decode(code: &str) -> Result<Self, String> {
-        let stripped = code
-            .trim()
-            .strip_prefix(PREFIX)
-            .ok_or_else(|| format!("Not a Stoa connection code (must start with '{}', got: '{}')", PREFIX, code.trim()))?;
+        let stripped = code.trim().strip_prefix(PREFIX).ok_or_else(|| {
+            format!(
+                "Not a Stoa connection code (must start with '{}', got: '{}')",
+                PREFIX,
+                code.trim()
+            )
+        })?;
 
         let payload = bs58::decode(stripped)
             .into_vec()
@@ -75,7 +81,9 @@ impl ConnectionCode {
         pos += 1;
 
         // PeerID bytes
-        let peer_len = *payload.get(pos).ok_or("Truncated: missing peer_id length")? as usize;
+        let peer_len = *payload
+            .get(pos)
+            .ok_or("Truncated: missing peer_id length")? as usize;
         pos += 1;
         if pos + peer_len > payload.len() {
             return Err("Truncated: peer_id bytes".into());
@@ -100,25 +108,25 @@ impl ConnectionCode {
             pos += addr_len;
         }
 
-        Ok(ConnectionCode { peer_id, relay_addrs })
+        Ok(ConnectionCode {
+            peer_id,
+            relay_addrs,
+        })
     }
 
     /// Generate a QR code as a PNG image (base64-encoded for Tauri IPC).
     pub fn to_qr_base64(&self) -> Result<String, String> {
         use base64::Engine;
-        use qrcode::QrCode;
         use qrcode::render::svg;
+        use qrcode::QrCode;
 
         let code_str = self.encode();
 
-        let qr = QrCode::new(code_str.as_bytes())
-            .map_err(|e| format!("QR generation failed: {e}"))?;
+        let qr =
+            QrCode::new(code_str.as_bytes()).map_err(|e| format!("QR generation failed: {e}"))?;
 
         // Render as SVG (no pixel manipulation needed, works without image crate)
-        let svg_str = qr
-            .render::<svg::Color>()
-            .min_dimensions(200, 200)
-            .build();
+        let svg_str = qr.render::<svg::Color>().min_dimensions(200, 200).build();
 
         // Base64-encode the SVG for transfer over IPC
         Ok(base64::engine::general_purpose::STANDARD.encode(svg_str.as_bytes()))

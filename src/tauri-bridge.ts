@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
+import { copyFile } from "@tauri-apps/plugin-fs";
+import { BaseDirectory, appCacheDir } from "@tauri-apps/api/path";
 import {
   setIdentity,
   setNearbyPeers,
@@ -282,14 +284,35 @@ export async function setUsername(newName: string): Promise<string> {
   return name;
 }
 
+/** Helper to convert Android content:// URIs to physical cache files */
+async function resolveFileUri(fileUri: string | null): Promise<string | null> {
+  if (!fileUri) return null;
+  let filePath = fileUri;
+  if (filePath.startsWith("content://")) {
+    const safeName = "transfer_" + Date.now();
+    await copyFile(filePath, safeName, { toPathBaseDir: BaseDirectory.AppCache });
+    
+    // Convert base directory to absolute path for Rust
+    const cacheDir = await appCacheDir();
+    // Use manual join since path.join isn't fully reliable on all OS edge-cases returning from cacheDir
+    if (cacheDir.endsWith("/") || cacheDir.endsWith("\\")) {
+      filePath = cacheDir + safeName;
+    } else {
+      filePath = cacheDir + "/" + safeName;
+    }
+  }
+  return filePath;
+}
+
 /** Open file picker and send the selected file to a peer. */
 export async function sendFile(peerId: string): Promise<void> {
   const file = await open({
     multiple: false,
     title: "Select a file to send",
   });
-  if (file) {
-    await invoke("send_file", { peerId, filePath: file });
+  const resolvedPath = await resolveFileUri(file as string | null);
+  if (resolvedPath) {
+    await invoke("send_file", { peerId, filePath: resolvedPath });
   }
 }
 
@@ -371,8 +394,9 @@ export async function sendGroupFile(groupId: string): Promise<void> {
     multiple: false,
     title: "Select a file to send to group",
   });
-  if (file) {
-    await invoke("send_group_file", { groupId, filePath: file });
+  const resolvedPath = await resolveFileUri(file as string | null);
+  if (resolvedPath) {
+    await invoke("send_group_file", { groupId, filePath: resolvedPath });
   }
 }
 
@@ -426,8 +450,9 @@ export async function importSpaceFile(groupId: string): Promise<void> {
     multiple: false,
     title: "Select a text file to import into Shared Space",
   });
-  if (!file) throw new Error("No file selected");
-  await invoke("import_space_file", { groupId, filePath: file });
+  const resolvedPath = await resolveFileUri(file as string | null);
+  if (!resolvedPath) throw new Error("No file selected");
+  await invoke("import_space_file", { groupId, filePath: resolvedPath });
 }
 
 export async function deleteSpaceFile(groupId: string, fileId: string): Promise<void> {

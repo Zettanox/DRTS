@@ -73,8 +73,7 @@ impl RelayConfig {
         }
         let json = serde_json::to_string_pretty(self)
             .map_err(|e| format!("Failed to serialize relay config: {e}"))?;
-        std::fs::write(&path, json)
-            .map_err(|e| format!("Failed to write relay config: {e}"))
+        std::fs::write(&path, json).map_err(|e| format!("Failed to write relay config: {e}"))
     }
 
     /// Return multiaddrs of all enabled relay entries.
