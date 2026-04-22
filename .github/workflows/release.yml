@@ -52,6 +52,22 @@ jobs:
           releaseDraft: true
           prerelease: false
 
+      - name: Build and Upload Relay Binary (Ubuntu only)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          cd src-tauri
+          cargo build --release --bin stoa-relay
+          mv target/release/stoa-relay ../stoa-relay-linux-x86_64
+          
+      - name: Upload Relay to Release
+        if: matrix.platform == 'ubuntu-22.04'
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: stoa-relay-linux-x86_64
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   publish-android:
     permissions:
       contents: write
