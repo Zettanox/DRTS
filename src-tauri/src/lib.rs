@@ -593,6 +593,76 @@ async fn open_file_native(path: String) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+async fn save_file_to_downloads(path: String) -> Result<String, String> {
+    let src = std::path::PathBuf::from(&path);
+    if !src.exists() {
+        return Err(format!("File not found: {}", src.display()));
+    }
+
+    let file_name = src
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or("Invalid file name")?
+        .to_string();
+
+    // Determine the Downloads directory per platform
+    let downloads_dir = {
+        #[cfg(target_os = "android")]
+        {
+            // Android public Download directory
+            let p = std::path::PathBuf::from("/storage/emulated/0/Download");
+            if !p.exists() {
+                // Fallback for some devices
+                std::path::PathBuf::from("/sdcard/Download")
+            } else {
+                p
+            }
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            dirs::download_dir().unwrap_or_else(|| {
+                dirs::home_dir()
+                    .expect("Could not determine home directory")
+                    .join("Downloads")
+            })
+        }
+    };
+
+    std::fs::create_dir_all(&downloads_dir)
+        .map_err(|e| format!("Failed to create Downloads dir: {e}"))?;
+
+    // Avoid overwriting: if file exists, add a suffix
+    let mut dest = downloads_dir.join(&file_name);
+    if dest.exists() {
+        let stem = src
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("file");
+        let ext = src
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| format!(".{e}"))
+            .unwrap_or_default();
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        dest = downloads_dir.join(format!("{stem}_{ts}{ext}"));
+    }
+
+    // Copy the file
+    std::fs::copy(&src, &dest).map_err(|e| format!("Failed to copy file: {e}"))?;
+
+    println!(
+        "[Stoa] Saved file to Downloads: {} -> {}",
+        src.display(),
+        dest.display()
+    );
+
+    Ok(dest.to_string_lossy().to_string())
+}
+
 // ─── Shared Spaces ──────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -895,6 +965,7 @@ pub fn run() {
             remove_group_member,
             disband_group,
             open_file_native,
+            save_file_to_downloads,
             open_group_space,
             list_space_files,
             create_space_file,

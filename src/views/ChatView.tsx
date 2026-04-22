@@ -376,6 +376,34 @@ export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (prop
                             </Show>
                           </div>
                         </div>
+                        {/* Save to Device button — only for completed downloads */}
+                        <Show when={message.fileInfo?.status === "complete" && message.fileInfo?.filePath && message.fileInfo?.direction === "download"}>
+                          <button
+                            class={`mt-2 flex items-center gap-1.5 text-[11px] font-black px-3 py-1 rounded-lg transition-colors ${
+                              isMe(message.senderId)
+                                ? "bg-primary-400/20 hover:bg-primary-400/40 text-primary-100"
+                                : "bg-stone-200 dark:bg-stone-700 hover:bg-stone-300 dark:hover:bg-stone-600 text-stone-600 dark:text-stone-300"
+                            }`}
+                            onClick={async (e) => {
+                              e.stopPropagation();
+                              try {
+                                const saved = await invoke('save_file_to_downloads', { path: message.fileInfo!.filePath });
+                                console.log("[Stoa] File saved to:", saved);
+                                // Brief visual feedback
+                                const btn = e.currentTarget;
+                                const orig = btn.textContent;
+                                btn.textContent = "✓ Saved!";
+                                setTimeout(() => { btn.textContent = orig; }, 2000);
+                              } catch (err) {
+                                console.error("[Stoa] Save to device failed:", err);
+                              }
+                            }}
+                            title="Save to Downloads folder"
+                          >
+                            <Download size={12} />
+                            Save to Device
+                          </button>
+                        </Show>
                       </div>
                     </Show>
 

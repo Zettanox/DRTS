@@ -2,6 +2,8 @@ import { Component } from "solid-js";
 import { identity, activeLeftPane, setActiveLeftPane, theme } from "../store";
 import { Shield, Settings, ChevronLeft } from "lucide-solid";
 import { A } from "@solidjs/router";
+import logoLight from "../assets/logo_light.svg";
+import logoDark from "../assets/logo_dark.svg";
 
 export const Topbar: Component = () => {
   return (
@@ -17,7 +19,7 @@ export const Topbar: Component = () => {
           </button>
         )}
         <img 
-          src={theme() === 'dark' ? "/src/assets/logo_dark.svg" : "/src/assets/logo_light.svg"} 
+          src={theme() === 'dark' ? logoDark : logoLight} 
           alt="Stoa Logo" 
           class="w-8 h-8 md:w-9 md:h-9" 
         />
