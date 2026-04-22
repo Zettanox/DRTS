@@ -276,11 +276,40 @@ export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (prop
                         toggleMessageSelection(message.id);
                       }
                     }}
+                    onPointerDown={(e) => {
+                      // Only start long press timer on primary pointer (finger/left click)
+                      // and if not already in selection mode (optional, but cleaner)
+                      if (e.button !== 0) return;
+                      
+                      const timer = setTimeout(() => {
+                        if (selectedMessages().length === 0) {
+                          toggleMessageSelection(message.id);
+                          if ('vibrate' in navigator) navigator.vibrate(40);
+                        }
+                      }, 600);
+                      
+                      const clear = () => {
+                        clearTimeout(timer);
+                        window.removeEventListener('pointerup', clear);
+                        window.removeEventListener('pointermove', clear);
+                      };
+                      
+                      window.addEventListener('pointerup', clear);
+                      // Move threshold: if they drag too far, cancel the long press
+                      const startX = e.clientX;
+                      const startY = e.clientY;
+                      const moveHandler = (me: PointerEvent) => {
+                        if (Math.abs(me.clientX - startX) > 10 || Math.abs(me.clientY - startY) > 10) {
+                          clear();
+                        }
+                      };
+                      window.addEventListener('pointermove', moveHandler);
+                    }}
                   >
                     {/* Floating Action Menu */}
                     <Show when={selectedMessages().length === 0}>
                       <button 
-                        class={`absolute top-1/2 -translate-y-1/2 ${isMe(message.senderId) ? '-left-11' : '-right-11'} z-10 opacity-0 md:group-hover:opacity-100 active:opacity-100 transition-opacity bg-white dark:bg-[#2c2421] border-2 border-stone-200 dark:border-stone-700 rounded-lg shadow-sm w-9 h-9 flex items-center justify-center text-stone-400 hover:text-primary-500 hover:border-primary-500`}
+                        class={`absolute top-1/2 -translate-y-1/2 ${isMe(message.senderId) ? '-left-11' : '-right-11'} z-10 hidden md:flex opacity-0 group-hover/message:opacity-100 active:opacity-100 transition-opacity bg-white dark:bg-[#2c2421] border-2 border-stone-200 dark:border-stone-700 rounded-lg shadow-sm w-9 h-9 items-center justify-center text-stone-400 hover:text-primary-500 hover:border-primary-500`}
                         onClick={(e) => { e.stopPropagation(); toggleMessageSelection(message.id); }}
                         title="Select Message"
                       >
