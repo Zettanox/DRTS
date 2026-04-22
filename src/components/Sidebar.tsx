@@ -58,11 +58,11 @@ export const Sidebar: Component = () => {
       <div class="p-4 flex-1 flex flex-col gap-6 mt-2">
         
         {/* Search */}
-        <div class="relative chamfer-all chamfer-shadow flex" style="--chamfer-outer: 8px; --chamfer-inner: 6px; --bg-color: var(--color-white)">
+        <div class="relative chamfer-all chamfer-shadow flex" style="--chamfer-outer: 8px; --chamfer-inner: 6px;">
           <Search size={16} class="absolute left-3 top-1/2 -translate-y-1/2 text-stone-500 z-10" />
           <input 
             type="text" 
-            placeholder="Search DMs, Groups, Endboxes..." 
+            placeholder="Search DMs, Groups..." 
             class="w-full bg-transparent border-none py-2 pl-9 pr-3 text-sm font-bold text-stone-900 dark:text-stone-100 placeholder-stone-500 focus:outline-none relative z-10"
             value={search()}
             onInput={(e) => setSearch(e.currentTarget.value)}
