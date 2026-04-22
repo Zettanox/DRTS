@@ -14,7 +14,7 @@ export const WorkspaceView: Component = () => {
             <p>Select a Chat or Group to connect</p>
           </div>
         ) : (
-          <ChatView pane="left" id={activeLeftPane()!.id} />
+          <ChatView pane="left" id={activeLeftPane()?.id || ""} />
         )}
       </div>
 
@@ -28,7 +28,7 @@ export const WorkspaceView: Component = () => {
            >
              <X size={16} />
            </button>
-           {activeRightPane() && <ChatView pane="right" id={activeRightPane()!.id} />}
+           {activeRightPane() && <ChatView pane="right" id={activeRightPane()?.id || ""} />}
         </div>
       )}
     </div>

@@ -51,7 +51,10 @@ export const Sidebar: Component = () => {
   };
 
   return (
-    <aside class={`w-full md:w-80 border-r-2 border-stone-800 dark:border-stone-700 bg-primary-50 dark:bg-[#1a1513] flex-col h-full overflow-y-auto ${activeLeftPane() ? 'hidden md:flex' : 'flex'}`}>
+    <aside 
+      class="w-full md:w-80 border-r-2 border-stone-800 dark:border-stone-700 bg-primary-50 dark:bg-[#1a1513] flex-col h-full overflow-y-auto"
+      classList={{ 'hidden md:flex': !!activeLeftPane(), 'flex': !activeLeftPane() }}
+    >
       <div class="p-4 flex-1 flex flex-col gap-6 mt-2">
         
         {/* Search */}
