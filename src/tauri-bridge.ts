@@ -284,33 +284,55 @@ export async function setUsername(newName: string): Promise<string> {
   return name;
 }
 
-/** Helper to convert Android content:// URIs to physical cache files */
-async function resolveFileUri(fileUri: string | null): Promise<string | null> {
-  if (!fileUri) return null;
-  let filePath = fileUri;
-  if (filePath.startsWith("content://")) {
-    const safeName = "transfer_" + Date.now();
-    await copyFile(filePath, safeName, { toPathBaseDir: BaseDirectory.AppCache });
-    
-    // Convert base directory to absolute path for Rust
-    const cacheDir = await appCacheDir();
-    // Use manual join since path.join isn't fully reliable on all OS edge-cases returning from cacheDir
-    if (cacheDir.endsWith("/") || cacheDir.endsWith("\\")) {
-      filePath = cacheDir + safeName;
-    } else {
-      filePath = cacheDir + "/" + safeName;
-    }
+/** 
+ * Platform-agnostic file picker helper.
+ * On Desktop, uses the native OS dialog via Tauri plugin-dialog.
+ * On Android, bypasses Tauri's content:// schema issues by using a native HTML5 input,
+ * extracting the literal bytes, and securely dumping them into the AppCache folder
+ * so the Rust backend can read them via standard POSIX paths.
+ */
+async function pickAndResolveFile(title: string): Promise<string | null> {
+  const isAndroid = navigator.userAgent.toLowerCase().includes("android");
+  
+  if (isAndroid) {
+    return new Promise((resolve) => {
+      const input = document.createElement("input");
+      input.type = "file";
+      input.onchange = async (e) => {
+        const file = (e.target as HTMLInputElement).files?.[0];
+        if (!file) return resolve(null);
+        
+        try {
+          const { writeFile } = await import("@tauri-apps/plugin-fs");
+          const safeName = "transfer_" + Date.now() + "_" + file.name.replace(/[^a-zA-Z0-9.-]/g, "_");
+          
+          const arrayBuffer = await file.arrayBuffer();
+          const bytes = new Uint8Array(arrayBuffer);
+          await writeFile(safeName, bytes, { baseDir: BaseDirectory.AppCache });
+          
+          const cacheDir = await appCacheDir();
+          let filePath = cacheDir.endsWith("/") || cacheDir.endsWith("\\") ? cacheDir + safeName : cacheDir + "/" + safeName;
+          resolve(filePath);
+        } catch (err) {
+          console.error("[Stoa FS] Failed to cache Android file fallback", err);
+          resolve(null);
+        }
+      };
+      input.click();
+    });
+  } else {
+    // Desktop: Native OS Dialog (returns absolute physical paths)
+    const picked = await open({
+      multiple: false,
+      title,
+    });
+    return (picked as string | null) || null;
   }
-  return filePath;
 }
 
 /** Open file picker and send the selected file to a peer. */
 export async function sendFile(peerId: string): Promise<void> {
-  const file = await open({
-    multiple: false,
-    title: "Select a file to send",
-  });
-  const resolvedPath = await resolveFileUri(file as string | null);
+  const resolvedPath = await pickAndResolveFile("Select a file to send");
   if (resolvedPath) {
     await invoke("send_file", { peerId, filePath: resolvedPath });
   }
@@ -390,11 +412,7 @@ export async function sendGroupMessage(
 }
 
 export async function sendGroupFile(groupId: string): Promise<void> {
-  const file = await open({
-    multiple: false,
-    title: "Select a file to send to group",
-  });
-  const resolvedPath = await resolveFileUri(file as string | null);
+  const resolvedPath = await pickAndResolveFile("Select a file to send to group");
   if (resolvedPath) {
     await invoke("send_group_file", { groupId, filePath: resolvedPath });
   }
@@ -446,11 +464,7 @@ export async function createSpaceFile(groupId: string, fileName: string): Promis
 }
 
 export async function importSpaceFile(groupId: string): Promise<void> {
-  const file = await open({
-    multiple: false,
-    title: "Select a text file to import into Shared Space",
-  });
-  const resolvedPath = await resolveFileUri(file as string | null);
+  const resolvedPath = await pickAndResolveFile("Select a text file to import into Shared Space");
   if (!resolvedPath) throw new Error("No file selected");
   await invoke("import_space_file", { groupId, filePath: resolvedPath });
 }

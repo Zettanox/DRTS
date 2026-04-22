@@ -18,6 +18,6 @@
     },
     "core:event:default",
     "dialog:default",
-    "fs:default"
+    "fs:default", "fs:allow-appcache-write", "fs:allow-appcache-read"
   ]
 }

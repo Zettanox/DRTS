@@ -189,7 +189,7 @@ pub fn spawn_network(
         // Reconnection sweep — retries disconnected contacts every 60s.
         let reconnect_start = tokio::time::Instant::now() + std::time::Duration::from_secs(15);
         let mut reconnect_interval =
-            tokio::time::interval_at(reconnect_start, std::time::Duration::from_secs(10));
+            tokio::time::interval_at(reconnect_start, std::time::Duration::from_secs(60));
         reconnect_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
         loop {
@@ -514,7 +514,12 @@ pub fn spawn_network(
                                 .is_some();
 
                             let err_str = error.to_string();
-                            let is_network_transition_noise = err_str.contains("os error 10048") || err_str.contains("oneshot canceled") || err_str.contains("os error 10060");
+                            let is_network_transition_noise = err_str.contains("os error 10048") 
+                                || err_str.contains("oneshot canceled") 
+                                || err_str.contains("os error 10060")
+                                || err_str.contains("Remote reported resource limit exceeded")
+                                || err_str.contains("Relay has no reservation")
+                                || err_str.contains("UnsupportedProtocols");
 
                             if !is_connected && !is_network_transition_noise {
                                 eprintln!("[{}] [Stoa Network] ❌ Connection failed to {:?}: {}",
