@@ -19,7 +19,7 @@ use clap::Parser;
 use futures::StreamExt;
 use libp2p::{
     core::upgrade,
-    identify, noise, ping, relay,
+    autonat, identify, noise, ping, relay,
     swarm::{NetworkBehaviour, SwarmEvent},
     tcp, yamux, Multiaddr, PeerId, Transport,
 };
@@ -57,6 +57,7 @@ struct RelayBehaviour {
     relay: relay::Behaviour,
     identify: identify::Behaviour,
     ping: ping::Behaviour,
+    autonat: autonat::Behaviour,
 }
 
 #[tokio::main]
@@ -112,6 +113,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
         ),
         ping: ping::Behaviour::new(
             ping::Config::new().with_interval(std::time::Duration::from_secs(15)),
+        ),
+        autonat: autonat::Behaviour::new(
+            peer_id,
+            autonat::Config {
+                only_global_ips: true,
+                // Disable CLIENT mode — the relay already knows its public IP
+                // via add_external_address(). Probing NATted clients creates
+                // hanging TCP connections that accumulate and cause 100% CPU.
+                boot_delay: std::time::Duration::from_secs(u32::MAX as u64),
+                ..Default::default()
+            },
         ),
     };
 
@@ -171,6 +183,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 }
             }
             SwarmEvent::Behaviour(RelayBehaviourEvent::Ping(_)) => {}
+            SwarmEvent::Behaviour(RelayBehaviourEvent::Autonat(event)) => {
+                println!("[Relay] AutoNAT: {:?}", event);
+            }
             SwarmEvent::ConnectionEstablished { peer_id, .. } => {
                 connected_count.fetch_add(1, Ordering::Relaxed);
                 println!("[Relay] Peer connected:    {peer_id}");

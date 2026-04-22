@@ -10,7 +10,7 @@ use futures::StreamExt;
 use libp2p::identity::Keypair;
 use libp2p::request_response::{self, ProtocolSupport};
 use libp2p::swarm::SwarmEvent;
-use libp2p::{dcutr, identify, mdns, relay, PeerId, StreamProtocol, Swarm, Transport};
+use libp2p::{autonat, dcutr, identify, mdns, relay, PeerId, StreamProtocol, Swarm, Transport};
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -34,6 +34,7 @@ pub struct StoaBehaviour {
     dcutr: dcutr::Behaviour,
     identify: identify::Behaviour,
     ping: libp2p::ping::Behaviour,
+    autonat: autonat::Behaviour,
 }
 
 /// Spawn the libp2p swarm on a background Tokio task.
@@ -115,6 +116,23 @@ pub fn spawn_network(
     let ping_config = libp2p::ping::Config::new().with_interval(std::time::Duration::from_secs(15));
     let ping_behaviour = libp2p::ping::Behaviour::new(ping_config);
 
+    // AutoNAT: verify our public IP by asking the relay to dial us back.
+    // This is required for DCUtR hole-punching to work — without it,
+    // observed addresses from Identify stay as untrusted "candidates"
+    // and are never promoted to external_addresses().
+    let autonat_config = autonat::Config {
+        boot_delay: std::time::Duration::from_secs(5),
+        retry_interval: std::time::Duration::from_secs(30),
+        refresh_interval: std::time::Duration::from_secs(300),
+        only_global_ips: true,
+        // Disable SERVER mode — we're behind NAT, we can't verify anyone
+        // else's reachability, and serving probes creates rogue connections
+        // that kill relay circuits (causing alternate-message bugs).
+        throttle_server_period: std::time::Duration::from_secs(u32::MAX as u64),
+        ..Default::default()
+    };
+    let autonat_behaviour = autonat::Behaviour::new(peer_id, autonat_config);
+
     let behaviour = StoaBehaviour {
         mdns: mdns_behaviour,
         messaging: msg_behaviour,
@@ -122,6 +140,7 @@ pub fn spawn_network(
         dcutr: dcutr::Behaviour::new(peer_id),
         identify: identify_behaviour,
         ping: ping_behaviour,
+        autonat: autonat_behaviour,
     };
 
     let mut swarm = Swarm::new(
@@ -170,6 +189,10 @@ pub fn spawn_network(
     let connected_peers_clone = connected_peers.clone();
 
     let cmd_tx_for_loop = cmd_tx.clone();
+    let relay_multiaddrs: Vec<libp2p::Multiaddr> = relay_addresses
+        .iter()
+        .filter_map(|s| s.parse().ok())
+        .collect();
     let handle = tokio::spawn(async move {
         let mut pending_messages: Vec<PendingMessage> = vec![];
         let mut inflight_messages: HashMap<
@@ -467,6 +490,16 @@ pub fn spawn_network(
                         )) => {
                             println!("[{}] [Stoa Network] Relay reservation accepted from {relay_peer_id}", chrono::Local::now().format("%H:%M:%S"));
                             let _ = app_handle.emit("relay-connected", relay_peer_id.to_string());
+
+                            // Register the relay as an AutoNAT server so we can
+                            // probe our public reachability through it.
+                            for addr in &relay_multiaddrs {
+                                swarm.behaviour_mut().autonat.add_server(relay_peer_id, Some(addr.clone()));
+                            }
+                            if !relay_multiaddrs.is_empty() {
+                                println!("[{}] [Stoa Network] Registered relay {relay_peer_id} as AutoNAT server",
+                                    chrono::Local::now().format("%H:%M:%S"));
+                            }
                         }
                         SwarmEvent::Behaviour(StoaBehaviourEvent::RelayClient(event)) => {
                             // covers OutboundCircuitEstablished, InboundCircuitEstablished, etc.
@@ -502,6 +535,24 @@ pub fn spawn_network(
                         }
                         SwarmEvent::Behaviour(StoaBehaviourEvent::Identify(_)) => {}
                         SwarmEvent::Behaviour(StoaBehaviourEvent::Ping(_)) => {}
+
+                        // ── AutoNAT Events ───────────────────────────────
+                        SwarmEvent::Behaviour(StoaBehaviourEvent::Autonat(event)) => {
+                            match event {
+                                autonat::Event::StatusChanged { old, new } => {
+                                    println!("[{}] [Stoa Network] \u{1F310} AutoNAT status: {:?} → {:?}",
+                                        chrono::Local::now().format("%H:%M:%S"), old, new);
+                                }
+                                autonat::Event::InboundProbe(e) => {
+                                    println!("[{}] [Stoa Network] AutoNAT inbound probe: {:?}",
+                                        chrono::Local::now().format("%H:%M:%S"), e);
+                                }
+                                autonat::Event::OutboundProbe(e) => {
+                                    println!("[{}] [Stoa Network] AutoNAT outbound probe: {:?}",
+                                        chrono::Local::now().format("%H:%M:%S"), e);
+                                }
+                            }
+                        }
 
                         SwarmEvent::NewListenAddr { address, .. } => {
                             println!("[{}] [Stoa Network] Listening on {address}", chrono::Local::now().format("%H:%M:%S"));
