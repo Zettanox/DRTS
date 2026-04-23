@@ -373,10 +373,26 @@ export const SpaceEditor: Component<{ groupId: string }> = (props) => {
 
   // ─── Lifecycle ───────────────────────────────────────────────────────────
 
-  onMount(async () => {
+  // Re-initialize when the group changes
+  createEffect(async () => {
+    const gid = props.groupId;
+    
+    // 1. Reset state to avoid "stale" files from previous group
+    setFiles([]);
+    setActiveFileId(null);
+    if (editorView) {
+      editorView.destroy();
+      editorView = null;
+    }
+    
+    // 2. Fetch fresh data for the new group
     await loadFiles();
-    await openGroupSpace(props.groupId);
+    await openGroupSpace(gid);
+  });
 
+  onMount(async () => {
+    // Keep the network listener alive for the duration of the component's life.
+    // It checks e.payload.group_id internally to ensure it only reacts to the relevant group.
     const unlistenUpdate = await listen<{ group_id: string }>(
       "space-remote-update",
       async (e) => {
