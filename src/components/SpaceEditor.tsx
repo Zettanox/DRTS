@@ -20,7 +20,7 @@ import {
 } from "../tauri-bridge";
 import type { SpaceFile } from "../store";
 import { theme } from "../store";
-import { FilePlus, Upload, Trash2, FileText, AlertTriangle, Download } from "lucide-solid";
+import { FilePlus, Upload, Trash2, FileText, AlertTriangle, Download, PanelLeftClose, PanelLeft } from "lucide-solid";
 
 // ─── CodeMirror Imports ───────────────────────────────────────────────────────
 import { EditorView, basicSetup } from "codemirror";
@@ -213,6 +213,7 @@ export const SpaceEditor: Component<{ groupId: string }> = (props) => {
   const [synced, setSynced] = createSignal(true);
   const [newFileName, setNewFileName] = createSignal("");
   const [showNewInput, setShowNewInput] = createSignal(false);
+  const [sidebarVisible, setSidebarVisible] = createSignal(window.innerWidth > 768);
   const [errorMsg, setErrorMsg] = createSignal<string | null>(null);
 
   let selectNewest = false;
@@ -496,7 +497,11 @@ export const SpaceEditor: Component<{ groupId: string }> = (props) => {
   return (
     <div class="flex-1 flex h-full overflow-hidden bg-stone-100 dark:bg-stone-900">
       {/* File Browser Sidebar */}
-      <div class="w-56 shrink-0 flex flex-col border-r-2 border-stone-300 dark:border-stone-700 bg-stone-50 dark:bg-[#1a1513]">
+      <div 
+        class={`shrink-0 flex flex-col border-r-2 border-stone-300 dark:border-stone-700 bg-stone-50 dark:bg-[#1a1513] transition-all duration-300 overflow-hidden ${
+          sidebarVisible() ? "w-56" : "w-0 border-r-0"
+        }`}
+      >
         {/* Sidebar Header */}
         <div class="px-3 py-3 border-b-2 border-stone-300 dark:border-stone-700">
           <div class="flex items-center justify-between mb-2">
@@ -614,10 +619,36 @@ export const SpaceEditor: Component<{ groupId: string }> = (props) => {
           </div>
         </Show>
 
+        {/* Global Toolbar */}
+        <div class="px-4 py-2.5 border-b border-stone-200 dark:border-stone-800 flex items-center gap-2 select-none shrink-0 bg-stone-50/50 dark:bg-[#1a1513]/50">
+          <button
+            onClick={() => setSidebarVisible(!sidebarVisible())}
+            class="p-1.5 -ml-1.5 rounded-md hover:bg-stone-200 dark:hover:bg-stone-800 text-stone-500 transition-colors shrink-0"
+            title={sidebarVisible() ? "Hide sidebar" : "Show sidebar"}
+          >
+            {sidebarVisible() ? <PanelLeftClose size={18} /> : <PanelLeft size={18} />}
+          </button>
+          
+          <FileText size={14} class="text-primary-500 shrink-0 ml-1" />
+          <h3 class="flex-1 text-sm font-black text-stone-700 dark:text-stone-300 truncate">
+            {files().find((f) => f.id === activeFileId())?.name || "Shared Space"}
+          </h3>
+
+          <Show when={activeFileId()}>
+            <button
+              onClick={handleExportFile}
+              class="p-1.5 rounded-md hover:bg-stone-200 dark:hover:bg-stone-800 text-stone-400 hover:text-stone-700 dark:hover:text-stone-300 transition-colors shrink-0"
+              title="Export file to disk"
+            >
+              <Download size={14} />
+            </button>
+          </Show>
+        </div>
+
         <Show
           when={activeFileId()}
           fallback={
-            <div class="flex-1 flex items-center justify-center">
+            <div class="flex-1 flex items-center justify-center bg-stone-100/50 dark:bg-stone-900/50">
               <div class="text-center">
                 <FileText size={48} class="mx-auto mb-4 text-stone-300 dark:text-stone-600" />
                 <p class="text-stone-400 dark:text-stone-500 font-black text-lg">
@@ -630,21 +661,6 @@ export const SpaceEditor: Component<{ groupId: string }> = (props) => {
             </div>
           }
         >
-          {/* File header bar */}
-          <div class="px-4 py-2.5 border-b border-stone-200 dark:border-stone-800 flex items-center gap-2 select-none shrink-0">
-            <FileText size={14} class="text-primary-500 shrink-0" />
-            <h3 class="flex-1 text-sm font-black text-stone-700 dark:text-stone-300 truncate">
-              {files().find((f) => f.id === activeFileId())?.name || "Untitled"}
-            </h3>
-            <button
-              onClick={handleExportFile}
-              class="p-1.5 rounded-md hover:bg-stone-200 dark:hover:bg-stone-800 text-stone-400 hover:text-stone-700 dark:hover:text-stone-300 transition-colors shrink-0"
-              title="Export file to disk"
-            >
-              <Download size={14} />
-            </button>
-          </div>
-
           {/* CodeMirror editor mount point */}
           <div
             ref={editorContainerRef}
