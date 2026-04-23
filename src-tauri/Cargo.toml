@@ -1,6 +1,6 @@
 [package]
 name = "stoa"
-version = "0.1.0"
+version = "0.1.3"
 description = "Stoa — Local-first decentralized collaboration"
 authors = ["you"]
 edition = "2021"
@@ -22,7 +22,7 @@ tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-libp2p = { version = "0.56.0", features = ["mdns", "noise", "yamux", "tcp", "tokio", "macros", "ed25519", "request-response", "json", "relay", "dcutr", "identify", "dns", "ping"] }
+libp2p = { version = "0.56.0", features = ["mdns", "noise", "yamux", "tcp", "tokio", "macros", "ed25519", "request-response", "json", "relay", "dcutr", "identify", "dns", "ping", "autonat"] }
 tokio = { version = "1", features = ["full"] }
 dirs = "6.0.0"
 futures = "0.3"
@@ -43,3 +43,4 @@ qrcode = "0.14"
 image = { version = "0.25", default-features = false, features = ["png"] }
 bs58 = "0.5"
 clap = { version = "4", features = ["derive"] }
+tauri-plugin-fs = "2"

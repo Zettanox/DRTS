@@ -255,30 +255,67 @@ export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (prop
                 <div 
                   class={`flex w-full ${isMe(message.senderId) ? "justify-end" : "justify-start"} px-2 selection-none group/message items-center gap-2`}
                 >
-                  <Show when={!isMe(message.senderId)}>
-                    <button
-                      class={`p-1.5 text-stone-400 hover:text-stone-600 dark:hover:text-stone-300 transition-opacity ${selectedMessages().length > 0 ? "opacity-100" : "opacity-0 group-hover/message:opacity-100"}`}
-                      onClick={() => toggleMessageSelection(message.id)}
-                    >
-                      {isSelected() ? <CheckSquare size={18} class="text-primary-500" /> : <Square size={18} />}
-                    </button>
-                  </Show>
+
 
                   <div 
                     class={`max-w-[85%] md:max-w-[70%] px-5 py-3 relative group font-bold transition-all duration-200 cursor-default ${
-                      isSelected() ? "bg-primary-500/20 ring-2 ring-primary-500 rounded-xl" : ""
-                    } ${
                       isMe(message.senderId)
                         ? "chamfer-tr-bl chamfer-shadow text-stone-100"
                         : "chamfer-tl-br chamfer-shadow text-stone-800 dark:text-stone-200"
                     }`} 
-                    style={{ "--bg-color": isMe(message.senderId) ? "var(--color-primary-500)" : "" }}
+                    style={{ 
+                      "--bg-color": isMe(message.senderId) ? "var(--color-primary-500)" : "",
+                      ...(isSelected() ? {
+                        "--border-color": "var(--color-primary-500)",
+                        "--drop-color": "var(--color-primary-500)",
+                        "transform": "scale(0.98)"
+                      } : {})
+                    }}
                     onClick={() => {
                       if (selectedMessages().length > 0) {
                         toggleMessageSelection(message.id);
                       }
                     }}
+                    onPointerDown={(e) => {
+                      // Only start long press timer on primary pointer (finger/left click)
+                      // and if not already in selection mode (optional, but cleaner)
+                      if (e.button !== 0) return;
+                      
+                      const timer = setTimeout(() => {
+                        if (selectedMessages().length === 0) {
+                          toggleMessageSelection(message.id);
+                          if ('vibrate' in navigator) navigator.vibrate(40);
+                        }
+                      }, 600);
+                      
+                      const clear = () => {
+                        clearTimeout(timer);
+                        window.removeEventListener('pointerup', clear);
+                        window.removeEventListener('pointermove', clear);
+                      };
+                      
+                      window.addEventListener('pointerup', clear);
+                      // Move threshold: if they drag too far, cancel the long press
+                      const startX = e.clientX;
+                      const startY = e.clientY;
+                      const moveHandler = (me: PointerEvent) => {
+                        if (Math.abs(me.clientX - startX) > 10 || Math.abs(me.clientY - startY) > 10) {
+                          clear();
+                        }
+                      };
+                      window.addEventListener('pointermove', moveHandler);
+                    }}
                   >
+                    {/* Floating Action Menu */}
+                    <Show when={selectedMessages().length === 0}>
+                      <button 
+                        class={`absolute top-1/2 -translate-y-1/2 ${isMe(message.senderId) ? '-left-11' : '-right-11'} z-10 hidden md:flex opacity-0 group-hover/message:opacity-100 active:opacity-100 transition-opacity bg-white dark:bg-[#2c2421] border-2 border-stone-200 dark:border-stone-700 rounded-lg shadow-sm w-9 h-9 items-center justify-center text-stone-400 hover:text-primary-500 hover:border-primary-500`}
+                        onClick={(e) => { e.stopPropagation(); toggleMessageSelection(message.id); }}
+                        title="Select Message"
+                      >
+                         <CheckSquare size={16} />
+                      </button>
+                    </Show>
                     {!isMe(message.senderId) && isGroup() && (
                       <div class="text-xs font-black mb-1 text-accent-600 dark:text-accent-400">
                         {contacts.find(c => c.peerId === message.senderId)?.petname || message.senderId.slice(0, 12) + '…'}
@@ -289,88 +326,114 @@ export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (prop
                     <Show when={message.fileInfo} fallback={
                       <div class="text-[15px] leading-relaxed break-words">{message.content}</div>
                     }>
-                      {(fi) => (
-                        <div>
-                          {/* Image Preview */}
-                          <Show when={fi().status === "complete" && fi().filePath && isImageFile(fi().fileName)}>
-                            <div
-                              class="mb-2 cursor-pointer rounded-lg overflow-hidden border border-stone-300 dark:border-stone-600 hover:opacity-90 transition-opacity"
-                              onClick={() => handleOpenFile(fi().filePath)}
-                            >
-                              <img
-                                src={convertFileSrc(fi().filePath!)}
-                                alt={fi().fileName}
-                                class="max-w-full max-h-[70vh] w-auto h-auto object-cover bg-stone-100 dark:bg-stone-800 block rounded-lg shadow-sm"
-                                loading="lazy"
-                              />
-                            </div>
-                          </Show>
-                          {/* File info row */}
+                      <div>
+                        {/* Image Preview */}
+                        <Show when={message.fileInfo?.status === "complete" && message.fileInfo?.filePath && isImageFile(message.fileInfo!.fileName)}>
                           <div
-                            class={`flex items-center gap-3 min-w-[200px] ${fi().status === 'complete' && fi().filePath ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}`}
-                            onClick={() => fi().status === 'complete' && fi().filePath && handleOpenFile(fi().filePath)}
+                            class="mb-2 cursor-pointer rounded-lg overflow-hidden border border-stone-300 dark:border-stone-600 hover:opacity-90 transition-opacity"
+                            onClick={() => handleOpenFile(message.fileInfo!.filePath)}
                           >
-                            <div class={`w-10 h-10 rounded-md flex items-center justify-center shrink-0 ${
-                              isMe(message.senderId)
-                                ? "bg-primary-400/30"
-                                : "bg-stone-200 dark:bg-stone-700"
-                            }`}>
-                              {isImageFile(fi().fileName) ? <ImageIcon size={20} /> : <FileIcon size={20} />}
+                            <img
+                              src={convertFileSrc(message.fileInfo!.filePath!)}
+                              alt={message.fileInfo?.fileName}
+                              class="max-w-full max-h-[70vh] w-auto h-auto object-cover bg-stone-100 dark:bg-stone-800 block rounded-lg shadow-sm"
+                              loading="lazy"
+                            />
+                          </div>
+                        </Show>
+                        {/* File info row */}
+                        <div
+                          class={`flex items-center gap-3 min-w-[200px] ${message.fileInfo?.status === 'complete' && message.fileInfo?.filePath ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}`}
+                          onClick={() => message.fileInfo?.status === 'complete' && message.fileInfo?.filePath && handleOpenFile(message.fileInfo!.filePath)}
+                        >
+                          <div class={`w-10 h-10 rounded-md flex items-center justify-center shrink-0 ${
+                            isMe(message.senderId)
+                              ? "bg-primary-400/30"
+                              : "bg-stone-200 dark:bg-stone-700"
+                          }`}>
+                            {isImageFile(message.fileInfo!.fileName) ? <ImageIcon size={20} /> : <FileIcon size={20} />}
+                          </div>
+                          <div class="flex-1 min-w-0">
+                            <div class="text-sm font-black truncate flex items-center gap-1.5">
+                              {message.fileInfo?.fileName}
+                              <Show when={message.fileInfo?.status === 'complete' && message.fileInfo?.filePath}>
+                                <ExternalLink size={12} class="opacity-50 shrink-0" />
+                              </Show>
                             </div>
-                            <div class="flex-1 min-w-0">
-                              <div class="text-sm font-black truncate flex items-center gap-1.5">
-                                {fi().fileName}
-                                <Show when={fi().status === 'complete' && fi().filePath}>
-                                  <ExternalLink size={12} class="opacity-50 shrink-0" />
-                                </Show>
+                            <div class={`text-[10px] font-bold flex items-center justify-between ${
+                              isMe(message.senderId) ? "text-primary-200" : "text-stone-500"
+                            }`}>
+                              <div>
+                                {formatFileSize(message.fileInfo!.fileSize)} · {message.fileInfo?.direction === "upload" ? "Sent" : "Received"}
+                                {message.fileInfo?.status === "complete" && " · Complete ✓"}
+                                {message.fileInfo?.status === "paused" && " · Paused"}
+                                {message.fileInfo?.status === "transferring" && " · Transferring…"}
                               </div>
-                              <div class={`text-[10px] font-bold flex items-center justify-between ${
-                                isMe(message.senderId) ? "text-primary-200" : "text-stone-500"
-                              }`}>
-                                <div>
-                                  {formatFileSize(fi().fileSize)} · {fi().direction === "upload" ? "Sent" : "Received"}
-                                  {fi().status === "complete" && " · Complete ✓"}
-                                  {fi().status === "paused" && " · Paused"}
-                                  {fi().status === "transferring" && " · Transferring…"}
-                                </div>
-                                <Show when={fi().status === "transferring" || fi().status === "paused"}>
-                                  <div class="flex gap-2">
-                                    <Show when={fi().status === "transferring"}>
-                                      <button 
-                                        onClick={(e) => { e.stopPropagation(); pauseFileTransfer(fi().transferId); }}
-                                        class="hover:text-stone-800 dark:hover:text-stone-200 transition-colors"
-                                        title="Pause Transfer"
-                                      >
-                                        ⏸️
-                                      </button>
-                                    </Show>
-                                    <Show when={fi().status === "paused"}>
-                                      <button 
-                                        onClick={(e) => { e.stopPropagation(); resumeFileTransfer(fi().transferId); }}
-                                        class="hover:text-stone-800 dark:hover:text-stone-200 transition-colors"
-                                        title="Resume Transfer"
-                                      >
-                                        ▶️
-                                      </button>
-                                    </Show>
-                                  </div>
-                                </Show>
-                              </div>
-                              {/* Progress bar */}
-                              <Show when={fi().status === "transferring" || fi().status === "paused"}>
-                                <div class={`w-full h-1.5 rounded-full mt-1.5 overflow-hidden ${
-                                  isMe(message.senderId) ? "bg-primary-400/30" : "bg-stone-300 dark:bg-stone-600"
-                                }`}>
-                                  <div
-                                    class={`h-full rounded-full transition-all duration-300 ${fi().status === "paused" ? "bg-amber-400" : "bg-emerald-400"}`}
-                                    style={{ width: `${Math.round(fi().progress * 100)}%` }}
-                                  />
+                              <Show when={message.fileInfo?.status === "transferring" || message.fileInfo?.status === "paused"}>
+                                <div class="flex gap-2">
+                                  <Show when={message.fileInfo?.status === "transferring"}>
+                                    <button 
+                                      onClick={(e) => { e.stopPropagation(); pauseFileTransfer(message.fileInfo!.transferId); }}
+                                      class="hover:text-stone-800 dark:hover:text-stone-200 transition-colors"
+                                      title="Pause Transfer"
+                                    >
+                                      ⏸️
+                                    </button>
+                                  </Show>
+                                  <Show when={message.fileInfo?.status === "paused"}>
+                                    <button 
+                                      onClick={(e) => { e.stopPropagation(); resumeFileTransfer(message.fileInfo!.transferId); }}
+                                      class="hover:text-stone-800 dark:hover:text-stone-200 transition-colors"
+                                      title="Resume Transfer"
+                                    >
+                                      ▶️
+                                    </button>
+                                  </Show>
                                 </div>
                               </Show>
                             </div>
+                            {/* Progress bar */}
+                            <Show when={message.fileInfo?.status === "transferring" || message.fileInfo?.status === "paused"}>
+                              <div class={`w-full h-1.5 rounded-full mt-1.5 overflow-hidden ${
+                                isMe(message.senderId) ? "bg-primary-400/30" : "bg-stone-300 dark:bg-stone-600"
+                              }`}>
+                                <div
+                                  class={`h-full rounded-full transition-all duration-300 ${message.fileInfo?.status === "paused" ? "bg-amber-400" : "bg-emerald-400"}`}
+                                  style={{ width: `${Math.round(message.fileInfo!.progress * 100)}%` }}
+                                />
+                              </div>
+                            </Show>
                           </div>
                         </div>
-                      )}
+                        {/* Save to Device button — only for completed downloads */}
+                        <Show when={message.fileInfo?.status === "complete" && message.fileInfo?.filePath && message.fileInfo?.direction === "download"}>
+                          <button
+                            class={`mt-2 flex items-center gap-1.5 text-[11px] font-black px-3 py-1 rounded-lg transition-colors ${
+                              isMe(message.senderId)
+                                ? "bg-primary-400/20 hover:bg-primary-400/40 text-primary-100"
+                                : "bg-stone-200 dark:bg-stone-700 hover:bg-stone-300 dark:hover:bg-stone-600 text-stone-600 dark:text-stone-300"
+                            }`}
+                            onClick={async (e) => {
+                              e.stopPropagation();
+                              try {
+                                const saved = await invoke('save_file_to_downloads', { path: message.fileInfo!.filePath });
+                                console.log("[Stoa] File saved to:", saved);
+                                // Brief visual feedback
+                                const btn = e.currentTarget;
+                                const orig = btn.textContent;
+                                btn.textContent = "✓ Saved!";
+                                setTimeout(() => { btn.textContent = orig; }, 2000);
+                              } catch (err) {
+                                console.error("[Stoa] Save to device failed:", err);
+                              }
+                            }}
+                            title="Save to Downloads folder"
+                          >
+                            <Download size={12} />
+                            Save to Device
+                          </button>
+                        </Show>
+                      </div>
                     </Show>
 
                     <div class={`text-xs mt-1.5 font-bold flex items-center justify-end gap-1.5 ${isMe(message.senderId) ? "text-primary-100" : "text-stone-400 dark:text-stone-500"}`}>
@@ -379,14 +442,7 @@ export const ChatView: Component<{ id: string, pane: "left" | "right" }> = (prop
                     </div>
                   </div>
 
-                  <Show when={isMe(message.senderId)}>
-                    <button
-                      class={`p-1.5 text-stone-400 hover:text-stone-600 dark:hover:text-stone-300 transition-opacity ${selectedMessages().length > 0 ? "opacity-100" : "opacity-0 group-hover/message:opacity-100"}`}
-                      onClick={() => toggleMessageSelection(message.id)}
-                    >
-                      {isSelected() ? <CheckSquare size={18} class="text-primary-500" /> : <Square size={18} />}
-                    </button>
-                  </Show>
+
                 </div>
               );
             }}

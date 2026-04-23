@@ -58,7 +58,7 @@ export const CreateGroupModal: Component<{ onClose: () => void }> = (props) => {
               <label class="block text-xs font-black uppercase tracking-wider text-stone-500 mb-2">
                 Group Name
               </label>
-              <div class="chamfer-all chamfer-shadow" style="--chamfer-outer: 8px; --chamfer-inner: 6px; --bg-color: var(--color-white)">
+              <div class="chamfer-all chamfer-shadow" style="--chamfer-outer: 8px; --chamfer-inner: 6px;">
                 <input
                   type="text"
                   placeholder="e.g. Project Alpha"

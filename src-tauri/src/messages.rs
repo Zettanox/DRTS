@@ -7,8 +7,8 @@ pub struct StoredFileInfo {
     pub transfer_id: String,
     pub file_name: String,
     pub file_size: u64,
-    pub direction: String,   // "upload" or "download"
-    pub status: String,      // "transferring", "complete", "failed"
+    pub direction: String, // "upload" or "download"
+    pub status: String,    // "transferring", "complete", "failed"
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file_path: Option<String>,
 }
@@ -43,22 +43,21 @@ pub fn load_messages(peer_id: &str) -> Result<Vec<StoredMessage>, String> {
     if !path.exists() {
         return Ok(vec![]);
     }
-    let data = std::fs::read_to_string(&path)
-        .map_err(|e| format!("Failed to read messages: {e}"))?;
-    serde_json::from_str(&data)
-        .map_err(|e| format!("Failed to parse messages: {e}"))
+    let data =
+        std::fs::read_to_string(&path).map_err(|e| format!("Failed to read messages: {e}"))?;
+    serde_json::from_str(&data).map_err(|e| format!("Failed to parse messages: {e}"))
 }
 
 /// Save a new message to the peer's message history.
 pub fn save_message(peer_id: &str, msg: &StoredMessage) -> Result<(), String> {
     let mut messages = load_messages(peer_id)?;
-    
+
     // Update existing message if same ID (e.g., marking delivered)
     if let Some(existing) = messages.iter_mut().find(|m| m.id == msg.id) {
         existing.delivered = msg.delivered;
         return write_messages(peer_id, &messages);
     }
-    
+
     messages.push(msg.clone());
     write_messages(peer_id, &messages)
 }
@@ -85,8 +84,7 @@ fn write_messages(peer_id: &str, messages: &[StoredMessage]) -> Result<(), Strin
     let path = peer_messages_path(peer_id)?;
     let data = serde_json::to_string_pretty(messages)
         .map_err(|e| format!("Failed to serialize messages: {e}"))?;
-    std::fs::write(&path, data)
-        .map_err(|e| format!("Failed to write messages: {e}"))
+    std::fs::write(&path, data).map_err(|e| format!("Failed to write messages: {e}"))
 }
 
 /// Delete a specific message from history.
@@ -99,7 +97,7 @@ pub fn delete_messages(peer_id: &str, message_ids: &[String]) -> Result<(), Stri
     let mut messages = load_messages(peer_id)?;
     let initial_len = messages.len();
     messages.retain(|m| !message_ids.contains(&m.id));
-    
+
     if messages.len() < initial_len {
         write_messages(peer_id, &messages)
     } else {
@@ -111,4 +109,3 @@ pub fn delete_messages(peer_id: &str, message_ids: &[String]) -> Result<(), Stri
 pub fn clear_chat_history(peer_id: &str) -> Result<(), String> {
     write_messages(peer_id, &[])
 }
-

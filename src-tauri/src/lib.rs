@@ -15,8 +15,8 @@ use identity::IdentityInfo;
 use libp2p::identity::Keypair;
 use messages::StoredMessage;
 use network::{ContactsList, NearbyPeer, NearbyPeersMap, NetworkCommand};
-use std::sync::{Arc, OnceLock};
 use std::path::PathBuf;
+use std::sync::{Arc, OnceLock};
 use tauri::{Emitter, Manager, State};
 use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinHandle;
@@ -31,9 +31,11 @@ pub fn get_stoa_dir() -> PathBuf {
             return legacy_path;
         }
     }
-    
+
     STOA_DIR.get().cloned().unwrap_or_else(|| {
-        dirs::home_dir().expect("Could not determine home directory").join(".stoa")
+        dirs::home_dir()
+            .expect("Could not determine home directory")
+            .join(".stoa")
     })
 }
 
@@ -57,10 +59,16 @@ async fn start_network(
 ) -> Result<(), String> {
     let our_name = {
         let info = state.identity_info.lock().await;
-        info.as_ref().map(|i| i.name.clone()).unwrap_or_else(|| "User".to_string())
+        info.as_ref()
+            .map(|i| i.name.clone())
+            .unwrap_or_else(|| "User".to_string())
     };
-    let (cmd_tx, peers_map, connected_peers, handle) =
-        network::spawn_network(keypair.clone(), app_handle.clone(), state.contacts.clone(), our_name)?;
+    let (cmd_tx, peers_map, connected_peers, handle) = network::spawn_network(
+        keypair.clone(),
+        app_handle.clone(),
+        state.contacts.clone(),
+        our_name,
+    )?;
     {
         let mut tx = state.network_cmd_tx.lock().await;
         *tx = Some(cmd_tx);
@@ -99,10 +107,7 @@ async fn stop_network(state: &AppState) {
     };
     if let Some(handle) = handle {
         // Give it 2 seconds max to shut down gracefully
-        let _ = tokio::time::timeout(
-            std::time::Duration::from_secs(2),
-            handle,
-        ).await;
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(2), handle).await;
     }
 
     {
@@ -189,10 +194,7 @@ async fn export_keypair() -> Result<String, String> {
 // ─── Visibility Commands ──────────────────────────────────────────────────────
 
 #[tauri::command]
-async fn toggle_visibility(
-    visible: bool,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
+async fn toggle_visibility(visible: bool, state: State<'_, AppState>) -> Result<(), String> {
     {
         let mut v = state.lan_visible.lock().await;
         *v = visible;
@@ -227,7 +229,9 @@ async fn get_visibility(state: State<'_, AppState>) -> Result<bool, String> {
 }
 
 #[tauri::command]
-async fn show_window(#[allow(unused_variables)] app_handle: tauri::AppHandle) -> Result<(), String> {
+async fn show_window(
+    #[allow(unused_variables)] app_handle: tauri::AppHandle,
+) -> Result<(), String> {
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         if let Some(window) = app_handle.get_webview_window("main") {
@@ -259,10 +263,7 @@ async fn get_connected_peers(state: State<'_, AppState>) -> Result<Vec<String>, 
 }
 
 #[tauri::command]
-async fn send_contact_request(
-    peer_id: String,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
+async fn send_contact_request(peer_id: String, state: State<'_, AppState>) -> Result<(), String> {
     let (our_peer_id, our_name) = {
         let info = state.identity_info.lock().await;
         let info = info.as_ref().ok_or("No identity")?;
@@ -294,7 +295,7 @@ async fn respond_contact_request(
         let mut cts = state.contacts.lock().await;
         contacts::add_contact(&mut cts, peer_id.clone(), petname, None)?;
         drop(cts);
-        
+
         // If the peer is already connected, emit contact-online immediately
         let peers = state.nearby_peers.lock().await;
         if let Some(ref map) = *peers {
@@ -316,7 +317,7 @@ async fn add_contact_from_request(
     let mut cts = state.contacts.lock().await;
     contacts::add_contact(&mut cts, peer_id.clone(), petname, None)?;
     drop(cts);
-    
+
     // If the peer is already connected, emit contact-online immediately
     let peers = state.nearby_peers.lock().await;
     if let Some(ref map) = *peers {
@@ -338,10 +339,7 @@ async fn rename_contact(
 }
 
 #[tauri::command]
-async fn remove_contact_cmd(
-    peer_id: String,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
+async fn remove_contact_cmd(peer_id: String, state: State<'_, AppState>) -> Result<(), String> {
     let mut cts = state.contacts.lock().await;
     contacts::remove_contact(&mut cts, &peer_id)
 }
@@ -394,12 +392,8 @@ async fn clear_chat(peer_id: String) -> Result<(), String> {
     messages::clear_chat_history(&peer_id)
 }
 
-
 #[tauri::command]
-async fn set_username(
-    new_name: String,
-    state: State<'_, AppState>,
-) -> Result<String, String> {
+async fn set_username(new_name: String, state: State<'_, AppState>) -> Result<String, String> {
     let info = identity::update_identity_name(&new_name)?;
     {
         let mut id = state.identity_info.lock().await;
@@ -435,10 +429,7 @@ async fn send_file(
 }
 
 #[tauri::command]
-async fn pause_transfer(
-    transfer_id: String,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
+async fn pause_transfer(transfer_id: String, state: State<'_, AppState>) -> Result<(), String> {
     let tx = state.network_cmd_tx.lock().await;
     if let Some(tx) = tx.as_ref() {
         let _ = tx.send(NetworkCommand::PauseTransfer { transfer_id }).await;
@@ -447,13 +438,12 @@ async fn pause_transfer(
 }
 
 #[tauri::command]
-async fn resume_transfer(
-    transfer_id: String,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
+async fn resume_transfer(transfer_id: String, state: State<'_, AppState>) -> Result<(), String> {
     let tx = state.network_cmd_tx.lock().await;
     if let Some(tx) = tx.as_ref() {
-        let _ = tx.send(NetworkCommand::ResumeTransfer { transfer_id }).await;
+        let _ = tx
+            .send(NetworkCommand::ResumeTransfer { transfer_id })
+            .await;
     }
     Ok(())
 }
@@ -531,18 +521,13 @@ async fn send_group_file(
 }
 
 #[tauri::command]
-async fn get_group_history(
-    group_id: String,
-) -> Result<Vec<StoredMessage>, String> {
+async fn get_group_history(group_id: String) -> Result<Vec<StoredMessage>, String> {
     let group_key = format!("group_{group_id}");
     messages::load_messages(&group_key)
 }
 
 #[tauri::command]
-async fn leave_group(
-    group_id: String,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
+async fn leave_group(group_id: String, state: State<'_, AppState>) -> Result<(), String> {
     let tx = state.network_cmd_tx.lock().await;
     if let Some(tx) = tx.as_ref() {
         let _ = tx.send(NetworkCommand::LeaveGroup { group_id }).await;
@@ -558,16 +543,15 @@ async fn remove_group_member(
 ) -> Result<(), String> {
     let tx = state.network_cmd_tx.lock().await;
     if let Some(tx) = tx.as_ref() {
-        let _ = tx.send(NetworkCommand::RemoveGroupMember { group_id, peer_id }).await;
+        let _ = tx
+            .send(NetworkCommand::RemoveGroupMember { group_id, peer_id })
+            .await;
     }
     Ok(())
 }
 
 #[tauri::command]
-async fn disband_group(
-    group_id: String,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
+async fn disband_group(group_id: String, state: State<'_, AppState>) -> Result<(), String> {
     let tx = state.network_cmd_tx.lock().await;
     if let Some(tx) = tx.as_ref() {
         let _ = tx.send(NetworkCommand::DisbandGroup { group_id }).await;
@@ -609,6 +593,76 @@ async fn open_file_native(path: String) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+async fn save_file_to_downloads(path: String) -> Result<String, String> {
+    let src = std::path::PathBuf::from(&path);
+    if !src.exists() {
+        return Err(format!("File not found: {}", src.display()));
+    }
+
+    let file_name = src
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or("Invalid file name")?
+        .to_string();
+
+    // Determine the Downloads directory per platform
+    let downloads_dir = {
+        #[cfg(target_os = "android")]
+        {
+            // Android public Download directory
+            let p = std::path::PathBuf::from("/storage/emulated/0/Download");
+            if !p.exists() {
+                // Fallback for some devices
+                std::path::PathBuf::from("/sdcard/Download")
+            } else {
+                p
+            }
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            dirs::download_dir().unwrap_or_else(|| {
+                dirs::home_dir()
+                    .expect("Could not determine home directory")
+                    .join("Downloads")
+            })
+        }
+    };
+
+    std::fs::create_dir_all(&downloads_dir)
+        .map_err(|e| format!("Failed to create Downloads dir: {e}"))?;
+
+    // Avoid overwriting: if file exists, add a suffix
+    let mut dest = downloads_dir.join(&file_name);
+    if dest.exists() {
+        let stem = src
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("file");
+        let ext = src
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| format!(".{e}"))
+            .unwrap_or_default();
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        dest = downloads_dir.join(format!("{stem}_{ts}{ext}"));
+    }
+
+    // Copy the file
+    std::fs::copy(&src, &dest).map_err(|e| format!("Failed to copy file: {e}"))?;
+
+    println!(
+        "[Stoa] Saved file to Downloads: {} -> {}",
+        src.display(),
+        dest.display()
+    );
+
+    Ok(dest.to_string_lossy().to_string())
+}
+
 // ─── Shared Spaces ──────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -633,11 +687,13 @@ async fn create_space_file(
 ) -> Result<(), String> {
     let tx = state.network_cmd_tx.lock().await;
     if let Some(tx) = tx.as_ref() {
-        let _ = tx.send(NetworkCommand::CreateSpaceFile {
-            group_id,
-            file_name,
-            content: None,
-        }).await;
+        let _ = tx
+            .send(NetworkCommand::CreateSpaceFile {
+                group_id,
+                file_name,
+                content: None,
+            })
+            .await;
     }
     Ok(())
 }
@@ -662,8 +718,8 @@ async fn import_space_file(
     }
 
     // Read content (copy — original file is never touched)
-    let content = std::fs::read_to_string(&file_path)
-        .map_err(|e| format!("Failed to read file: {}", e))?;
+    let content =
+        std::fs::read_to_string(&file_path).map_err(|e| format!("Failed to read file: {}", e))?;
 
     // Check size limit
     if content.len() > crate::crdt::MAX_IMPORT_SIZE {
@@ -682,11 +738,13 @@ async fn import_space_file(
     // Send to network handler — it creates and broadcasts
     let tx = state.network_cmd_tx.lock().await;
     if let Some(tx) = tx.as_ref() {
-        let _ = tx.send(NetworkCommand::CreateSpaceFile {
-            group_id,
-            file_name,
-            content: Some(content),
-        }).await;
+        let _ = tx
+            .send(NetworkCommand::CreateSpaceFile {
+                group_id,
+                file_name,
+                content: Some(content),
+            })
+            .await;
     }
 
     Ok(())
@@ -700,7 +758,9 @@ async fn delete_space_file(
 ) -> Result<(), String> {
     let tx = state.network_cmd_tx.lock().await;
     if let Some(tx) = tx.as_ref() {
-        let _ = tx.send(NetworkCommand::DeleteSpaceFile { group_id, file_id }).await;
+        let _ = tx
+            .send(NetworkCommand::DeleteSpaceFile { group_id, file_id })
+            .await;
     }
     Ok(())
 }
@@ -717,8 +777,7 @@ async fn export_space_file(
     export_path: String,
 ) -> Result<(), String> {
     let content = crate::crdt::get_file_text(&group_id, &file_id).await?;
-    std::fs::write(&export_path, &content)
-        .map_err(|e| format!("Failed to export file: {}", e))
+    std::fs::write(&export_path, &content).map_err(|e| format!("Failed to export file: {}", e))
 }
 
 #[tauri::command]
@@ -732,13 +791,15 @@ async fn edit_space_file(
 ) -> Result<(), String> {
     let tx = state.network_cmd_tx.lock().await;
     if let Some(tx) = tx.as_ref() {
-        let _ = tx.send(NetworkCommand::EditGroupSpace {
-            group_id,
-            file_id,
-            index,
-            delete_count,
-            insert_text,
-        }).await;
+        let _ = tx
+            .send(NetworkCommand::EditGroupSpace {
+                group_id,
+                file_id,
+                index,
+                delete_count,
+                insert_text,
+            })
+            .await;
     }
     Ok(())
 }
@@ -802,17 +863,24 @@ async fn add_contact_from_code(
     // Add to contacts list first
     {
         let mut cts = state.contacts.lock().await;
-        contacts::add_contact(&mut cts, peer_id_str.clone(), petname, Some(relay_addrs.clone()))
-            .map_err(|e| format!("Failed to save contact: {e}"))?;
+        contacts::add_contact(
+            &mut cts,
+            peer_id_str.clone(),
+            petname,
+            Some(relay_addrs.clone()),
+        )
+        .map_err(|e| format!("Failed to save contact: {e}"))?;
     }
 
     // Dial the peer via their relay, then send contact request
     let tx = state.network_cmd_tx.lock().await;
     if let Some(tx) = tx.as_ref() {
-        let _ = tx.send(network::NetworkCommand::DialPeer {
-            peer_id: peer_id_str.clone(),
-            relay_addrs,
-        }).await;
+        let _ = tx
+            .send(network::NetworkCommand::DialPeer {
+                peer_id: peer_id_str.clone(),
+                relay_addrs,
+            })
+            .await;
 
         let id_guard = state.identity_info.lock().await;
         let our_name = id_guard
@@ -825,33 +893,36 @@ async fn add_contact_from_code(
             .unwrap_or_default();
         drop(id_guard);
 
-        let _ = tx.send(network::NetworkCommand::SendContactRequest {
-            peer_id: peer_id_str,
-            our_name,
-            our_peer_id,
-        }).await;
+        let _ = tx
+            .send(network::NetworkCommand::SendContactRequest {
+                peer_id: peer_id_str,
+                our_name,
+                our_peer_id,
+            })
+            .await;
     }
 
     Ok(())
 }
 
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            let data_dir = app.path().app_data_dir().unwrap_or_else(|_| {
-                dirs::home_dir().expect("fallback").join(".stoa")
-            });
+            let data_dir = app
+                .path()
+                .app_data_dir()
+                .unwrap_or_else(|_| dirs::home_dir().expect("fallback").join(".stoa"));
             std::fs::create_dir_all(&data_dir).ok();
             STOA_DIR.set(data_dir).ok();
-            
+
             let initial_contacts = contacts::load_contacts().unwrap_or_default();
             let state = app.state::<AppState>();
             *state.contacts.blocking_lock() = initial_contacts;
-            
+
             Ok(())
         })
         .manage(AppState {
@@ -894,6 +965,7 @@ pub fn run() {
             remove_group_member,
             disband_group,
             open_file_native,
+            save_file_to_downloads,
             open_group_space,
             list_space_files,
             create_space_file,
@@ -925,10 +997,8 @@ pub fn run() {
                     }
                     if let Some(handle) = handle.lock().await.take() {
                         // Give the task a moment to finish
-                        let _ = tokio::time::timeout(
-                            std::time::Duration::from_millis(500),
-                            handle,
-                        ).await;
+                        let _ = tokio::time::timeout(std::time::Duration::from_millis(500), handle)
+                            .await;
                     }
                 });
             }

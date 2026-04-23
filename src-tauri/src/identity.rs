@@ -51,8 +51,7 @@ pub fn generate_identity(display_name: &str) -> Result<(Keypair, IdentityInfo), 
     // Write identity.json
     let json = serde_json::to_string_pretty(&stored)
         .map_err(|e| format!("Failed to serialize identity: {e}"))?;
-    fs::write(identity_path(), json)
-        .map_err(|e| format!("Failed to write identity file: {e}"))?;
+    fs::write(identity_path(), json).map_err(|e| format!("Failed to write identity file: {e}"))?;
 
     let info = IdentityInfo {
         peer_id: peer_id.to_string(),
@@ -68,8 +67,8 @@ pub fn load_or_create_identity() -> Result<(Keypair, IdentityInfo), String> {
     let path = identity_path();
 
     if path.exists() {
-        let json = fs::read_to_string(&path)
-            .map_err(|e| format!("Failed to read identity file: {e}"))?;
+        let json =
+            fs::read_to_string(&path).map_err(|e| format!("Failed to read identity file: {e}"))?;
         let stored: StoredIdentity = serde_json::from_str(&json)
             .map_err(|e| format!("Failed to parse identity file: {e}"))?;
 
@@ -94,10 +93,9 @@ pub fn load_or_create_identity() -> Result<(Keypair, IdentityInfo), String> {
 /// Export the raw keypair bytes (protobuf-encoded) as base64, for cross-platform import.
 pub fn export_keypair_base64() -> Result<String, String> {
     let path = identity_path();
-    let json = fs::read_to_string(&path)
-        .map_err(|e| format!("No identity found: {e}"))?;
-    let stored: StoredIdentity = serde_json::from_str(&json)
-        .map_err(|e| format!("Failed to parse identity: {e}"))?;
+    let json = fs::read_to_string(&path).map_err(|e| format!("No identity found: {e}"))?;
+    let stored: StoredIdentity =
+        serde_json::from_str(&json).map_err(|e| format!("Failed to parse identity: {e}"))?;
 
     use base64::Engine;
     Ok(base64::engine::general_purpose::STANDARD.encode(&stored.keypair_bytes))
@@ -106,17 +104,15 @@ pub fn export_keypair_base64() -> Result<String, String> {
 /// Update the display name in the identity file without changing the keypair.
 pub fn update_identity_name(new_name: &str) -> Result<IdentityInfo, String> {
     let path = identity_path();
-    let json = fs::read_to_string(&path)
-        .map_err(|e| format!("No identity found: {e}"))?;
-    let mut stored: StoredIdentity = serde_json::from_str(&json)
-        .map_err(|e| format!("Failed to parse identity: {e}"))?;
+    let json = fs::read_to_string(&path).map_err(|e| format!("No identity found: {e}"))?;
+    let mut stored: StoredIdentity =
+        serde_json::from_str(&json).map_err(|e| format!("Failed to parse identity: {e}"))?;
 
     stored.name = new_name.to_string();
 
     let json = serde_json::to_string_pretty(&stored)
         .map_err(|e| format!("Failed to serialize identity: {e}"))?;
-    fs::write(&path, json)
-        .map_err(|e| format!("Failed to write identity file: {e}"))?;
+    fs::write(&path, json).map_err(|e| format!("Failed to write identity file: {e}"))?;
 
     let keypair = Keypair::from_protobuf_encoding(&stored.keypair_bytes)
         .map_err(|e| format!("Failed to decode keypair: {e}"))?;

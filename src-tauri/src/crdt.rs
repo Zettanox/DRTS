@@ -1,14 +1,14 @@
+use lazy_static::lazy_static;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use yrs::{Doc, GetString, Map, ReadTxn, StateVector, Text, Transact, Update};
+use uuid::Uuid;
 use yrs::updates::decoder::Decode;
 use yrs::updates::encoder::Encode;
-use lazy_static::lazy_static;
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
+use yrs::{Doc, GetString, Map, ReadTxn, StateVector, Text, Transact, Update};
 
 lazy_static! {
     static ref ACTIVE_DOCS: Mutex<HashMap<String, Arc<Mutex<Doc>>>> = Mutex::new(HashMap::new());
@@ -29,9 +29,9 @@ pub const MAX_IMPORT_SIZE: usize = 1_048_576;
 
 /// Allowed text file extensions for import.
 pub const ALLOWED_EXTENSIONS: &[&str] = &[
-    "txt", "md", "rs", "ts", "js", "py", "json", "toml", "yaml", "yml",
-    "css", "html", "xml", "csv", "log", "sh", "c", "cpp", "h", "go",
-    "java", "tsx", "jsx", "svg", "sql", "rb", "php", "kt", "swift",
+    "txt", "md", "rs", "ts", "js", "py", "json", "toml", "yaml", "yml", "css", "html", "xml",
+    "csv", "log", "sh", "c", "cpp", "h", "go", "java", "tsx", "jsx", "svg", "sql", "rb", "php",
+    "kt", "swift",
 ];
 
 fn get_storage_path(group_id: &str) -> PathBuf {
@@ -61,7 +61,11 @@ pub async fn load_or_create_doc(group_id: &str) -> Result<Arc<Mutex<Doc>>, Strin
                 let _ = txn.apply_update(update);
                 drop(txn);
             } else {
-                eprintln!("[{}] [Stoa CRDT] Failed to decode existing doc for group {}", chrono::Local::now().format("%H:%M:%S"), group_id);
+                eprintln!(
+                    "[{}] [Stoa CRDT] Failed to decode existing doc for group {}",
+                    chrono::Local::now().format("%H:%M:%S"),
+                    group_id
+                );
             }
         }
 
@@ -159,7 +163,11 @@ fn migrate_legacy_doc(doc: &Doc, group_id: &str) {
     }
 
     save_snapshot_sync(doc, group_id);
-    println!("[{}] [Stoa CRDT] Migrated legacy doc for group {} to multi-file format", chrono::Local::now().format("%H:%M:%S"), group_id);
+    println!(
+        "[{}] [Stoa CRDT] Migrated legacy doc for group {} to multi-file format",
+        chrono::Local::now().format("%H:%M:%S"),
+        group_id
+    );
 }
 
 fn save_snapshot_sync(doc: &Doc, group_id: &str) {
@@ -168,7 +176,12 @@ fn save_snapshot_sync(doc: &Doc, group_id: &str) {
     let sv = StateVector::default(); // empty sv returns full document
     let data = txn.encode_diff_v1(&sv);
     if let Err(e) = fs::write(&path, data) {
-        eprintln!("[{}] [Stoa CRDT] Failed to save snapshot for {}: {}", chrono::Local::now().format("%H:%M:%S"), group_id, e);
+        eprintln!(
+            "[{}] [Stoa CRDT] Failed to save snapshot for {}: {}",
+            chrono::Local::now().format("%H:%M:%S"),
+            group_id,
+            e
+        );
     }
 }
 
@@ -215,8 +228,8 @@ pub async fn create_file(
         timestamp: chrono::Utc::now().timestamp(),
         deleted: false,
     };
-    let meta_json = serde_json::to_string(&meta)
-        .map_err(|e| format!("Serialization error: {}", e))?;
+    let meta_json =
+        serde_json::to_string(&meta).map_err(|e| format!("Serialization error: {}", e))?;
 
     let sv_before = doc.transact().state_vector();
 
@@ -255,8 +268,8 @@ pub async fn create_file_with_content(
         timestamp: chrono::Utc::now().timestamp(),
         deleted: false,
     };
-    let meta_json = serde_json::to_string(&meta)
-        .map_err(|e| format!("Serialization error: {}", e))?;
+    let meta_json =
+        serde_json::to_string(&meta).map_err(|e| format!("Serialization error: {}", e))?;
 
     let sv_before = doc.transact().state_vector();
 
@@ -289,16 +302,14 @@ pub async fn delete_file(group_id: &str, file_id: &str) -> Result<Vec<u8>, Strin
     drop(txn);
 
     let mut meta: SpaceFile = match current {
-        Some(yrs::Out::Any(yrs::Any::String(json_str))) => {
-            serde_json::from_str(json_str.as_ref())
-                .map_err(|e| format!("Failed to parse file metadata: {}", e))?
-        }
+        Some(yrs::Out::Any(yrs::Any::String(json_str))) => serde_json::from_str(json_str.as_ref())
+            .map_err(|e| format!("Failed to parse file metadata: {}", e))?,
         _ => return Err(format!("File {} not found in manifest", file_id)),
     };
 
     meta.deleted = true;
-    let meta_json = serde_json::to_string(&meta)
-        .map_err(|e| format!("Serialization error: {}", e))?;
+    let meta_json =
+        serde_json::to_string(&meta).map_err(|e| format!("Serialization error: {}", e))?;
 
     let sv_before = doc.transact().state_vector();
     let mut txn = doc.transact_mut();

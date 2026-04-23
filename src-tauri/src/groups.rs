@@ -28,8 +28,7 @@ pub fn load_groups() -> Result<Vec<Group>, String> {
     if !path.exists() {
         return Ok(vec![]);
     }
-    let data =
-        std::fs::read_to_string(&path).map_err(|e| format!("Failed to read groups: {e}"))?;
+    let data = std::fs::read_to_string(&path).map_err(|e| format!("Failed to read groups: {e}"))?;
     serde_json::from_str(&data).map_err(|e| format!("Failed to parse groups: {e}"))
 }
 
@@ -93,7 +92,11 @@ pub fn remove_group(groups: &mut Vec<Group>, group_id: &str) -> Result<(), Strin
 }
 
 /// Rename a group.
-pub fn rename_group(groups: &mut Vec<Group>, group_id: &str, new_name: String) -> Result<(), String> {
+pub fn rename_group(
+    groups: &mut Vec<Group>,
+    group_id: &str,
+    new_name: String,
+) -> Result<(), String> {
     if let Some(group) = groups.iter_mut().find(|g| g.id == group_id) {
         group.name = new_name;
         save_groups(groups)

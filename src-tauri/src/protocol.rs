@@ -34,9 +34,7 @@ pub enum StoaRequest {
         chunk_index: u32,
     },
     /// E2E: Send our X25519 public key for ECDH key exchange.
-    KeyExchange {
-        x25519_public_key_hex: String,
-    },
+    KeyExchange { x25519_public_key_hex: String },
     /// E2E: An encrypted envelope wrapping any message type.
     /// The decrypted payload is JSON that identifies its inner type.
     EncryptedEnvelope {
@@ -78,14 +76,9 @@ pub enum StoaRequest {
         removed_peer_id: String,
     },
     /// A member left the group voluntarily.
-    MemberLeft {
-        group_id: String,
-        peer_id: String,
-    },
+    MemberLeft { group_id: String, peer_id: String },
     /// Admin disbanded the group.
-    GroupDisbanded {
-        group_id: String,
-    },
+    GroupDisbanded { group_id: String },
     // ─── Shared Space Protocol ───────────────────────────────────────────────
     /// Step 1: Send local StateVector to sync missing updates
     GroupSpaceSync {
@@ -125,9 +118,7 @@ pub enum StoaResponse {
         nonce_b64: Option<String>,
     },
     /// E2E: Acknowledge key exchange with our X25519 public key.
-    KeyExchangeAck {
-        x25519_public_key_hex: String,
-    },
+    KeyExchangeAck { x25519_public_key_hex: String },
     /// Acknowledgement of a group message.
     GroupAck {
         group_id: String,
@@ -140,7 +131,5 @@ pub enum StoaResponse {
         update_b64: String,
     },
     /// Acknowledgement of an incoming group space update
-    GroupSpaceUpdateAck {
-        group_id: String,
-    },
+    GroupSpaceUpdateAck { group_id: String },
 }
